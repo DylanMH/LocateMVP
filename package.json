@@ -1,0 +1,11 @@
+{
+  "name": "locatemvp",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Adam Miskiewicz <adam@sk3vy.com>, Eric Vicenti <ericvicenti@gmail.com>, Brent Vatne <brent@expo.io>, Satyajit Sahoo <satyajit.happy@gmail.com>",
+  "license": "MIT",
+  "files": [
+    "index.js"
+  ],
+  "private": true
+}
