@@ -32,9 +32,10 @@ expo-env.d.ts
 *.swp
 *.swo
 
-# AI agent config & workflows
+# AI agent config, workflows & guides
 .devin/
 .windsurf/
+AGENTS.md
 
 # Project docs (internal planning, todos, AI handoffs, app-specific notes)
 docs/
