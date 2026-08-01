@@ -1,0 +1,34 @@
+{
+  "name": "locate720-backend",
+  "version": "1.0.0",
+  "description": "Backend server for Locate720 - simulates 811 ticket system",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/scripts/seedTickets.js",
+    "reset": "node src/scripts/resetDatabase.js",
+    "test:phase1": "node tests/phase1-sync.test.js",
+    "test:status-machine": "node src/validation/tests/statusMachine.test.js"
+  },
+  "keywords": [
+    "811",
+    "tickets",
+    "locate",
+    "backend"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

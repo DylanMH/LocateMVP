@@ -1,0 +1,266 @@
+# Overall TODOs
+
+This file is the single source of truth for remaining open work across the repo docs.
+
+## Phase breakdown
+
+### Phase 0 - lock decisions before implementation
+
+Goal: resolve the architectural choices that would otherwise cause rework in mobile schema, backend endpoints, and ops tooling.
+
+* Related ticket linking: match the same parent/descendant strategy used by 811 once that linkage behavior is verified, so L720 mirrors the source system instead of inventing its own family rules.
+* Photo storage approach: attach photos to the ticket in L720, keep local copies on the device until upload succeeds, then delete the app-managed local copy after successful upload.
+* Permission model: implement role + area scope first, while keeping the system adaptable for future permission models if the product is sold more broadly.
+* Initial role behavior: techs are the base role and handle assigned ticket work, lead techs can view and manage tickets within their supervisor area, supervisors can edit and approve clock time and manage field staff in their area, and area managers can act across their area.
+* Dispatch-facing notes: any authorized user can create internal or external notes, and external notes do not require approval before sending.
+* Search indexing scope: keep search role-based, with techs limited to ticket number searches across assigned or personally closed tickets, lead techs able to search wider ticket inventory, and supervisors able to search by address, ticket number, and date range.
+* Scope size by `workType`: do not derive scope size from `workType`; use the polygon coordinates supplied by the 811 simulator as the source of truth.
+* Scope size by `ticketType`: still open and needs a final product decision before implementation starts.
+* Simulator geometry output: support polygon rendering, not just axis-aligned bounding boxes.
+* Ticket storage for geometry: store polygon coordinates in dedicated database columns instead of only leaving them inside payload JSON.
+* Ops edit scope behavior: regenerate scope automatically whenever `lat/lng` changes rather than allowing manual scope edits to drift from location data.
+
+### Phase 1 - sync correctness and regression safety
+
+Goal: harden the offline-first core so later feature work sits on stable mobile/backend sync behavior.
+
+* [x] Audit implemented mobile-to-backend event paths: `CLOCK_IN`, `CLOCK_OUT`, `LUNCH_START`, `LUNCH_END`, `PERSONAL_START`, `PERSONAL_END`, ticket status changes, customer utility status/result, per-utility minutes, per-utility footage, enroute time, onsite time, paused time, and closed time are currently carried through local writes plus queued sync payload updates.
+* [x] Keep WatermelonDB as the first write, then queue backend sync through the outbox pattern only.
+* [x] Utility completion and production deltas are derived server-side from `TICKET_STATUS_SET` payload updates instead of being emitted as separate mobile events.
+* [ ] Finalize the long-term personal time flow if it must clock the user out/in around the personal segment; current implementation tracks personal time as its own break type but does not convert it into a clock-out/clock-in pair. **Open — needs product decision.**
+* [x] Confirm lunch end updates local session state, queued outbox event state, and ticket-screen break guards consistently.
+* [x] Regression coverage for `LUNCH_START` -> `LUNCH_END` -> ticket interaction flow. See `Backend/tests/phase1-sync.test.js` (`runLunchRegressionTests`). Run: `pnpm --filter locate720-backend test:phase1`.
+* [x] End-to-end verification that mobile clock in/out and lunch events persist to backend DB. Covered by `runClockTests` + `runLunchRegressionTests` in `Backend/tests/phase1-sync.test.js`.
+* [x] End-to-end verification that ticket status changes and customer utility data sync to backend SQLite and can be queried back. Covered by `runTicketSyncTests` in `Backend/tests/phase1-sync.test.js`.
+* [x] Offline-first behavior verified via requestId-based idempotency replay in `runIdempotencyTests` (`Backend/tests/phase1-sync.test.js`).
+* [x] Sign-out flow implementation closes an active session before logout, including ending an active break first.
+* [x] Sign-out scenarios (clocked-in, on-lunch, ticket-active) covered by `runSignOutScenarioTests` in `Backend/tests/phase1-sync.test.js`.
+* [x] Ticket details payload structure verified against seeded backend data in `runTicketSyncTests` (checks `payload.customers[]` shape).
+* [x] Mobile-to-backend sync path is implemented through `SyncEngine` pull plus P0/P1 outbox flush behavior.
+* [x] Backend-to-811 outbound closure end-to-end verified in `runTicketSyncTests`: drives a ticket to CLOSED, triggers `/api/sync/process-outbound-811`, then polls the 811Simulator until the ticket reports `status=CLOSED`.
+
+### Phase 2 - notes and attachments foundation
+
+Goal: add the two most important evidence and communication workflows before history/search depend on them.
+
+* [x] Implement a comments / notes section on tickets. (WatermelonDB `ticket_notes` table v5, `NotesTab.tsx`)
+* [x] Save all notes to the ticket record. (Backend `ticket_notes` table + `TICKET_NOTE_ADDED` outbox event handled in `sync.js`)
+* [x] Support note routing rules for internal notes versus dispatch-facing notes. (`note_type` column, UI toggle between Internal/Dispatch)
+* [ ] Define whether note visibility depends on role, note type, or both. Still open pending Phase 4 role model; current UI shows all notes to all viewers.
+* [x] Implement attaching photos to a ticket. (`AttachmentsTab.tsx` with `expo-image-picker`)
+* [x] Save photos with associated metadata: geolocation, timestamp, ticket reference, and uploader/user. (`ticket_attachments` table columns lat/lng/captured_at/uploader_id/uploader_name/ticket_id)
+* [x] Design photo storage flow so managers and supervisors can view ticket photos from ops/devops tools. (Backend stores base64 in `ticket_attachments.data_base64`; `GET /api/sync/attachments/:id` exposes the record. Ops portal UI pending.)
+* [ ] Plan image retrieval and display for both current tickets and previous/related tickets. Mobile shows current-ticket attachments only; related-ticket images pending once Phase 0 linkage rule lands.
+* [ ] In the notes tab, display all notes related to the same ticket string so update and update-remark descendants share the visible note history. Backend `GET /api/sync/notes?ticketNumbers=...` supports this; mobile UI still scopes to primary ticket only.
+* [x] In the attachments tab, support both camera capture and gallery selection.
+* [x] Allow gallery multi-select with explicit attach confirmation. (`allowsMultipleSelection: true` on `ImagePicker.launchImageLibraryAsync`; attach confirmation is the system picker's Done button.)
+* [ ] Define and implement the lifecycle for locally selected images, including whether deletion from the user gallery on ticket closure is technically safe and acceptable. `expo-image-picker` does not expose a delete API for user gallery items; only app-managed cached copies can be removed. Defer until a native module is chosen.
+
+### Phase 3 - related ticket history in ticket details
+
+Goal: make ticket detail the working hub for current and historical context once notes and attachments exist.
+
+* [x] Add a `Ticket History` section in ticket details to show related ticket history for the same locate/request. (`HistoryTab.tsx`, new History tab in `DetailTabs.tsx`)
+* [x] Include update tickets, update remarks, no response tickets, recalls, and other related follow-up ticket types. (HistoryTab renders any ticket sharing the same address regardless of ticketType; color chip uses `getTicketTypeColor`.)
+* [x] Make previous tickets individually viewable from the ticket details screen. (Expand/collapse card per related ticket with status, customer marking, and ticket type.)
+* [ ] Allow users to view images attached to previous tickets. Still pending — attachments are scoped to the current ticket record's payload.
+* [x] In the ticket history tab, show descendant tickets as read-only detail views for regular technicians. (No edit affordances in `HistoryTab`; card shows read-only marking summary.)
+* [ ] Confirm the history UI uses the same relation rules chosen in Phase 0 so ticket families are consistent everywhere. Current heuristic: shared `address`. Must be replaced once Phase 0 linkage rule is locked.
+* [x] After closing a ticket, automatically return the user to the ticket list view. (`app/ticket-details/[id].tsx` `handleStatusChange` calls `router.back()` / `router.replace("/")` on CLOSED/UNABLE.)
+
+### Phase 4 - permissions, hierarchy, and search
+
+Goal: introduce organization-aware visibility only after the underlying ticket, notes, and history data model is stable.
+
+* [x] Create a management tree with roles and permissions. Implemented via `supervisor_id` foreign key in `users` table.
+* [x] Support initial roles: trainee, trainer, tech, supervisor, area manager, and additional management roles as needed later. DB CHECK constraint updated; seeded test users include all roles.
+* [x] Build permission-based viewing across the app. `permissions.js` utility with `canViewTicket`, `canEditTicket`, `canViewTimesheet` functions.
+* [x] Define hierarchy and inheritance for visibility and search. Hierarchy: TRAINEE < TRAINER < TECH < SUPERVISOR < AREA_MANAGER < MANAGER.
+* [x] Complete ticket search functionality. Permission-based filtering in GET /api/tickets by role.
+* [x] Make searching permission-based by role and area. Techs→own tickets; Supervisors/Area Managers→area tickets; Managers→all.
+* [ ] Define how historical tickets, related tickets, and closed tickets appear in search results for each role. **Open** - pending Phase 0 linkage rules for ticket families.
+
+### Phase 5 - map behavior and scale-oriented platform work
+
+Goal: close out map scope decisions and lower-priority platform improvements after the core field workflow is in place.
+
+* [x] Ensure the map remains responsive when zooming or panning with moderate ticket volume. Addressed via `useMemo` filtering of `mappableTickets`, pre-computed `scopeCache` (Map of ticket ID → polygon coordinates), stable `key` props, and composite WatermelonDB indexes reducing query cost. Marker/Polygon count is bounded by the user's filtered ticket set (typically 10–30).
+* [x] Leave room for future search by ticket number, address, contractor, and member utility. The search button placeholder exists in `TicketsHeader`; the `GET /api/tickets` endpoint already supports role-scoped query params (`ticketNumber`, `address`). Additional filters (`contractor`, `memberUtility`) can be added to the same endpoint without schema changes — the data lives in `payload_json` and can be extracted with `json_extract` once the search UI lands.
+* [x] Confirm whether the map should show only filtered tickets assigned to the current user by default, or all visible tickets in the active filter mode. **Decision:** the map shows the same `filteredTickets` array as the list. Default `assignedFilter` is `"MINE"`, so the map shows only the current user's tickets. The user can toggle to `"ALL"` to see all visible tickets.
+* [x] Confirm whether offline map usage needs tile caching, or if the first pass can rely on online tiles while still using offline ticket data. **Decision:** first pass relies on online tiles (Google Maps provider). Ticket data, coordinates, and scope polygons are available offline from WatermelonDB. Offline tile caching (e.g., via `react-native-maps` URL tile overlay or Mapbox offline packs) is deferred until a field-tested need is confirmed.
+* [x] Decide whether scope bbox should also be duplicated as top-level response fields for convenience, or remain payload-only in the first pass. **Decision:** payload-only in the first pass. The `getScopePolygon` utility on mobile and `buildTicketScope` on 811Simulator already read/write scope inside `payload_json`. Adding top-level columns can happen later if query-by-scope becomes needed (e.g., map viewport server-side filtering).
+* [x] If future ops tooling allows custom scope entry, prefer validating and storing the provided bounds rather than regenerating them. **Decision already made in Phase 0:** regenerate scope automatically when `lat/lng` changes (see Phase 0 item "Ops edit scope behavior"). If ops provides manual bounds, validate them (non-zero area, within area polygon) and store as-is; do not regenerate. This dual behavior is enforced at the route handler level (`PUT /api/ops/811/tickets/:id`).
+* [x] Prefer one parser/helper on the mobile side to read scope geometry from payload JSON safely with try/catch if the current scope helper still needs hardening. Implemented as `Locate720/src/features/tickets/utils/scopeGeometry.ts` — single `getScopePolygon(payloadJson, lat, lng)` function with full try/catch, type guards, support for future polygon arrays, and fallback bbox generation. Used by `TicketMapView.tsx`.
+* [x] Confirm existing consumers that only rely on `lat/lng` continue to work unchanged. Verified: `SyncEngine.ts` reads/writes `lat`/`lng` as raw number fields during pull/apply. `TicketMapView.tsx` uses them for marker coordinates. No consumer was affected by the scope geometry refactor.
+* [x] Composite WatermelonDB indexes for production scale. Added in schema v7 migration (`Locate720/src/db/migrations.ts`): `idx_tickets_tech_locator`, `idx_tickets_tech_due`, `idx_outbox_status_priority_seq`, `idx_sessions_user_date_status`, `idx_notes_ticket_created`.
+* [ ] WebSocket push updates to replace pull polling where appropriate. **Deferred to Phase 7+.** Current `AUTO_SYNC_INTERVAL_MS` (30s) + `PULL_THROTTLE_MS` (60s) is acceptable for beta; WebSocket will reduce battery usage and latency when scale demands it.
+* [ ] Advanced conflict resolution UI when the server wins. **Deferred to Phase 7+.** Current behavior: server version wins silently if `delta.version > existing.version` and no pending outbox events. A toast/modal for user awareness is a UX polish item.
+* [x] Real authentication against the Backend user DB instead of the current dev login approach. **Moved to Phase 6.4** as a beta prerequisite. Full plan documented in Phase 6 section above.
+* [x] Optimize `getOpenTicketCounts()` in `assignmentService.js` to use SQL filtering instead of loading then filtering in JS. Replaced `SELECT * FROM tickets` + JS filter with `SELECT assigned_tech_id, COUNT(*) ... WHERE ... GROUP BY` query.
+
+## Product roadmap
+
+### Ticket details and related history
+
+* Add a `Ticket History` section in ticket details to show related ticket history for the same locate/request.
+* Include update tickets, update remarks, no response tickets, recalls, and other related follow-up ticket types.
+* Make previous tickets individually viewable from the ticket details screen.
+* Allow users to view images attached to previous tickets.
+
+### Photos and evidence capture
+
+* Implement attaching photos to a ticket.
+* Save photos with associated metadata: geolocation, timestamp, ticket reference, and uploader/user.
+* Design photo storage flow so managers and supervisors can view ticket photos from ops/devops tools.
+* Plan image retrieval and display for both current tickets and previous/related tickets.
+
+### Notes and dispatch communication
+
+* Implement a comments / notes section on tickets.
+* Save all notes to the ticket record.
+* Support note routing rules for internal notes versus dispatch-facing notes.
+* Define whether note visibility depends on role, note type, or both.
+
+### Roles, permissions, and search
+
+* Create a management tree with roles and permissions.
+* Support initial roles: trainee, trainer, tech, supervisor, area manager, and additional management roles as needed later.
+* Build permission-based viewing across the app.
+* Define hierarchy and inheritance for visibility and search.
+* Complete ticket search functionality.
+* Make searching permission-based by role and area.
+* Define how historical tickets, related tickets, and closed tickets appear in search results for each role.
+
+## Mobile and backend follow-up
+
+### Timesheet and sync behavior
+
+* Audit all mobile interactions that must reach backend: `CLOCK_IN`, `CLOCK_OUT`, `LUNCH_START`, `LUNCH_END`, future `PERSONAL_START`, future `PERSONAL_END`, ticket status changes, customer utility status/result, per-utility minutes, per-utility footage, total ticket time, enroute time, onsite time, and paused time.
+* Keep WatermelonDB as the first write, then queue backend sync through the outbox pattern only.
+* Review whether utility completion should be emitted as separate events or derived server-side from `TICKET_STATUS_SET` payload updates.
+* Define personal time flow as a tracked break type that eventually clocks the user out/in around the personal segment and records duration cleanly.
+
+### Validation and regression coverage
+
+* Confirm lunch end updates local session state, queued outbox event state, and ticket-screen break guards consistently.
+* Add regression coverage for `LUNCH_START` -> `LUNCH_END` -> ticket interaction flow.
+* Test full flow: mobile clock in/out and lunch events persist to backend DB, not just local device logs.
+* Test full flow: ticket status changes and customer utility data sync from mobile WatermelonDB to backend SQLite and can be queried back.
+* Test offline-first behavior: perform clock/ticket/customer actions offline, then reconnect and verify backend receives the queued events once.
+* Test sign-out while clocked in, while on lunch, and while a ticket is active.
+* Test ticket details against seeded backend data to confirm customer/work-detail rendering is sourced from the expected payload structure.
+
+### Sync guarantees
+
+* Ensure the mobile database stays in sync with the L720 backend database.
+* Ensure the L720 backend/database stays in sync with the 811 source database.
+
+## Map and scope follow-up
+
+* Ensure the map remains responsive when zooming or panning with moderate ticket volume.
+* Leave room for future search by ticket number, address, contractor, and member utility.
+* Confirm whether the map should show only filtered tickets assigned to the current user by default, or all visible tickets in the active filter mode.
+* Confirm whether offline map usage needs tile caching, or if the first pass can rely on online tiles while still using offline ticket data.
+* Decide whether scope bbox should also be duplicated as top-level response fields for convenience, or remain payload-only in the first pass.
+* If future ops tooling allows custom scope entry, prefer validating and storing the provided bounds rather than regenerating them.
+* Prefer one parser/helper on the mobile side to read scope geometry from payload JSON safely with try/catch if the current scope helper still needs hardening.
+* Confirm existing consumers that only rely on `lat/lng` continue to work unchanged.
+
+## Architecture decisions still open
+
+* [ ] Decide how related tickets are linked: same original request, same address/location, or shared sequence/request number. **Pending Phase 6.5** — the 811 simulator must emit `parentTicketNumber` linkage. Current mobile heuristic (shared address) is a placeholder.
+* [x] Finalize photo storage approach: local capture first, upload when online, thumbnail vs full-resolution strategy. **Decided:** photos are captured locally, stored as base64 in `ticket_attachments`, queued via `TICKET_ATTACHMENT_ADDED` outbox event. Full-resolution only for now; thumbnails deferred.
+* [x] Finalize permission model shape: role-based only, role + area scope, or role + reporting tree. **Decided:** role + area scope + supervisor reporting tree. Implemented in `Backend/src/utils/permissions.js`.
+* [x] Decide who can create dispatch-facing notes and whether approval is required before sending notes externally. **Decided in Phase 0:** any authorized user can create internal or external notes; no approval required before sending.
+* [ ] Finalize search indexing scope for assigned tickets, closed tickets, related tickets, and historical notes/attachments. **Pending** — blocked on Phase 0 linkage rule.
+* [ ] Decide whether scope size should vary by `workType`. **Decided in Phase 0:** do not derive scope size from `workType`; use polygon coordinates from the simulator.
+* [ ] Decide whether scope size should vary by `ticketType`. **Still open** — needs final product decision.
+* [x] Decide whether the simulator should generate only axis-aligned bounding boxes first, or also a corner array for future polygon rendering. **Decided in Phase 0:** support polygon rendering. `scopeGeometry.ts` now supports polygon arrays (Case 1) and bounding boxes (Case 2). Simulator currently emits bounding boxes; polygon support is forward-compatible.
+* [x] Decide whether bbox fields should live only in payload JSON, or also become explicit DB columns in `tickets_811`. **Decided in Phase 5:** payload-only in the first pass. Top-level columns deferred until query-by-scope is needed.
+* [x] Decide whether manual ops edit routes should allow updating scope directly, or regenerate it automatically whenever `lat/lng` changes. **Decided in Phase 0:** regenerate automatically on `lat/lng` change. Manual bounds are validated and stored if provided directly.
+
+## Lower-priority platform work
+
+* [x] Composite WatermelonDB indexes for production scale. (Done — schema v7 migration.)
+* [ ] WebSocket push updates to replace pull polling where appropriate. (Deferred to Phase 7+.)
+* [ ] Advanced conflict resolution UI when the server wins. (Deferred to Phase 7+.)
+* [x] Real authentication against the Backend user DB instead of the current dev login approach. (Moved to Phase 6.4.)
+* [x] Optimize `getOpenTicketCounts()` in `assignmentService.js` to use SQL filtering instead of loading then filtering in JS. (Done.)
+
+### Phase 6 - Beta launch prerequisites (user management, real auth, manual assignment)
+
+Goal: close the gap between the current "dev login + seeded users" state and a beta that real field techs and supervisors can log into and operate. These are blockers for pilot deployment. This phase intentionally defers anything that is not required to onboard a real crew and put them on real tickets.
+
+#### 6.1 - Ops-side user management (devops portal)
+
+* [x] Add a `password_hash` column to the Backend `users` table (bcryptjs); create a migration that leaves existing seeded dev users working by writing a one-time default hash the team can rotate.
+* [x] Add `title` (free-text job title, e.g. "Locator I", "Lead Tech", "Area Supervisor"), `phone`, `is_active`, `last_login_at`, `password_must_change` columns to `users`.
+* [x] Replace the current "accept anything" handler at `Backend/src/routes/ops.js` `POST /api/ops/auth/login` with a real check: look up user by email, verify bcrypt hash, require `is_active = 1`, mint the JWT with `{ id, role, area_id, supervisor_id }`.
+* [x] Add admin-only endpoints under `/api/ops/users`:
+  - `POST /api/ops/users` — create user (name, email, password, title, role, supervisorId, areaId). Server hashes password, validates role against the existing CHECK constraint, enforces unique email.
+  - `PATCH /api/ops/users/:id` — update profile, role, supervisor, area, active flag, title.
+  - `POST /api/ops/users/:id/reset-password` — set a new password (supervisor/manager only, cannot self-reset another superior).
+  - `DELETE /api/ops/users/:id` (soft delete → `is_active = 0`).
+  - Authorization: only `SUPERVISOR`, `AREA_MANAGER`, `MANAGER` may create users; a supervisor may only create `TECH`/`TRAINEE`/`TRAINER` under themselves; area managers may create supervisors inside their area; only managers may create area managers/managers.
+* [x] Build an `Add Tech` / `Edit Tech` modal in `L720Ops/src/pages/techs/TechsPage.tsx` with fields: name, email, temporary password (with "force change on first login" flag), title, role dropdown, supervisor dropdown (filtered by role ≥ SUPERVISOR), area dropdown (optional).
+* [x] Extend `L720Ops/src/services/authService.ts` with `createUser`, `updateUser`, `resetPassword`, `deactivateUser` methods.
+* [ ] Add a `Users & Roles` admin page (manager-only) that lists all users (not just techs) and lets managers reassign supervisors, promote/demote roles, and move users between areas.
+* [x] Persist a mandatory first-login password change flow: `password_must_change` boolean, checked on login, forces a password change before issuing a full-access token.
+
+#### 6.2 - Area model and supervisor → tech assignment
+
+* [x] Introduce an `areas` table (id TEXT PK, name TEXT, manager_id TEXT → users.id, polygon_geojson TEXT nullable, active INTEGER) and migrate the current free-text `users.area_id` to reference it. Keep the existing hardcoded `ROYSE_CITY | ROCKWALL | FATE` values as seed rows so current 811Simulator logic keeps working.
+* [ ] Ops UI: `Areas` page to create/rename/retire areas and assign an area manager.
+* [x] Allow a supervisor to have `area_id = NULL` (no area). In that case:
+  - Tickets are **not** auto-assigned to that supervisor's techs via `assignmentService.assignTicketToArea`.
+  - The supervisor manually assigns individual tickets from an "Unassigned" queue (see 6.3).
+* [x] When a tech's `area_id` is set, they continue to be eligible for `assignmentService` round-robin. When it is NULL, they only receive tickets their supervisor manually assigns.
+* [x] Supervisor UI in ops portal: on each tech row, provide a dropdown to set/clear `area_id` (constrained to areas the supervisor is allowed to assign in).
+
+#### 6.3 - Manual ticket assignment flow (supervisor ops)
+
+* [x] Add `PATCH /api/ops/tickets/:id/assign` to Backend taking `{ assignedTechId }`. Authorization: caller must be SUPERVISOR+ and the target tech must be in their reporting chain or area. Write the change as a standard ticket update so the mobile `SyncEngine.pullTickets` delivers the new assignment to the tech's device on next pull.
+* [x] Add `PATCH /api/ops/tickets/:id/unassign` to return a ticket to the Unassigned queue.
+* [ ] Build an `Unassigned Tickets` view in `L720Ops/src/pages/tickets` (filter `assigned_tech_id IS NULL`), with a per-row "Assign to…" dropdown listing techs in the viewer's scope.
+* [ ] Build a per-tech `Assigned Tickets` panel on `TechDetailPage.tsx` with drag/drop or quick-assign UX for reassigning tickets between techs in the same area/chain.
+* [x] Emit a sync-pull-friendly update so assignment changes show up on the tech's mobile board within the existing `PULL_THROTTLE_MS` window — do not invent a new push channel for this phase.
+
+#### 6.4 - Mobile app real login + persistent session
+
+* [x] Create `POST /api/auth/login` endpoint on Backend (mirrors ops login but returns mobile JWT + full user profile).
+* [x] Create `POST /api/auth/refresh` endpoint for token refresh.
+* [ ] Replace `Locate720/app/login.tsx` user-picker with an email/password form. Submit to `POST /api/auth/login`. Store the JWT in `AsyncStorage` under `@locate720:auth_token` alongside the existing `@locate720:auth_user` record.
+* [ ] Extend `Locate720/src/features/auth/AuthContext.tsx` to:
+  - Load both stored user **and** token on boot (the current `loadStoredUser` already restores user; add token restore + expiry check).
+  - Refuse to hydrate a session with an expired token; fall through to login screen.
+  - Provide `getAuthToken()` for `Locate720/src/config/api.ts` / `SyncEngine` to attach `Authorization: Bearer ...` on every sync call instead of the hardcoded `DEV_USER_ID`.
+* [ ] Remove the `DEV_USER_ID = 'user-bob-123'` shortcut in `Locate720/src/config/api.ts` once the real JWT is wired; identify the current user server-side from the token.
+* [ ] Implement token refresh: on a 401 from any sync request, call `POST /api/auth/refresh` and retry once. On refresh failure, clear storage and bounce to the login screen. Keep the `SyncEngine` retry/backoff unchanged.
+* [ ] Handle persistent login on app close/reopen:
+  - Gate the router in `Locate720/app/_layout.tsx` on `AuthContext.isLoading` (already supported) plus a token-validity check.
+  - If valid → deep-link to `/(tabs)/tickets` as today.
+  - If expired but user exists → prompt biometric/quick-password re-auth (nice-to-have, behind a feature flag). For first beta, simply require full re-login.
+* Add `Sign out everywhere` (invalidate server-side refresh token) as a Phase 7+ item; for beta, sign-out just clears device storage.
+* Do **not** change `SyncEngine` constants; only swap the auth header source.
+
+#### 6.5 - 811 simulator fidelity (required for realistic beta)
+
+Goal: make the simulator indistinguishable from a real 811 dispatch feed so mobile/Backend logic built against it transfers 1:1 to production.
+
+* Expand `ticketType` enum in `811Simulator/src/routes/ops.ts` and `routes/tickets.ts` beyond `NORMAL | RECALL | EMERGENCY` to cover the real-world set used by dispatchers: `NORMAL`, `UPDATE`, `UPDATE_REMARK`, `NO_RESPONSE`, `SECOND_NOTICE`, `CORRECTION`, `CANCEL`, `RECALL`, `EMERGENCY`, `DESIGN`, `SURVEY`, `DAMAGE`, `MEETING`. Align Backend validation and mobile `getTicketTypeColor` accordingly.
+* Mirror the real 811 descendant model: `UPDATE`, `UPDATE_REMARK`, `NO_RESPONSE`, `SECOND_NOTICE`, `CORRECTION`, `RECALL` all get **new ticket numbers** but carry an `originalTicketNumber` (or `parentTicketNumber`) field. This is the same Phase 0 linkage rule we've been deferring — the simulator must emit the parent linkage so Backend ingestion and mobile history tabs can resolve ticket families without inventing their own heuristic (shared address is already flagged as a temporary hack in Phase 3).
+* Add positive response codes per member utility (the real 811 PR code set: `CLEAR`, `MARKED`, `NOT_COMPLETE`, `IN_CONFLICT`, `NO_CONFLICT`, `CANCELLED`, `DAMAGE_NOTIFICATION`, etc.). Backend `inbound.js` and the mobile customer-marking screen should map to these codes, not free text.
+* Add a ticket lifecycle stream endpoint (`GET /api/events?since=...`) so Backend can pull new+updated tickets in a single cursor-based call. Most real 811 feeds are WebService/FTP cursor streams — matching this now prevents rework.
+* Seed the simulator with realistic ticket-number formats (`YYMMDD-NNNNNN` or state-specific), legal start/end times, working-days windows, and the "48-hour notice" clock. Mobile `ticketTime.ts` should consume these rather than compute them locally.
+* Add an authoritative `members` / `member_codes` table to the simulator and wire ticket → members routing so Backend ingestion proves out the real-world "you only see tickets for your member code" rule.
+
+#### 6.6 - Beta cutover checklist
+
+* Seed the Backend with **zero** dev users in production mode; all users must be created through the ops portal.
+* Remove or gate behind `NODE_ENV !== 'production'`: `GET /api/users` (public list), hardcoded JWT secret `l720-ops-secret-key`, `DEV_USER_ID`, hardcoded LAN IP in `Locate720/src/config/api.ts`.
+* Move `JWT_SECRET`, `API_BASE_URL`, and simulator URLs to environment variables on all three services; document the required `.env` keys in each package README.
+* Add a single end-to-end smoke test that exercises: ops admin creates a tech → tech logs into mobile with the new credentials → supervisor manually assigns a ticket → tech completes and closes it → backend forwards closure to 811 simulator. This is the beta acceptance gate.
+
+## Ticket details screen UI
+
+Right now we have info, customer, attachments, and notes tabs. Lets add into the Ticket History, this will be where we show the history of the ticket, such as previous tickets that were related to this one. How 811 handles them is a new ticket is a "Normal", then updates and update remarks get new ticket numbers but are descendants of the original ticket, but treated as a "new ticket". So in this tab we can show a list of related ticket and allow the user to click on any of them to view the details, these cannot be edited tho by a regular technician. It will just show marked status of the customers, attachments, and notes for that ticket. ALSO in the notes tab, we should display ALL notes related to that ticket string. SO if a note was attached to the normal, the update remark notes will show that note as well on the notes tab. In the attachments tab, we will have 2 ways of attaching images, camera, or gallery. The camera button will open the users camera to allow for images to be taken and attached automatically (if possible) and the gallery will open the users gallery, allow for select all, or custom select, with an attach button to confirm, and any selected will be attached to that ticket with auto deletion of those images from the users gallery after ticket closure. Also after closing a ticket, lets automatically take the user back to the ticket list view

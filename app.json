@@ -1,4 +1,12 @@
 {
-  "name": "LocateMVP",
-  "slug": "LocateMVP"
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "67cea334-bd33-4359-9872-195a203666cb"
+      }
+    },
+    "android": {
+      "package": "com.dylanmh97.locatemvp"
+    }
+  }
 }
