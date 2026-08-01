@@ -1,5 +1,48 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment files
 .env
 .env.*
 !.env.example
 Locate720/.env.local
+
+# Runtime databases & logs (regenerated at startup)
+data/
+811Simulator/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.log
+
+# Build outputs
+dist/
+build/
+.turbo/
+
+# Expo / React Native
+.expo/
+expo-env.d.ts
+*.tsbuildinfo
+
+# IDE & editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# AI agent config & workflows
+.devin/
+.windsurf/
+
+# Project docs (internal planning, todos, AI handoffs, app-specific notes)
+docs/
+Locate720/docs/
+Locate720/PRODUCTION_FIXES.md
+Locate720/SCALABILITY.md
+Locate720/gradle_error.txt
+
+# OS files
+.DS_Store
+Thumbs.db
