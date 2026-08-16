@@ -70,12 +70,13 @@ echo ============================================
 echo.
 
 echo [1/3] Prebuilding Android project...
-if exist "android" powershell -Command "Get-ChildItem 'android' -Force | Remove-Item -Recurse -Force"
-call npx expo prebuild --clean --platform android
+if exist "android" rd /s /q "android" 2>nul
+call npx expo prebuild --clean --platform android --no-install
 if errorlevel 1 (
     echo Prebuild failed, retrying once...
-    powershell -Command "Start-Sleep -Seconds 2; if (Test-Path 'android') { Get-ChildItem 'android' -Force | Remove-Item -Recurse -Force }"
-    call npx expo prebuild --clean --platform android
+    if exist "android" rd /s /q "android" 2>nul
+    timeout /t 2 /nobreak >nul
+    call npx expo prebuild --clean --platform android --no-install
     if errorlevel 1 (
         echo ERROR: expo prebuild failed.
         exit /b 1
