@@ -58,7 +58,9 @@ The ops portal is where supervisors, managers, and administrators monitor and ma
 
 **URL:** `http://15.204.247.173`
 
-**Login:** Any username and password will work (dev auth accepts all credentials).
+**Login:** Use the district manager login to view everything - tech accounts cant access ops portal
+username: king.henry@locate720.com
+password: password
 
 #### What you can do and see
 
