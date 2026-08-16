@@ -63,7 +63,18 @@ class SyncEngineImpl {
    */
   setCurrentUser(userId: string): void {
     this.currentUserId = userId;
+    this.currentAuthToken = null; // Reset cached token so new user's token is fetched
     logger.log(`[SyncEngine] Current user set to: ${userId}`);
+  }
+
+  /**
+   * Clear the current user — called on logout.
+   * Stops the SyncEngine from syncing until a new user is set.
+   */
+  clearCurrentUser(): void {
+    this.currentUserId = '';
+    this.currentAuthToken = null;
+    logger.log('[SyncEngine] Current user cleared (logout)');
   }
 
   /**
