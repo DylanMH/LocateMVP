@@ -267,6 +267,83 @@ export function canUserSeeTicket(db, user, ticket) {
 }
 
 /**
+ * Return the user IDs of all TECH/TRAINEE/TRAINER users who fall under the
+ * given user's hierarchy. For a supervisor, that means techs assigned to
+ * TECH_TERRITORYs whose parent chain includes one of the supervisor's
+ * SUPERVISOR_TERRITORYs. For an area manager, techs under any supervisor
+ * territory in their area. For a district manager, techs under any area in
+ * their district. For techs themselves, just their own user id.
+ *
+ * Returns [] if the user has no downstream techs.
+ */
+export function getTechIdsUnderUser(db, userId, role) {
+  if (!userId) return [];
+  if (role === 'TECH' || role === 'TRAINEE' || role === 'TRAINER') {
+    return [userId];
+  }
+  if (role === 'MANAGER') {
+    return db.prepare(`
+      SELECT id FROM users
+      WHERE role IN ('TECH','TRAINEE','TRAINER') AND is_active = 1
+    `).all().map((r) => r.id);
+  }
+
+  const dir = getUserDirectTerritories(db, userId);
+
+  // Build the set of supervisor territory IDs whose techs we want.
+  let supervisorTerritoryIds = [];
+
+  if (role === 'SUPERVISOR') {
+    supervisorTerritoryIds = dir.SUPERVISOR_TERRITORY;
+  } else if (role === 'AREA_MANAGER') {
+    // Find supervisor territories under the user's areas.
+    if (dir.AREA.length === 0) return [];
+    const ph = dir.AREA.map(() => '?').join(',');
+    supervisorTerritoryIds = db.prepare(`
+      SELECT id FROM territories
+      WHERE type = 'SUPERVISOR_TERRITORY' AND parent_territory_id IN (${ph})
+    `).all(...dir.AREA).map((r) => r.id);
+  } else if (role === 'DISTRICT_MANAGER') {
+    // Find areas under the user's districts, then supervisor territories under those areas.
+    if (dir.DISTRICT.length === 0) return [];
+    const dph = dir.DISTRICT.map(() => '?').join(',');
+    const areaIds = db.prepare(`
+      SELECT id FROM territories
+      WHERE type = 'AREA' AND parent_territory_id IN (${dph})
+    `).all(...dir.DISTRICT).map((r) => r.id);
+    if (areaIds.length === 0) return [];
+    const aph = areaIds.map(() => '?').join(',');
+    supervisorTerritoryIds = db.prepare(`
+      SELECT id FROM territories
+      WHERE type = 'SUPERVISOR_TERRITORY' AND parent_territory_id IN (${aph})
+    `).all(...areaIds).map((r) => r.id);
+  }
+
+  if (supervisorTerritoryIds.length === 0) return [];
+
+  // Find tech territories under those supervisor territories.
+  const sph = supervisorTerritoryIds.map(() => '?').join(',');
+  const techTerritoryIds = db.prepare(`
+    SELECT id FROM territories
+    WHERE type = 'TECH_TERRITORY' AND parent_territory_id IN (${sph})
+  `).all(...supervisorTerritoryIds).map((r) => r.id);
+
+  if (techTerritoryIds.length === 0) return [];
+
+  // Find active techs assigned to those tech territories.
+  const tph = techTerritoryIds.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT DISTINCT u.id
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id IN (${tph})
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.role IN ('TECH','TRAINEE','TRAINER')
+      AND u.is_active = 1
+  `).all(...techTerritoryIds, Date.now()).map((r) => r.id);
+}
+
+/**
  * Pick a tech to assign a new ticket to, scoped to a specific tech territory.
  * Uses least-open-ticket load balancing, same policy as the legacy
  * assignmentService. Returns null if no tech is assigned to that territory.

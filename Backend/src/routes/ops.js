@@ -13,6 +13,7 @@ import {
   buildTicketVisibilityFilter,
   canUserSeeTicket,
   getUserDirectTerritories,
+  getTechIdsUnderUser,
 } from "../services/territoryService.js";
 
 const router = express.Router();
@@ -296,6 +297,123 @@ function computeTechProductivity(userId, startMs, endMs) {
          AND (ended_at IS NULL OR ended_at >= ?)`,
     )
     .get(endMs, endMs, startMs, endMs, endMs, startMs, userId, endMs, startMs);
+
+  const workedMs = Math.max(0, worked.worked_ms || 0);
+  const lunchMs = Math.max(0, breaks.lunch_ms || 0);
+  const personalMs = Math.max(0, breaks.personal_ms || 0);
+  const productiveMs = Math.max(0, workedMs - lunchMs - personalMs);
+  const productiveHours = productiveMs / 3600000;
+  const locatesClosed = production.locates_closed || 0;
+  const footage = production.footage || 0;
+
+  return {
+    ticketsOnBoard: tickets.on_board || 0,
+    ticketsClosedInRange: tickets.closed_in_range || 0,
+    ticketsTotalClosed: tickets.total_closed || 0,
+    locatesClosed,
+    footage,
+    utilityMinutes: production.utility_minutes || 0,
+    workedMs,
+    lunchMs,
+    personalMs,
+    productiveMs,
+    lph: productiveHours > 0 ? locatesClosed / productiveHours : 0,
+    fph: productiveHours > 0 ? footage / productiveHours : 0,
+  };
+}
+
+/**
+ * Compute productivity for a user, aggregating across all techs in their
+ * hierarchy if the user is a supervisor or manager. For techs/trainees/
+ * trainers, this is identical to computeTechProductivity.
+ *
+ * On board = total open tickets across all their techs.
+ * Closed = total tickets closed in range across all their techs.
+ * Locates, footage, utility minutes = summed across all their techs.
+ * Worked/lunch/personal/productive ms = summed across all their techs.
+ * LPH/FPH = total locates/footage divided by total productive hours.
+ */
+function computeUserProductivity(userId, role, startMs, endMs) {
+  if (role === 'TECH' || role === 'TRAINEE' || role === 'TRAINER') {
+    return computeTechProductivity(userId, startMs, endMs);
+  }
+
+  const techIds = getTechIdsUnderUser(db, userId, role);
+  if (techIds.length === 0) {
+    return {
+      ticketsOnBoard: 0,
+      ticketsClosedInRange: 0,
+      ticketsTotalClosed: 0,
+      locatesClosed: 0,
+      footage: 0,
+      utilityMinutes: 0,
+      workedMs: 0,
+      lunchMs: 0,
+      personalMs: 0,
+      productiveMs: 0,
+      lph: 0,
+      fph: 0,
+    };
+  }
+
+  const ph = techIds.map(() => '?').join(',');
+
+  const tickets = db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN locator_status NOT IN ('CLOSED','UNABLE') THEN 1 ELSE 0 END) as on_board,
+         SUM(CASE WHEN closed_at IS NOT NULL AND closed_at >= ? AND closed_at <= ? THEN 1 ELSE 0 END) as closed_in_range,
+         SUM(CASE WHEN closed_at IS NOT NULL THEN 1 ELSE 0 END) as total_closed
+       FROM tickets
+       WHERE assigned_tech_id IN (${ph})`,
+    )
+    .get(startMs, endMs, ...techIds);
+
+  const production = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(footage_delta), 0) as footage,
+         COALESCE(SUM(completed_delta), 0) as locates_closed,
+         COALESCE(SUM(minutes_delta), 0) as utility_minutes
+       FROM utility_production_ledger
+       WHERE user_id IN (${ph}) AND occurred_at >= ? AND occurred_at <= ?`,
+    )
+    .get(...techIds, startMs, endMs);
+
+  const worked = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(
+           CASE
+             WHEN clock_in_at IS NOT NULL AND clock_out_at IS NOT NULL AND clock_out_at > clock_in_at
+               THEN MIN(clock_out_at, ?) - MAX(clock_in_at, ?)
+             WHEN clock_in_at IS NOT NULL AND status = 'ACTIVE'
+               THEN ? - MAX(clock_in_at, ?)
+             ELSE 0
+           END
+         ), 0) as worked_ms
+       FROM day_sessions
+       WHERE user_id IN (${ph})
+         AND (
+           (clock_in_at IS NOT NULL AND clock_in_at <= ?) OR status = 'ACTIVE'
+         )
+         AND (clock_out_at IS NULL OR clock_out_at >= ?)`,
+    )
+    .get(endMs, startMs, endMs, startMs, ...techIds, endMs, startMs);
+
+  const breaks = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN break_type = 'LUNCH' THEN
+           (COALESCE(MIN(ended_at, ?), ?) - MAX(started_at, ?)) ELSE 0 END), 0) as lunch_ms,
+         COALESCE(SUM(CASE WHEN break_type = 'PERSONAL' THEN
+           (COALESCE(MIN(ended_at, ?), ?) - MAX(started_at, ?)) ELSE 0 END), 0) as personal_ms
+       FROM break_segments
+       WHERE user_id IN (${ph})
+         AND started_at <= ?
+         AND (ended_at IS NULL OR ended_at >= ?)`,
+    )
+    .get(endMs, endMs, startMs, endMs, endMs, startMs, ...techIds, endMs, startMs);
 
   const workedMs = Math.max(0, worked.worked_ms || 0);
   const lunchMs = Math.max(0, breaks.lunch_ms || 0);
@@ -750,7 +868,7 @@ router.get("/techs", authenticateToken, (req, res) => {
       .map((tech) => {
         const clock = getLiveClockState(tech.id);
         if (status && clock.clockStatus !== status) return null;
-        const prod = computeTechProductivity(tech.id, range.startMs, range.endMs);
+        const prod = computeUserProductivity(tech.id, tech.role, range.startMs, range.endMs);
         const currentTicket = getTechCurrentTicket(tech.id);
         const assignedTerritories = getTechAssignedTerritories(tech.id);
         return {
@@ -792,16 +910,16 @@ router.get("/techs/:id", authenticateToken, (req, res) => {
       .prepare(
         `SELECT u.*, s.name as supervisor_name
          FROM users u LEFT JOIN users s ON s.id = u.supervisor_id
-         WHERE u.id = ? AND u.role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR')`,
+         WHERE u.id = ? AND u.role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER')`,
       )
       .get(id);
-    if (!tech) return res.status(404).json({ error: "Technician not found" });
+    if (!tech) return res.status(404).json({ error: "User not found" });
 
     const range = resolveRange(req);
     const clock = getLiveClockState(id);
     const currentTicket = getTechCurrentTicket(id);
     const assignedTerritories = getTechAssignedTerritories(id);
-    const productivity = computeTechProductivity(id, range.startMs, range.endMs);
+    const productivity = computeUserProductivity(tech.id, tech.role, range.startMs, range.endMs);
 
     res.json({
       id: tech.id,
