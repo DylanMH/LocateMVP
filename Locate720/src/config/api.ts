@@ -19,6 +19,3 @@ export const ENDPOINTS = {
   timesheetSummary: '/timesheet/summary',
   syncNotes: '/sync/notes',
 };
-
-// Test user ID for development
-export const DEV_USER_ID = 'user-bob-123';
