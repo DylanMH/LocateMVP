@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { MapContainer, TileLayer, Rectangle, CircleMarker, Tooltip, LayersControl, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, useMap, Marker } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { OpsService } from "../../services/opsService";
@@ -101,6 +101,23 @@ function getCenter(territory: TerritoryNode): [number, number] | null {
     (bounds[0][0] + bounds[1][0]) / 2,
     (bounds[0][1] + bounds[1][1]) / 2,
   ];
+}
+
+// Create a Leaflet divIcon that renders a colored circle with the type label inside
+function makeTicketIcon(color: string, label: string) {
+  return L.divIcon({
+    className: "ticket-div-icon",
+    html: `<div style="
+      width: 22px; height: 22px; border-radius: 50%;
+      background: ${color}; border: 2px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+      font-family: system-ui, sans-serif; line-height: 1;
+    ">${label}</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
 }
 
 // Helper to recenter the map when filters change
@@ -229,44 +246,61 @@ export function MapTicketsPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Visible supervisor territory IDs (for boundary unit fetching)
-  const visibleSupervisorIds = useMemo(() => {
-    if (territoryLevel === "TECH_TERRITORY" || territoryLevel === "SUPERVISOR_TERRITORY" || !territoryLevel) {
-      return flattenedTerritories
-        .filter((t) => t.type === "SUPERVISOR_TERRITORY")
-        .map((t) => t.id);
-    }
-    return [];
-  }, [flattenedTerritories, territoryLevel]);
+  // Fetch boundary units for all supervisor AND tech territories so we can
+  // render individual city rectangles at both levels.
+  const visibleBoundaryTerritoryIds = useMemo(() => {
+    return flattenedTerritories
+      .filter((t) => t.type === "SUPERVISOR_TERRITORY" || t.type === "TECH_TERRITORY")
+      .map((t) => t.id);
+  }, [flattenedTerritories]);
 
   const boundaryUnitsQuery = useQuery({
-    queryKey: ["map-tickets", "supervisor-boundary-units", visibleSupervisorIds],
+    queryKey: ["map-tickets", "boundary-units", visibleBoundaryTerritoryIds],
     queryFn: async () => {
       const results = await Promise.all(
-        visibleSupervisorIds.map((id) => TerritoryService.getTerritoryBoundaryUnits(id)),
+        visibleBoundaryTerritoryIds.map((id) => TerritoryService.getTerritoryBoundaryUnits(id)),
       );
       const map = new Map<string, BoundaryUnitInfo[]>();
       results.forEach((result, index) => {
         map.set(
-          visibleSupervisorIds[index],
+          visibleBoundaryTerritoryIds[index],
           result.units.map((u) => ({ id: u.id, name: u.name, bbox: u.bbox })),
         );
       });
       return map;
     },
-    enabled: visibleSupervisorIds.length > 0,
+    enabled: visibleBoundaryTerritoryIds.length > 0,
   });
 
+  // Map of territory ID → territory type for quick lookups
+  const territoryTypeById = useMemo(() => {
+    const map = new Map<string, string>();
+    flattenedTerritories.forEach((t) => map.set(t.id, t.type));
+    return map;
+  }, [flattenedTerritories]);
+
+  // All boundary units flattened, tagged with their parent territory ID.
+  // Filtered by the selected territory level so we only show relevant
+  // boundaries on the map.
   const allBoundaryUnits = useMemo(() => {
     if (!boundaryUnitsQuery.data) return [];
-    const result: Array<BoundaryUnitInfo & { groupId: string }> = [];
-    for (const [supeId, units] of boundaryUnitsQuery.data) {
+    const result: Array<BoundaryUnitInfo & { territoryId: string }> = [];
+    for (const [territoryId, units] of boundaryUnitsQuery.data) {
+      const type = territoryTypeById.get(territoryId);
+      // If a level is selected, only include boundary units for territories
+      // of that type. If no level is selected, show supervisor cities only
+      // (tech sub-areas would overlap with their parent supervisor cities).
+      if (territoryLevel) {
+        if (type !== territoryLevel) continue;
+      } else {
+        if (type !== "SUPERVISOR_TERRITORY") continue;
+      }
       for (const unit of units) {
-        result.push({ ...unit, groupId: supeId });
+        result.push({ ...unit, territoryId });
       }
     }
     return result;
-  }, [boundaryUnitsQuery.data]);
+  }, [boundaryUnitsQuery.data, territoryLevel, territoryTypeById]);
 
   // Color palette for territory groups
   const paletteByGroup = useMemo(() => {
@@ -287,7 +321,7 @@ export function MapTicketsPage() {
       if (t) {
         const c = getCenter(t);
         if (c) return c;
-        // Try boundary units for supervisor territories
+        // Try boundary units for this territory
         const units = boundaryUnitsQuery.data?.get(t.id);
         if (units && units.length > 0) {
           const lat = units.reduce((s, u) => s + (u.bbox.north + u.bbox.south) / 2, 0) / units.length;
@@ -566,9 +600,11 @@ export function MapTicketsPage() {
                     </LayersControl.BaseLayer>
                   </LayersControl>
 
-                  {/* Territory boundaries */}
+                  {/* Territory boundaries — render rectangles for AREA and
+                      TECH_TERRITORY types that have bboxes. Supervisor
+                      territories are rendered via their individual city
+                      boundary units below. */}
                   {levelTerritories.map((territory) => {
-                    // For supervisor territories, render individual city boundary units instead
                     if (territory.type === "SUPERVISOR_TERRITORY") return null;
 
                     const bounds = getBounds(territory);
@@ -597,27 +633,27 @@ export function MapTicketsPage() {
                     );
                   })}
 
-                  {/* Supervisor territory boundary units (individual cities) */}
+                  {/* Boundary unit rectangles for supervisor AND tech
+                      territories. Each city rectangle is clickable and
+                      selects the territory it belongs to. */}
                   {allBoundaryUnits.map((unit) => {
-                    const color = paletteByGroup[unit.groupId] || "#2563EB";
+                    const color = paletteByGroup[unit.territoryId] || "#2563EB";
+                    const isSelected = unit.territoryId === selectedTerritoryId;
                     const bounds: [[number, number], [number, number]] = [
                       [unit.bbox.south, unit.bbox.west],
                       [unit.bbox.north, unit.bbox.east],
                     ];
                     return (
                       <Rectangle
-                        key={`bu-${unit.id}`}
+                        key={`bu-${unit.territoryId}-${unit.id}`}
                         bounds={bounds}
                         pathOptions={{
                           color,
-                          weight: 1.5,
-                          fillOpacity: 0.1,
+                          weight: isSelected ? 3 : 1.5,
+                          fillOpacity: isSelected ? 0.2 : 0.1,
                         }}
                         eventHandlers={{
-                          click: () => {
-                            // Clicking a boundary unit selects the parent supervisor territory
-                            setSelectedTerritoryId(unit.groupId);
-                          },
+                          click: () => setSelectedTerritoryId(unit.territoryId),
                         }}
                       >
                         <Tooltip direction="center" className="area-label">
@@ -629,38 +665,27 @@ export function MapTicketsPage() {
                     );
                   })}
 
-                  {/* Ticket markers */}
+                  {/* Ticket markers — divIcon with colored circle + type label */}
                   {ticketsWithCoords.map((ticket) => {
                     const color = STATUS_COLORS[ticket.locatorStatus] || "#6B7280";
                     const label = TYPE_LABELS[ticket.ticketType] || "?";
                     return (
-                      <CircleMarker
+                      <Marker
                         key={ticket.id}
-                        center={[ticket.lat, ticket.lng]}
-                        radius={10}
-                        pathOptions={{
-                          color: "#fff",
-                          weight: 2,
-                          fillColor: color,
-                          fillOpacity: 0.85,
-                        }}
+                        position={[ticket.lat, ticket.lng]}
+                        icon={makeTicketIcon(color, label)}
                         eventHandlers={{
                           click: () => setSelectedId(ticket.id),
                         }}
                       >
-                        <Tooltip direction="top" offset={[0, -8]}>
+                        <Tooltip direction="top" offset={[0, -12]}>
                           <div className="text-xs">
                             <div className="font-semibold">{ticket.ticketNumber}</div>
                             <div>{formatTicketType(ticket.ticketType)} · {ticket.locatorStatus}</div>
                             <div className="text-gray-500 truncate max-w-[200px]">{ticket.address}</div>
                           </div>
                         </Tooltip>
-                        <Tooltip permanent direction="center" className="ticket-marker-label">
-                          <span style={{ fontWeight: 700, fontSize: "9px", color: "#fff" }}>
-                            {label}
-                          </span>
-                        </Tooltip>
-                      </CircleMarker>
+                      </Marker>
                     );
                   })}
                 </MapContainer>

@@ -35,3 +35,9 @@ body {
 .area-label::before {
   display: none !important;
 }
+
+/* Ticket marker divIcon — remove default Leaflet icon styles */
+.ticket-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
