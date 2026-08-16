@@ -1,4 +1,4 @@
-# Dependencies
+﻿# Dependencies
 node_modules/
 
 # Environment files
@@ -47,3 +47,5 @@ Locate720/gradle_error.txt
 # OS files
 .DS_Store
 Thumbs.db
+ssh_cmd.py
+deploy.py

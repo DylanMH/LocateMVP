@@ -27,6 +27,11 @@ export interface CurrentSession {
   onBreak: boolean;
   breakType: "LUNCH" | "PERSONAL" | null;
   breakStartedAt: number | null;
+  clockInReason: string | null;
+  allocationType: string | null;
+  otherReason: string | null;
+  clockOutTicket: { id: string; ticketNumber: string } | null;
+  currentTicket: CurrentTicket | null;
 }
 
 export interface CurrentTicket {
@@ -68,6 +73,14 @@ export interface DashboardStats {
   }>;
 }
 
+export interface AssignedTerritory {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  parentTerritoryId: string | null;
+}
+
 export interface TechStatusRow {
   id: string;
   name: string;
@@ -76,6 +89,7 @@ export interface TechStatusRow {
   clockStatus: ClockState;
   currentSession: CurrentSession | null;
   currentTicket: CurrentTicket | null;
+  assignedTerritories: AssignedTerritory[];
   activeTickets: number;
 }
 
@@ -90,6 +104,7 @@ export interface TechRow {
   clockStatus: ClockState;
   currentSession: CurrentSession | null;
   currentTicket: CurrentTicket | null;
+  assignedTerritories: AssignedTerritory[];
   ticketsOnBoard: number;
   ticketsClosedInRange: number;
   ticketsTotalClosed: number;

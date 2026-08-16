@@ -4,8 +4,11 @@ import crypto from "node:crypto";
 import { db } from "../db/db.js";
 import { buildTicketScope } from "../domain/scope.js";
 import { notifyL720BackendOf811Change } from "../services/dispatchNotifier.js";
+import { AREAS, type AreaId } from "../domain/areas.js";
 
-function getAreaBounds(areaId: "ROYSE_CITY" | "ROCKWALL" | "FATE") {
+const AREA_IDS = AREAS.map((a) => a.id) as [AreaId, ...AreaId[]];
+
+function getAreaBounds(areaId: string) {
   const area = db
     .prepare(
       `
@@ -37,7 +40,7 @@ function buildScopePayload(params: {
   ticketId: string;
   ticketNumber: string;
   ticketType: "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT" | "UPDATE" | "UPDATE_REMARK" | "RECALL" | "NO_RESPONSE";
-  areaId: "ROYSE_CITY" | "ROCKWALL" | "FATE";
+  areaId: string;
   lat: number;
   lng: number;
   workType?: string;
@@ -112,6 +115,9 @@ export async function opsRoutes(app: FastifyInstance) {
         ticketNumber: ticket.ticket_number,
         ticketType: ticket.ticket_type,
         status: ticket.status,
+        locatorStatus: ticket.locator_status || null,
+        assignedTechName: ticket.assigned_tech_name || null,
+        assignedTechId: ticket.assigned_tech_id || null,
         areaId: ticket.area_id,
         address: `${ticket.address_line1}, ${ticket.city}, ${ticket.state} ${ticket.zip}`,
         lat: ticket.lat,
@@ -243,7 +249,7 @@ export async function opsRoutes(app: FastifyInstance) {
       const bodySchema = z.object({
         ticketNumber: z.string().min(1),
         ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).default("NORMAL"),
-        areaId: z.enum(["ROYSE_CITY", "ROCKWALL", "FATE"]),
+        areaId: z.enum(AREA_IDS),
         address: z.string().min(1),
         lat: z.number(),
         lng: z.number(),
@@ -314,13 +320,15 @@ export async function opsRoutes(app: FastifyInstance) {
         now,
         dueAt,
         body.address,
-        body.areaId === "ROYSE_CITY"
-          ? "Royse City"
-          : body.areaId === "ROCKWALL"
-            ? "Rockwall"
-            : "Fate",
+        (() => {
+          const a = AREAS.find((x) => x.id === body.areaId);
+          return a ? a.name.replace(/, TX$/, "") : "Unknown";
+        })(),
         "TX",
-        body.areaId === "ROCKWALL" ? "75087" : "75189",
+        (() => {
+          // Default zip — not critical for simulation
+          return "75000";
+        })(),
         body.lat,
         body.lng,
         body.workType || "STANDARD",
@@ -395,9 +403,9 @@ export async function opsRoutes(app: FastifyInstance) {
         ticketNumber: z.string().min(1).optional(),
         ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).optional(),
         status: z
-          .enum(["NEW", "SENT_TO_MEMBER", "RESPONDED", "CLOSED"])
+          .enum(["NEW", "SENT_TO_MEMBER", "ASSIGNED", "RESPONDED", "CLOSED"])
           .optional(),
-        areaId: z.enum(["ROYSE_CITY", "ROCKWALL", "FATE"]).optional(),
+        areaId: z.enum(AREA_IDS).optional(),
         address: z.string().min(1).optional(),
         lat: z.number().optional(),
         lng: z.number().optional(),
@@ -587,10 +595,15 @@ export async function opsRoutes(app: FastifyInstance) {
     try {
       const { count = 5, areaId } = req.body as any;
 
+      // Treat empty string or whitespace-only areaId as "no specific area"
+      // so the generator picks randomly from all configured areas.
+      const normalizedAreaId =
+        typeof areaId === "string" && areaId.trim().length > 0 ? areaId : undefined;
+
       // Import the existing generator
       const { generateTickets } = await import("../domain/generator.js");
 
-      const tickets = generateTickets({ areaId, count });
+      const tickets = generateTickets({ areaId: normalizedAreaId as any, count });
 
       console.log(`[811 OPS] Generated ${tickets.length} test tickets`);
       await notifyL720BackendOf811Change({ since: Date.now() - 1000 });
@@ -662,11 +675,12 @@ export async function opsRoutes(app: FastifyInstance) {
       const areas = db
         .prepare(
           `
-        SELECT 
+        SELECT
           area_id as areaId,
           COUNT(*) as total,
           COUNT(CASE WHEN status = 'NEW' THEN 1 END) as new,
           COUNT(CASE WHEN status = 'SENT_TO_MEMBER' THEN 1 END) as sent,
+          COUNT(CASE WHEN status = 'ASSIGNED' THEN 1 END) as assigned,
           COUNT(CASE WHEN status = 'RESPONDED' THEN 1 END) as responded,
           COUNT(CASE WHEN status = 'CLOSED' THEN 1 END) as closed
         FROM tickets_811

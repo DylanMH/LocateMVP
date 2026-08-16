@@ -1,4 +1,5 @@
 import express from "express";
+import jwt from "jsonwebtoken";
 import { db } from "../server.js";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -21,7 +22,35 @@ import { emitOpsEvent } from "../utils/opsEventBus.js";
 import { buildTicketVisibilityFilter } from "../services/territoryService.js";
 
 const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
 let syncStatements;
+
+/**
+ * Extract authenticated user from request.
+ * Tries JWT Bearer token first, then falls back to x-user-id header for dev.
+ * Returns the user row or null.
+ */
+function getUserFromSyncRequest(req) {
+  const authHeader = req.headers["authorization"];
+  if (authHeader) {
+    const token = authHeader.split(" ")[1];
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_active = 1").get(decoded.id);
+        if (user) return user;
+      } catch {
+        // Token invalid/expired — fall through to dev fallback.
+      }
+    }
+  }
+  // Dev fallback: x-user-id header or viewerId query param.
+  const userId = req.query.viewerId || req.headers["x-user-id"];
+  if (userId) {
+    return db.prepare("SELECT * FROM users WHERE id = ?").get(userId) || null;
+  }
+  return null;
+}
 
 function getSyncStatements() {
   if (syncStatements) {
@@ -111,9 +140,9 @@ function recordUtilityProductionDeltas({
 }) {
   const { insertProductionLedgerEntry } = getSyncStatements();
   const previousMarking =
-    previousPayload?.customerMarking || previousPayload?.customerMarkings || {};
+    previousPayload?.customerMarkings || previousPayload?.customerMarking || {};
   const nextMarking =
-    nextPayload?.customerMarking || nextPayload?.customerMarkings || {};
+    nextPayload?.customerMarkings || nextPayload?.customerMarking || {};
   const customerLookup = getCustomerLookup(nextPayload);
 
   for (const [customerId, nextData] of Object.entries(nextMarking)) {
@@ -155,33 +184,35 @@ function mergePayloadUpdates(existingPayloadJson, payloadUpdates = {}) {
   const existingPayload = JSON.parse(existingPayloadJson || "{}");
   const normalizedPayloadUpdates = { ...payloadUpdates };
 
-  if (
-    normalizedPayloadUpdates.customerMarkings &&
-    !normalizedPayloadUpdates.customerMarking
-  ) {
-    normalizedPayloadUpdates.customerMarking =
-      normalizedPayloadUpdates.customerMarkings;
+  // Canonical key is "customerMarkings" (plural — it's a map of multiple
+  // customer markings). Normalize the legacy singular form into the canonical
+  // key so all downstream code can rely on one spelling.
+  if (normalizedPayloadUpdates.customerMarking) {
+    normalizedPayloadUpdates.customerMarkings =
+      normalizedPayloadUpdates.customerMarkings ||
+      normalizedPayloadUpdates.customerMarking;
+    // Remove the legacy key so the merged payload only has the canonical one.
+    delete normalizedPayloadUpdates.customerMarking;
   }
 
-  if (
-    normalizedPayloadUpdates.customerMarking &&
-    !normalizedPayloadUpdates.customerMarkings
-  ) {
-    normalizedPayloadUpdates.customerMarkings =
-      normalizedPayloadUpdates.customerMarking;
+  const merged = { ...existingPayload, ...normalizedPayloadUpdates };
+  // Also strip legacy key from merged result if it came from existingPayload.
+  if (merged.customerMarking) {
+    merged.customerMarkings = merged.customerMarkings || merged.customerMarking;
+    delete merged.customerMarking;
   }
 
   return {
-    mergedPayload: { ...existingPayload, ...normalizedPayloadUpdates },
+    mergedPayload: merged,
     normalizedPayloadUpdates,
   };
 }
 
 function summarizeCustomerMarkingChange(previousPayload = {}, nextPayload = {}) {
   const previousMarking =
-    previousPayload?.customerMarking || previousPayload?.customerMarkings || {};
+    previousPayload?.customerMarkings || previousPayload?.customerMarking || {};
   const nextMarking =
-    nextPayload?.customerMarking || nextPayload?.customerMarkings || {};
+    nextPayload?.customerMarkings || nextPayload?.customerMarking || {};
 
   let completedChanges = 0;
   let productionChanges = 0;
@@ -250,13 +281,34 @@ router.post("/events", (req, res) => {
     return res.status(400).json({ error: "Invalid events array" });
   }
 
-  console.log("[Sync] Received", events.length, "events from mobile app");
+  // Authenticate the caller. Reject if no valid user can be resolved.
+  const authUser = getUserFromSyncRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  console.log("[Sync] Received", events.length, "events from user", authUser.id);
 
   const results = [];
 
   for (const event of events) {
     try {
       const { type, requestId, payload } = event;
+
+      // Validate that the event's userId matches the authenticated user
+      // (except for MANAGER who can act on behalf of techs)
+      if (payload?.userId && authUser.role !== "MANAGER" && authUser.role !== "SUPERVISOR") {
+        if (payload.userId !== authUser.id) {
+          const errorResult = {
+            requestId,
+            status: "ERROR",
+            error: `Event userId (${payload.userId}) does not match authenticated user (${authUser.id})`,
+          };
+          markEventProcessed(requestId, errorResult);
+          results.push(errorResult);
+          continue;
+        }
+      }
 
       console.log("[Sync] Processing event:", type, "requestId:", requestId);
 
@@ -424,8 +476,8 @@ router.post("/events", (req, res) => {
                 closedByUserId: payload.userId,
                 closedByName: JSON.parse(updatedPayloadJson).closedByName || "Unknown",
                 customerMarkings:
-                  JSON.parse(updatedPayloadJson).customerMarking ||
                   JSON.parse(updatedPayloadJson).customerMarkings ||
+                  JSON.parse(updatedPayloadJson).customerMarking ||
                   {},
                 closedAt: Date.now()
               }
@@ -434,6 +486,22 @@ router.post("/events", (req, res) => {
           } catch (error) {
             console.error(`[Sync] Failed to queue outbound 811 event for ticket ${ticketId}:`, error.message);
           }
+        }
+
+        // Notify the 811 simulator of status changes (ENROUTE, ONSITE, PAUSED, etc.)
+        // so the simulator reflects real-world locator state.
+        if (ticket.source === '811' && ticket.external_ticket_id && nextStatus !== "CLOSED") {
+          const techName = ticket.assigned_tech_id
+            ? (db.prepare("SELECT name FROM users WHERE id = ?").get(ticket.assigned_tech_id)?.name || "Unknown")
+            : "Unknown";
+          fetch(
+            `${process.env.SIMULATOR_URL || 'http://localhost:4100'}/api/811/tickets/${ticket.external_ticket_id}/status`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ locatorStatus: nextStatus, techName }),
+            },
+          ).catch((err) => console.error('[Sync] Failed to notify simulator of status change:', err.message));
         }
 
         emitOpsEvent("ticket.updated", {
@@ -542,7 +610,6 @@ router.post("/events", (req, res) => {
         // Update with customer markings
         const updatedPayload = {
           ...existingPayload,
-          customerMarking: customerMarkings,
           customerMarkings,
           closedAt: Date.now(),
           closedByUserId,

@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 7,
+  version: 8,
   tables: [
     tableSchema({
       name: 'tickets',
@@ -64,6 +64,9 @@ export const schema = appSchema({
         { name: 'clock_out_at', type: 'number', isOptional: true },
         { name: 'clock_out_ticket_id', type: 'string', isOptional: true },
         { name: 'status', type: 'string', isIndexed: true },
+        { name: 'clock_in_reason', type: 'string', isOptional: true },
+        { name: 'allocation_type', type: 'string', isOptional: true },
+        { name: 'other_reason', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

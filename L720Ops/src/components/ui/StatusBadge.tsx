@@ -46,6 +46,10 @@ const MAP: Record<string, string> = {
   ON_LUNCH: "bg-amber-100 text-amber-800",
   ON_PERSONAL: "bg-sky-100 text-sky-800",
 
+  // 811 simulator statuses
+  SENT_TO_MEMBER: "bg-cyan-100 text-cyan-800",
+  RESPONDED: "bg-teal-100 text-teal-800",
+
   // 811 ticket types
   NORMAL: "bg-blue-100 text-blue-800",
   EMERGENCY: "bg-red-100 text-red-800",

@@ -9,11 +9,33 @@ import {
   subscribeOpsEvents,
 } from "../utils/opsEventBus.js";
 import { getChainWithSummaries } from "../services/ticketChainService.js";
+import {
+  buildTicketVisibilityFilter,
+  canUserSeeTicket,
+  getUserDirectTerritories,
+  getTechIdsUnderUser,
+} from "../services/territoryService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
 
 // ---------- helpers ----------
+
+// Locator status machine (mirrors mobile statusMachine.ts).
+// MANAGER can bypass for admin overrides.
+const ALLOWED_LOCATOR_TRANSITIONS = {
+  PENDING: ["ASSIGNED"],   // Tech assigned → ready for field work
+  ASSIGNED: ["ENROUTE"],
+  ENROUTE: ["ONSITE"],
+  ONSITE: ["PAUSED"],
+  PAUSED: ["ONSITE"],
+  CLOSED: ["ASSIGNED"],    // Reopen: return to assigned for re-locate
+  UNABLE: ["ASSIGNED"],    // Reopen: return to assigned for re-locate
+};
+
+function isValidLocatorTransition(from, to) {
+  return (ALLOWED_LOCATOR_TRANSITIONS[from] || []).includes(to);
+}
 
 function parseJson(value, fallback = {}) {
   try {
@@ -95,7 +117,7 @@ function computeTicketTimeAllocation(ticket) {
 function getLiveClockState(userId) {
   const session = db
     .prepare(
-      `SELECT id, clock_in_at, status
+      `SELECT id, clock_in_at, clock_out_at, status, clock_in_reason, allocation_type, other_reason, clock_out_ticket_id
        FROM day_sessions
        WHERE user_id = ? AND status = 'ACTIVE'
        ORDER BY clock_in_at DESC
@@ -103,7 +125,38 @@ function getLiveClockState(userId) {
     )
     .get(userId);
 
-  if (!session) return { clockStatus: "CLOCKED_OUT", currentSession: null };
+  // No active session — look up the most recent CLOCKED_OUT session so
+  // the ops page can show which ticket the tech clocked out on.
+  if (!session) {
+    const lastClosed = db
+      .prepare(
+        `SELECT id, clock_in_at, clock_out_at, clock_out_ticket_id
+         FROM day_sessions
+         WHERE user_id = ? AND status = 'CLOCKED_OUT'
+         ORDER BY clock_out_at DESC
+         LIMIT 1`,
+      )
+      .get(userId);
+
+    let clockOutTicket = null;
+    if (lastClosed?.clock_out_ticket_id) {
+      const t = db.prepare("SELECT id, ticket_number FROM tickets WHERE id = ?").get(lastClosed.clock_out_ticket_id);
+      clockOutTicket = t ? { id: t.id, ticketNumber: t.ticket_number } : null;
+    }
+
+    return {
+      clockStatus: "CLOCKED_OUT",
+      currentSession: lastClosed
+        ? {
+            sessionId: lastClosed.id,
+            clockInAt: lastClosed.clock_in_at,
+            clockOutAt: lastClosed.clock_out_at,
+            clockOutTicket,
+            currentTicket: null,
+          }
+        : null,
+    };
+  }
 
   const openBreak = db
     .prepare(
@@ -115,6 +168,16 @@ function getLiveClockState(userId) {
     )
     .get(session.id);
 
+  // Resolve clock-out ticket info
+  let clockOutTicket = null;
+  if (session.clock_out_ticket_id) {
+    const t = db.prepare("SELECT id, ticket_number FROM tickets WHERE id = ?").get(session.clock_out_ticket_id);
+    clockOutTicket = t ? { id: t.id, ticketNumber: t.ticket_number } : null;
+  }
+
+  // Resolve current active ticket (ENROUTE/ONSITE/PAUSED)
+  const currentTicket = getTechCurrentTicket(userId);
+
   return {
     clockStatus: openBreak ? `ON_${openBreak.break_type}` : "CLOCKED_IN",
     currentSession: {
@@ -124,8 +187,35 @@ function getLiveClockState(userId) {
       onBreak: Boolean(openBreak),
       breakType: openBreak?.break_type ?? null,
       breakStartedAt: openBreak?.started_at ?? null,
+      clockInReason: session.clock_in_reason || null,
+      allocationType: session.allocation_type || null,
+      otherReason: session.other_reason || null,
+      clockOutTicket,
+      currentTicket,
     },
   };
+}
+
+function getTechAssignedTerritories(userId) {
+  return db
+    .prepare(
+      `SELECT t.id, t.name, t.code, t.type, t.parent_territory_id
+       FROM user_territory_assignments uta
+       JOIN territories t ON t.id = uta.territory_id
+       WHERE uta.user_id = ?
+         AND uta.assignment_type = 'TECH_ASSIGNMENT'
+         AND (uta.end_date IS NULL OR uta.end_date > ?)
+         AND t.active = 1
+       ORDER BY t.name`,
+    )
+    .all(userId, Date.now())
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      code: t.code,
+      type: t.type,
+      parentTerritoryId: t.parent_territory_id,
+    }));
 }
 
 function getTechCurrentTicket(userId) {
@@ -232,6 +322,123 @@ function computeTechProductivity(userId, startMs, endMs) {
   };
 }
 
+/**
+ * Compute productivity for a user, aggregating across all techs in their
+ * hierarchy if the user is a supervisor or manager. For techs/trainees/
+ * trainers, this is identical to computeTechProductivity.
+ *
+ * On board = total open tickets across all their techs.
+ * Closed = total tickets closed in range across all their techs.
+ * Locates, footage, utility minutes = summed across all their techs.
+ * Worked/lunch/personal/productive ms = summed across all their techs.
+ * LPH/FPH = total locates/footage divided by total productive hours.
+ */
+function computeUserProductivity(userId, role, startMs, endMs) {
+  if (role === 'TECH' || role === 'TRAINEE' || role === 'TRAINER') {
+    return computeTechProductivity(userId, startMs, endMs);
+  }
+
+  const techIds = getTechIdsUnderUser(db, userId, role);
+  if (techIds.length === 0) {
+    return {
+      ticketsOnBoard: 0,
+      ticketsClosedInRange: 0,
+      ticketsTotalClosed: 0,
+      locatesClosed: 0,
+      footage: 0,
+      utilityMinutes: 0,
+      workedMs: 0,
+      lunchMs: 0,
+      personalMs: 0,
+      productiveMs: 0,
+      lph: 0,
+      fph: 0,
+    };
+  }
+
+  const ph = techIds.map(() => '?').join(',');
+
+  const tickets = db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN locator_status NOT IN ('CLOSED','UNABLE') THEN 1 ELSE 0 END) as on_board,
+         SUM(CASE WHEN closed_at IS NOT NULL AND closed_at >= ? AND closed_at <= ? THEN 1 ELSE 0 END) as closed_in_range,
+         SUM(CASE WHEN closed_at IS NOT NULL THEN 1 ELSE 0 END) as total_closed
+       FROM tickets
+       WHERE assigned_tech_id IN (${ph})`,
+    )
+    .get(startMs, endMs, ...techIds);
+
+  const production = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(footage_delta), 0) as footage,
+         COALESCE(SUM(completed_delta), 0) as locates_closed,
+         COALESCE(SUM(minutes_delta), 0) as utility_minutes
+       FROM utility_production_ledger
+       WHERE user_id IN (${ph}) AND occurred_at >= ? AND occurred_at <= ?`,
+    )
+    .get(...techIds, startMs, endMs);
+
+  const worked = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(
+           CASE
+             WHEN clock_in_at IS NOT NULL AND clock_out_at IS NOT NULL AND clock_out_at > clock_in_at
+               THEN MIN(clock_out_at, ?) - MAX(clock_in_at, ?)
+             WHEN clock_in_at IS NOT NULL AND status = 'ACTIVE'
+               THEN ? - MAX(clock_in_at, ?)
+             ELSE 0
+           END
+         ), 0) as worked_ms
+       FROM day_sessions
+       WHERE user_id IN (${ph})
+         AND (
+           (clock_in_at IS NOT NULL AND clock_in_at <= ?) OR status = 'ACTIVE'
+         )
+         AND (clock_out_at IS NULL OR clock_out_at >= ?)`,
+    )
+    .get(endMs, startMs, endMs, startMs, ...techIds, endMs, startMs);
+
+  const breaks = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN break_type = 'LUNCH' THEN
+           (COALESCE(MIN(ended_at, ?), ?) - MAX(started_at, ?)) ELSE 0 END), 0) as lunch_ms,
+         COALESCE(SUM(CASE WHEN break_type = 'PERSONAL' THEN
+           (COALESCE(MIN(ended_at, ?), ?) - MAX(started_at, ?)) ELSE 0 END), 0) as personal_ms
+       FROM break_segments
+       WHERE user_id IN (${ph})
+         AND started_at <= ?
+         AND (ended_at IS NULL OR ended_at >= ?)`,
+    )
+    .get(endMs, endMs, startMs, endMs, endMs, startMs, ...techIds, endMs, startMs);
+
+  const workedMs = Math.max(0, worked.worked_ms || 0);
+  const lunchMs = Math.max(0, breaks.lunch_ms || 0);
+  const personalMs = Math.max(0, breaks.personal_ms || 0);
+  const productiveMs = Math.max(0, workedMs - lunchMs - personalMs);
+  const productiveHours = productiveMs / 3600000;
+  const locatesClosed = production.locates_closed || 0;
+  const footage = production.footage || 0;
+
+  return {
+    ticketsOnBoard: tickets.on_board || 0,
+    ticketsClosedInRange: tickets.closed_in_range || 0,
+    ticketsTotalClosed: tickets.total_closed || 0,
+    locatesClosed,
+    footage,
+    utilityMinutes: production.utility_minutes || 0,
+    workedMs,
+    lunchMs,
+    personalMs,
+    productiveMs,
+    lph: productiveHours > 0 ? locatesClosed / productiveHours : 0,
+    fph: productiveHours > 0 ? footage / productiveHours : 0,
+  };
+}
+
 function mapTicketRow(ticket) {
   const tech = ticket.assigned_tech_id
     ? db
@@ -298,34 +505,32 @@ function authenticateTokenQuery(req, res, next) {
   });
 }
 
+// Ops login now delegates to the shared auth logic (see routes/auth.js).
+// Kept as a thin wrapper for backward compatibility with L720Ops.
 router.post("/auth/login", async (req, res) => {
+  const { authenticateLogin } = await import("../routes/auth.js");
+  // Not ideal to dynamically import, so we forward to the unified endpoint.
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password required" });
   }
-
-  // Look up user by email
   const user = db.prepare("SELECT * FROM users WHERE email = ? AND is_active = 1").get(email);
-  if (!user) {
-    return res.status(401).json({ error: "Invalid credentials" });
-  }
+  if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-  // Dev fallback: if password_hash is the placeholder, accept any password (for dev migration)
   let passwordValid = false;
-  if (user.password_hash === '$2b$10$YourDevHashHere.ShouldBeReplacedInProd') {
-    passwordValid = true; // Dev mode: accept any password for seeded users
+  if (process.env.DEV_MODE === "true" && user.password_hash === '$2b$10$YourDevHashHere.ShouldBeReplacedInProd') {
+    passwordValid = true;
   } else if (user.password_hash) {
     passwordValid = await bcrypt.compare(password, user.password_hash);
   }
+  if (!passwordValid) return res.status(401).json({ error: "Invalid credentials" });
 
-  if (!passwordValid) {
-    return res.status(401).json({ error: "Invalid credentials" });
+  // Only supervisors and above can access the ops portal.
+  const OPS_ALLOWED_ROLES = ["SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER", "MANAGER"];
+  if (!OPS_ALLOWED_ROLES.includes(user.role)) {
+    return res.status(403).json({ error: "Technicians do not have access to the Ops Portal" });
   }
 
-  // Update last login timestamp
-  db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(Date.now(), user.id);
-
-  // Check if password change is required
   if (user.password_must_change === 1) {
     return res.status(403).json({
       error: "Password change required",
@@ -334,29 +539,15 @@ router.post("/auth/login", async (req, res) => {
     });
   }
 
-  const tokenPayload = {
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    areaId: user.area_id,
-    supervisorId: user.supervisor_id,
-  };
+  db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(Date.now(), user.id);
 
+  const tokenPayload = { id: user.id, email: user.email, role: user.role, areaId: user.area_id, supervisorId: user.supervisor_id };
   const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
   console.log(`[OPS Auth] User ${user.email} (${user.role}) logged in`);
 
   res.json({
     token,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      areaId: user.area_id,
-      supervisorId: user.supervisor_id,
-      title: user.title,
-      phone: user.phone,
-    },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, areaId: user.area_id, supervisorId: user.supervisor_id, title: user.title, phone: user.phone },
   });
 });
 
@@ -584,6 +775,7 @@ router.get("/dashboard/tech-status", authenticateToken, (req, res) => {
     const out = techs.map((tech) => {
       const clock = getLiveClockState(tech.id);
       const currentTicket = getTechCurrentTicket(tech.id);
+      const assignedTerritories = getTechAssignedTerritories(tech.id);
       const activeTickets = db
         .prepare(
           `SELECT COUNT(*) as c FROM tickets
@@ -599,6 +791,7 @@ router.get("/dashboard/tech-status", authenticateToken, (req, res) => {
         clockStatus: clock.clockStatus,
         currentSession: clock.currentSession,
         currentTicket,
+        assignedTerritories,
         activeTickets,
       };
     });
@@ -653,7 +846,7 @@ router.get("/techs", authenticateToken, (req, res) => {
     const { area, status, search } = req.query;
     const range = resolveRange(req);
 
-    let query = "SELECT id, name, email, role, area_id, supervisor_id, created_at FROM users WHERE role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR') AND is_active = 1";
+    let query = "SELECT id, name, email, role, area_id, supervisor_id, created_at FROM users WHERE role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER') AND is_active = 1";
     const params = [];
 
     if (area) {
@@ -675,8 +868,9 @@ router.get("/techs", authenticateToken, (req, res) => {
       .map((tech) => {
         const clock = getLiveClockState(tech.id);
         if (status && clock.clockStatus !== status) return null;
-        const prod = computeTechProductivity(tech.id, range.startMs, range.endMs);
+        const prod = computeUserProductivity(tech.id, tech.role, range.startMs, range.endMs);
         const currentTicket = getTechCurrentTicket(tech.id);
+        const assignedTerritories = getTechAssignedTerritories(tech.id);
         return {
           id: tech.id,
           name: tech.name,
@@ -688,6 +882,7 @@ router.get("/techs", authenticateToken, (req, res) => {
           clockStatus: clock.clockStatus,
           currentSession: clock.currentSession,
           currentTicket,
+          assignedTerritories,
           ...prod,
         };
       })
@@ -715,15 +910,16 @@ router.get("/techs/:id", authenticateToken, (req, res) => {
       .prepare(
         `SELECT u.*, s.name as supervisor_name
          FROM users u LEFT JOIN users s ON s.id = u.supervisor_id
-         WHERE u.id = ? AND u.role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR')`,
+         WHERE u.id = ? AND u.role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER')`,
       )
       .get(id);
-    if (!tech) return res.status(404).json({ error: "Technician not found" });
+    if (!tech) return res.status(404).json({ error: "User not found" });
 
     const range = resolveRange(req);
     const clock = getLiveClockState(id);
     const currentTicket = getTechCurrentTicket(id);
-    const productivity = computeTechProductivity(id, range.startMs, range.endMs);
+    const assignedTerritories = getTechAssignedTerritories(id);
+    const productivity = computeUserProductivity(tech.id, tech.role, range.startMs, range.endMs);
 
     res.json({
       id: tech.id,
@@ -737,6 +933,7 @@ router.get("/techs/:id", authenticateToken, (req, res) => {
       clockStatus: clock.clockStatus,
       currentSession: clock.currentSession,
       currentTicket,
+      assignedTerritories,
       range: {
         startMs: range.startMs,
         endMs: range.endMs,
@@ -757,9 +954,47 @@ router.get("/techs/:id/tickets", authenticateToken, (req, res) => {
     const { status, locatorStatus } = req.query;
     const range = resolveRange(req);
 
-    let query =
-      "SELECT * FROM tickets WHERE assigned_tech_id = ? AND (updated_at >= ? OR locator_status NOT IN ('CLOSED','UNABLE'))";
-    const params = [id, range.startMs];
+    // Look up the user to determine their role and territory scope.
+    // Hierarchy: a supervisor sees all tickets in their supervisor territory,
+    // an area manager sees all tickets in their area, a district manager sees
+    // all tickets in their district, and a tech sees tickets in their tech
+    // territories (plus any directly assigned to them).
+    const user = db.prepare("SELECT id, role FROM users WHERE id = ?").get(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const dir = getUserDirectTerritories(db, id);
+    let whereSql;
+    let params;
+
+    if (user.role === "MANAGER") {
+      whereSql = "1=1";
+      params = [];
+    } else if (user.role === "DISTRICT_MANAGER" && dir.DISTRICT.length) {
+      const ph = dir.DISTRICT.map(() => "?").join(",");
+      whereSql = `tickets.district_territory_id IN (${ph})`;
+      params = [...dir.DISTRICT];
+    } else if (user.role === "AREA_MANAGER" && dir.AREA.length) {
+      const ph = dir.AREA.map(() => "?").join(",");
+      whereSql = `tickets.area_territory_id IN (${ph})`;
+      params = [...dir.AREA];
+    } else if (user.role === "SUPERVISOR" && dir.SUPERVISOR_TERRITORY.length) {
+      const ph = dir.SUPERVISOR_TERRITORY.map(() => "?").join(",");
+      whereSql = `tickets.supervisor_territory_id IN (${ph})`;
+      params = [...dir.SUPERVISOR_TERRITORY];
+    } else if (dir.TECH_TERRITORY.length) {
+      const ph = dir.TECH_TERRITORY.map(() => "?").join(",");
+      whereSql = `(tickets.tech_territory_id IN (${ph}) OR tickets.assigned_tech_id = ?)`;
+      params = [...dir.TECH_TERRITORY, id];
+    } else {
+      // Fallback: only tickets directly assigned to this user.
+      whereSql = "tickets.assigned_tech_id = ?";
+      params = [id];
+    }
+
+    let query = `SELECT * FROM tickets WHERE (${whereSql}) AND (updated_at >= ? OR locator_status NOT IN ('CLOSED','UNABLE'))`;
+    params.push(range.startMs);
 
     if (status) {
       query += " AND status = ?";
@@ -926,6 +1161,11 @@ router.get("/tickets", authenticateToken, (req, res) => {
     let query = "SELECT * FROM tickets WHERE 1=1";
     const params = [];
 
+    // Territory-based visibility: non-MANAGER users only see tickets in their territory.
+    const territoryFilter = buildTicketVisibilityFilter(db, req.user);
+    query += ` AND ${territoryFilter.sql}`;
+    params.push(...territoryFilter.params);
+
     if (status) {
       query += " AND status = ?";
       params.push(status);
@@ -937,6 +1177,13 @@ router.get("/tickets", authenticateToken, (req, res) => {
     if (areaId) {
       query += " AND assigned_tech_id IN (SELECT id FROM users WHERE area_id = ?)";
       params.push(areaId);
+    }
+    if (req.query.territoryId) {
+      // Filter by any territory level. A ticket matches if its
+      // tech/supervisor/area/district territory ID equals the given ID.
+      query += " AND (tech_territory_id = ? OR supervisor_territory_id = ? OR area_territory_id = ? OR district_territory_id = ?)";
+      const tid = req.query.territoryId;
+      params.push(tid, tid, tid, tid);
     }
     if (assignedTechId) {
       query += " AND assigned_tech_id = ?";
@@ -1015,6 +1262,9 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
     const { id } = req.params;
     const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, ticket)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
 
     const tech = ticket.assigned_tech_id
       ? db
@@ -1054,7 +1304,7 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
     const customerLookup = new Map(
       (payload.customers || []).map((c) => [c.id, c]),
     );
-    const markings = payload.customerMarking || payload.customerMarkings || {};
+    const markings = payload.customerMarkings || payload.customerMarking || {};
     const customers = Object.entries(markings).map(([customerId, m]) => {
       const c = customerLookup.get(customerId) || {};
       return {
@@ -1120,8 +1370,11 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
 router.get("/tickets/:id/chain", authenticateToken, (req, res) => {
   try {
     const { id } = req.params;
-    const anchor = db.prepare("SELECT id FROM tickets WHERE id = ?").get(id);
+    const anchor = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!anchor) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, anchor)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
     res.json({ chain: getChainWithSummaries(db, id) });
   } catch (error) {
     console.error("[OPS Tickets] Error fetching ticket chain:", error);
@@ -1164,7 +1417,12 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
 
   const now = Date.now();
   db.prepare(
-    "UPDATE tickets SET assigned_tech_id = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+    `UPDATE tickets
+     SET assigned_tech_id = ?,
+         locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
+         updated_at = ?,
+         version = version + 1
+     WHERE id = ?`,
   ).run(resolvedTechId, now, ticketId);
 
   db.prepare(
@@ -1198,16 +1456,33 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
     assignedTechId: resolvedTechId,
   });
 
+  // Notify the 811 simulator of the assignment so it can reflect real-world state
+  if (resolvedTechId && tech && ticket.source === '811' && ticket.external_ticket_id) {
+    fetch(
+      `${process.env.SIMULATOR_URL || 'http://localhost:4100'}/api/811/tickets/${ticket.external_ticket_id}/assign`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ techId: resolvedTechId, techName: tech.name, locatorStatus: 'ASSIGNED' }),
+      },
+    ).catch((err) => console.error('[OPS] Failed to notify simulator of manual assignment:', err.message));
+  }
+
   return { ok: true, tech };
 }
 
 router.put("/tickets/:id/assign", authenticateToken, (req, res) => {
   try {
     const { id } = req.params;
+    const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, ticket)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
     const { techId } = req.body;
     const result = assignTicketInternal(id, techId ?? null, req.user?.id);
     if (!result.ok) {
-      return res.status(result.error === "Ticket not found" ? 404 : 400).json({ error: result.error });
+      return res.status(400).json({ error: result.error });
     }
     res.json({
       message: "Ticket assignment updated",
@@ -1226,6 +1501,18 @@ router.post("/tickets/bulk-assign", authenticateToken, (req, res) => {
     const { ticketIds, techId } = req.body;
     if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
       return res.status(400).json({ error: "ticketIds required" });
+    }
+    // Pre-check territory visibility for all tickets.
+    const denied = [];
+    for (const tid of ticketIds) {
+      const t = db.prepare("SELECT * FROM tickets WHERE id = ?").get(tid);
+      if (!t) { denied.push({ ticketId: tid, ok: false, error: "Ticket not found" }); continue; }
+      if (!canUserSeeTicket(db, req.user, t)) {
+        denied.push({ ticketId: tid, ok: false, error: "Access denied — ticket outside your territory" });
+      }
+    }
+    if (denied.length > 0) {
+      return res.status(403).json({ error: "Some tickets are outside your territory", denied });
     }
     const results = [];
     const tx = db.transaction(() => {
@@ -1251,6 +1538,19 @@ router.put("/tickets/:id/status", authenticateToken, (req, res) => {
     }
     const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, ticket)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
+
+    // Enforce locator status machine. MANAGER can bypass for admin overrides.
+    if (locatorStatus && req.user.role !== "MANAGER") {
+      const valid = isValidLocatorTransition(ticket.locator_status, locatorStatus);
+      if (!valid) {
+        return res.status(400).json({
+          error: `Invalid status transition: ${ticket.locator_status} → ${locatorStatus}`,
+        });
+      }
+    }
 
     const updates = [];
     const params = [];
@@ -1264,6 +1564,11 @@ router.put("/tickets/:id/status", authenticateToken, (req, res) => {
       if (locatorStatus === "CLOSED" || locatorStatus === "UNABLE") {
         updates.push("closed_at = ?");
         params.push(Date.now());
+      }
+      // Reopening: clear closed_at so ticket appears as active again.
+      if ((ticket.locator_status === "CLOSED" || ticket.locator_status === "UNABLE") &&
+          locatorStatus === "ASSIGNED") {
+        updates.push("closed_at = NULL");
       }
     }
     updates.push("updated_at = ?");
@@ -1319,6 +1624,12 @@ router.get("/tickets/export.csv", authenticateToken, (req, res) => {
 
     let query = "SELECT * FROM tickets WHERE 1=1";
     const params = [];
+
+    // Territory-based visibility.
+    const territoryFilter = buildTicketVisibilityFilter(db, req.user);
+    query += ` AND ${territoryFilter.sql}`;
+    params.push(...territoryFilter.params);
+
     if (status) { query += " AND status = ?"; params.push(status); }
     if (locatorStatus) { query += " AND locator_status = ?"; params.push(locatorStatus); }
     if (areaId) { query += " AND assigned_tech_id IN (SELECT id FROM users WHERE area_id = ?)"; params.push(areaId); }
@@ -1530,7 +1841,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
   try {
     const {
       name, email, password, title, role, supervisorId, areaId, phone,
-      territoryId, assignmentType,
+      territoryId, territoryIds, assignmentType,
     } = req.body;
     const viewerRole = req.user.role;
     const viewerId = req.user.id;
@@ -1576,16 +1887,24 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
       TRAINEE: 'TECH_ASSIGNMENT',
     };
     const assignTerritory = (userId) => {
-      if (!territoryId) return null;
-      const t = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(territoryId);
-      if (!t) return null;
+      // Support both legacy single territoryId and new territoryIds array.
+      const ids = Array.isArray(territoryIds) && territoryIds.length > 0
+        ? territoryIds
+        : territoryId ? [territoryId] : [];
+      if (ids.length === 0) return null;
       const finalType = assignmentType || ROLE_TO_ASSIGNMENT[role] || 'TECH_ASSIGNMENT';
-      const utaId = `uta-${userId}-${t.id}-${finalType.toLowerCase()}`;
-      db.prepare(`
-        INSERT OR IGNORE INTO user_territory_assignments (id, user_id, territory_id, assignment_type, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(utaId, userId, t.id, finalType, now);
-      return { territoryId: t.id, assignmentType: finalType };
+      const assigned = [];
+      for (const tid of ids) {
+        const t = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(tid);
+        if (!t) continue;
+        const utaId = `uta-${userId}-${t.id}-${finalType.toLowerCase()}`;
+        db.prepare(`
+          INSERT OR IGNORE INTO user_territory_assignments (id, user_id, territory_id, assignment_type, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(utaId, userId, t.id, finalType, now);
+        assigned.push({ territoryId: t.id, assignmentType: finalType });
+      }
+      return assigned.length > 0 ? assigned : null;
     };
 
     if (existing && existing.is_active === 1) {
@@ -1617,8 +1936,8 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
       });
       const assignedTerritory = tx();
 
-      console.log(`[OPS Users] Reactivated user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.territoryId}` : ''}`);
-      emitOpsEvent("user.reactivated", { userId, email, role, by: req.user.id, territoryId: assignedTerritory?.territoryId });
+      console.log(`[OPS Users] Reactivated user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.map(a => a.territoryId).join(', ')}` : ''}`);
+      emitOpsEvent("user.reactivated", { userId, email, role, by: req.user.id, territoryIds: assignedTerritory?.map(a => a.territoryId) });
 
       return res.status(200).json({
         id: userId,
@@ -1629,7 +1948,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
         phone,
         areaId,
         supervisorId,
-        territoryAssignment: assignedTerritory,
+        territoryAssignments: assignedTerritory,
         passwordMustChange: true,
       });
     }
@@ -1642,8 +1961,8 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
 
     const assignedTerritory = assignTerritory(id);
 
-    console.log(`[OPS Users] Created user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.territoryId}` : ''}`);
-    emitOpsEvent("user.created", { userId: id, email, role, by: req.user.id, territoryId: assignedTerritory?.territoryId });
+    console.log(`[OPS Users] Created user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.map(a => a.territoryId).join(', ')}` : ''}`);
+    emitOpsEvent("user.created", { userId: id, email, role, by: req.user.id, territoryIds: assignedTerritory?.map(a => a.territoryId) });
 
     res.status(201).json({
       id,
@@ -1654,7 +1973,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
       phone,
       areaId,
       supervisorId,
-      territoryAssignment: assignedTerritory,
+      territoryAssignments: assignedTerritory,
       passwordMustChange: true,
     });
   } catch (error) {

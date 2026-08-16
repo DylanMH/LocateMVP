@@ -13,9 +13,8 @@ import { MainLayout } from "./components/layout/MainLayout";
 import { DashboardPage } from "./pages/dashboard/DashboardPage";
 import { TechsPage } from "./pages/techs/TechsPage";
 import { TechDetailPage } from "./pages/techs/TechDetailPage";
-import { TicketsPage } from "./pages/tickets/TicketsPage";
+import { MapTicketsPage } from "./pages/maptickets/MapTicketsPage";
 import { SimulatorPage } from "./pages/simulator/SimulatorPage";
-import { AreasPage } from "./pages/areas/AreasPage";
 import { TerritoriesPage } from "./pages/territories/TerritoriesPage";
 
 // Create a client
@@ -43,13 +42,12 @@ function App() {
                     <Routes>
                       <Route
                         path="/"
-                        element={<Navigate to="/dashboard" replace />}
+                        element={<Navigate to="/map" replace />}
                       />
                       <Route path="/dashboard" element={<DashboardPage />} />
                       <Route path="/techs" element={<TechsPage />} />
                       <Route path="/techs/:id" element={<TechDetailPage />} />
-                      <Route path="/tickets" element={<TicketsPage />} />
-                      <Route path="/areas" element={<AreasPage />} />
+                      <Route path="/map" element={<MapTicketsPage />} />
                       <Route path="/territories" element={<TerritoriesPage />} />
                       <Route path="/simulator" element={<SimulatorPage />} />
                     </Routes>

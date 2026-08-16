@@ -6,34 +6,91 @@
  *
  * A ticket is always routed to its tech_territory_id (set by the
  * ingestionService via territoryService.resolveTerritoryChainForPoint).
- * If nobody is assigned to that territory, the ticket is left unassigned —
- * a supervisor will still see it via territory visibility rules.
+ * If nobody is assigned to that territory, the ticket falls back to the
+ * supervisor who owns the supervisor_territory so no ticket sits unassigned.
  */
 
-import { pickTechForTerritory } from './territoryService.js';
+import {
+  pickTechForTerritory,
+  pickSupervisorForTerritory,
+} from './territoryService.js';
+
+const SIMULATOR_URL = process.env.SIMULATOR_URL || 'http://localhost:4100';
+
+/**
+ * Notify the 811 simulator that a ticket has been assigned to a tech.
+ * Fire-and-forget — failures are logged but do not block assignment.
+ */
+async function notifySimulatorOfAssignment(db, ticketId, techId, techName, locatorStatus) {
+  try {
+    // The simulator's ticket ID is stored in external_ticket_id
+    const ticket = db.prepare('SELECT external_ticket_id, source FROM tickets WHERE id = ?').get(ticketId);
+    if (!ticket || ticket.source !== '811' || !ticket.external_ticket_id) {
+      return; // Not an 811 ticket, nothing to notify
+    }
+    const response = await fetch(
+      `${SIMULATOR_URL}/api/811/tickets/${ticket.external_ticket_id}/assign`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ techId, techName, locatorStatus }),
+      },
+    );
+    if (!response.ok) {
+      console.error(`[Assignment] Simulator assign notification failed: ${response.status}`);
+    }
+  } catch (error) {
+    console.error(`[Assignment] Failed to notify simulator of assignment: ${error.message}`);
+  }
+}
+
+/**
+ * Assign a ticket to a user by their id.
+ * @returns {Object} - { success, assignedUserId?, assignedUserName?, error? }
+ */
+function assignTicketToUser(db, ticketId, userId, userName) {
+  db.prepare(`
+    UPDATE tickets
+    SET assigned_tech_id = ?,
+        locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
+        updated_at = ?,
+        version = version + 1
+    WHERE id = ?
+  `).run(userId, Date.now(), ticketId);
+  return { success: true, assignedTechId: userId, assignedTechName: userName };
+}
 
 /**
  * Assign a ticket to a tech in its tech_territory (by territory id).
+ * Falls back to the supervisor if no tech covers the territory.
  * @returns {Object} - { success, assignedTechId?, assignedTechName?, error? }
  */
-export function assignTicketToTechTerritory(db, ticketId, techTerritoryId) {
+export function assignTicketToTechTerritory(db, ticketId, techTerritoryId, supervisorTerritoryId) {
   try {
     if (!techTerritoryId) {
       return { success: false, error: 'No tech_territory_id resolved for ticket' };
     }
     const tech = pickTechForTerritory(db, techTerritoryId);
-    if (!tech) {
-      return { success: false, error: `No techs assigned to territory ${techTerritoryId}` };
+    if (tech) {
+      const r = assignTicketToUser(db, ticketId, tech.id, tech.name);
+      console.log(`[Assignment] Assigned ticket ${ticketId} to tech ${tech.name} (${tech.id}) in ${techTerritoryId}`);
+      // Fire-and-forget notification to the 811 simulator
+      notifySimulatorOfAssignment(db, ticketId, tech.id, tech.name, 'ASSIGNED');
+      return r;
     }
 
-    db.prepare(`
-      UPDATE tickets
-      SET assigned_tech_id = ?, updated_at = ?, version = version + 1
-      WHERE id = ?
-    `).run(tech.id, Date.now(), ticketId);
+    // No tech in this territory — fall back to supervisor.
+    if (supervisorTerritoryId) {
+      const supe = pickSupervisorForTerritory(db, supervisorTerritoryId);
+      if (supe) {
+        const r = assignTicketToUser(db, ticketId, supe.id, supe.name);
+        console.log(`[Assignment] Assigned ticket ${ticketId} to supervisor ${supe.name} (${supe.id}) — no tech in ${techTerritoryId}`);
+        notifySimulatorOfAssignment(db, ticketId, supe.id, supe.name, 'ASSIGNED');
+        return r;
+      }
+    }
 
-    console.log(`[Assignment] Assigned ticket ${ticketId} to ${tech.name} (${tech.id}) in ${techTerritoryId}`);
-    return { success: true, assignedTechId: tech.id, assignedTechName: tech.name };
+    return { success: false, error: `No techs in territory ${techTerritoryId} and no supervisor found` };
   } catch (error) {
     console.error(`[Assignment] Failed to assign ticket ${ticketId}:`, error.message);
     return { success: false, error: error.message };
@@ -51,13 +108,16 @@ export function assignTicketToArea(db, ticketId, areaCode) {
 
 /**
  * Assign every unassigned ticket by its tech_territory_id (set at ingestion).
+ * Only assigns tickets where assigned_tech_id IS NULL — never overrides an
+ * existing assignment, even if it was a supervisor fallback. Manual
+ * assignments by supervisors must be respected.
  * @returns {{ assigned: number, errors: string[] }}
  */
 export function assignUnassignedTickets(db) {
   const results = { assigned: 0, errors: [] };
 
   const unassigned = db.prepare(`
-    SELECT id, tech_territory_id
+    SELECT id, tech_territory_id, supervisor_territory_id
     FROM tickets
     WHERE assigned_tech_id IS NULL
       AND locator_status NOT IN ('CLOSED','UNABLE')
@@ -70,7 +130,7 @@ export function assignUnassignedTickets(db) {
       results.errors.push(`Ticket ${t.id}: no tech_territory_id resolved`);
       continue;
     }
-    const r = assignTicketToTechTerritory(db, t.id, t.tech_territory_id);
+    const r = assignTicketToTechTerritory(db, t.id, t.tech_territory_id, t.supervisor_territory_id);
     if (r.success) results.assigned++;
     else results.errors.push(`Ticket ${t.id}: ${r.error}`);
   }

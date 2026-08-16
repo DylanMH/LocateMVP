@@ -26,6 +26,11 @@ export function SimulatorTicketDetailModal({ ticket, isOpen, onClose }: Simulato
   const contractorPhone = (ticket as any).contractor?.phone || payloadData.contractorPhone;
   const contactName = (ticket as any).contractor?.contact?.name || payloadData.contactName;
   const contactEmail = (ticket as any).contractor?.contact?.email || payloadData.contactEmail;
+  const scope = payloadData.scope;
+  const rootTicketId = payloadData.rootTicketId;
+  const parentTicketId = payloadData.parentTicketId;
+  const sequenceNumber = payloadData.sequenceNumber;
+  const externalRootNumber = payloadData.externalRootNumber;
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
@@ -229,6 +234,68 @@ export function SimulatorTicketDetailModal({ ticket, isOpen, onClose }: Simulato
 
               {/* Timestamps */}
               <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-900">Work Area Scope</h4>
+                  <dl className="mt-2 space-y-2">
+                    {scope ? (
+                      <>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Shape:</dt>
+                          <dd className="text-sm font-medium text-gray-900">{scope.shape || "N/A"}</dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Center:</dt>
+                          <dd className="text-sm font-medium text-gray-900">
+                            {scope.centerLat != null && scope.centerLng != null
+                              ? `${scope.centerLat.toFixed(6)}, ${scope.centerLng.toFixed(6)}`
+                              : "N/A"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Width × Height:</dt>
+                          <dd className="text-sm font-medium text-gray-900">
+                            {scope.widthFeet != null && scope.heightFeet != null
+                              ? `${scope.widthFeet} ft × ${scope.heightFeet} ft`
+                              : "N/A"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Bounds (N/S/E/W):</dt>
+                          <dd className="text-sm font-mono text-gray-900 text-xs">
+                            {scope.latMax != null
+                              ? `${scope.latMax.toFixed(6)}, ${scope.latMin?.toFixed(6)}, ${scope.lngMax?.toFixed(6)}, ${scope.lngMin?.toFixed(6)}`
+                              : "N/A"}
+                          </dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">No scope data available.</div>
+                    )}
+                  </dl>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-medium text-gray-900">811 Lineage</h4>
+                  <dl className="mt-2 space-y-2">
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">External Root #:</dt>
+                      <dd className="text-sm font-medium text-gray-900">{externalRootNumber || "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">Sequence #:</dt>
+                      <dd className="text-sm font-medium text-gray-900">{sequenceNumber ?? "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">Root Ticket ID:</dt>
+                      <dd className="text-sm font-mono text-gray-900 text-xs">{rootTicketId || "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">Parent Ticket ID:</dt>
+                      <dd className="text-sm font-mono text-gray-900 text-xs">{parentTicketId || "N/A"}</dd>
+                    </div>
+                  </dl>
+                </div>
+
                 <div>
                   <h4 className="text-sm font-medium text-gray-900">Timestamps</h4>
                   <dl className="mt-2 space-y-2">

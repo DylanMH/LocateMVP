@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TerritoryService } from "../../services/territoryService";
 import { AuthService } from "../../services/authService";
@@ -45,8 +45,11 @@ const DEFAULT_ROLE_FOR_TYPE: Record<TerritoryType, UserRole> = {
 
 const TECH_ASSIGNABLE_ROLES: UserRole[] = ["TECH", "TRAINER", "TRAINEE"];
 
+type TabId = "tree" | "supervisors";
+
 export function TerritoriesPage() {
   const qc = useQueryClient();
+  const [tab, setTab] = useState<TabId>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<
@@ -158,12 +161,31 @@ export function TerritoriesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Territories</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Geographic hierarchy: District → Area → Supervisor Territory → Tech Territory. Users
-            are assigned at any level to scope their ticket visibility and routing.
+            Manage supervisor assignments and geographic territory hierarchy.
           </p>
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        {(["tree", "supervisors"] as TabId[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+              tab === t
+                ? "bg-white text-blue-600 border border-b-white border-gray-200 -mb-px"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t === "tree" ? "Tree View" : "Supervisor Assignments"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "supervisors" ? (
+        <SupervisorAssignmentsPanel />
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Tree */}
         <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-3">
@@ -203,6 +225,7 @@ export function TerritoriesPage() {
           )}
         </div>
       </div>
+      )}
 
       {dialog?.kind === "create-child" && (
         <CreateTerritoryDialog
@@ -731,9 +754,13 @@ function DefineCoverageDialog({
     enabled: !!territory.id,
   });
 
-  // Initialize selected units from existing
+  // Initialize selected units from existing — only once when data first loads.
+  // Without the ref, any refetch (window focus, invalidation) would reset the
+  // user's selections back to the original set, wiping out additions/removals.
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (existingUnitsQuery.data?.units) {
+    if (existingUnitsQuery.data?.units && !initializedRef.current) {
+      initializedRef.current = true;
       setSelectedUnitIds(existingUnitsQuery.data.units.map((u) => u.id));
     }
   }, [existingUnitsQuery.data]);
@@ -1241,6 +1268,341 @@ function AssignTechTerritoriesDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+{/* ── Supervisor Assignments Panel ────────────────────────── */}
+function SupervisorAssignmentsPanel() {
+  const qc = useQueryClient();
+  const [assignDialog, setAssignDialog] = useState<{ supeId: string; supeName: string } | null>(null);
+  const [selectedTerritoryId, setSelectedTerritoryId] = useState("");
+  const [techAssignDialog, setTechAssignDialog] = useState<{ techTerritoryId: string; techTerritoryName: string } | null>(null);
+  const [selectedTechUserId, setSelectedTechUserId] = useState("");
+  const [expandedSupeTerritories, setExpandedSupeTerritories] = useState<Set<string>>(new Set());
+
+  const treeQuery = useQuery({
+    queryKey: ["territories", "tree"],
+    queryFn: () => TerritoryService.getTree(),
+  });
+
+  const usersQuery = useQuery({
+    queryKey: ["ops", "users", "list"],
+    queryFn: () => AuthService.getUsers({ includeInactive: false }),
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (v: { territoryId: string; userId: string }) =>
+      TerritoryService.assignUser(v.territoryId, v.userId, "OWNER"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["territories"] });
+      setAssignDialog(null);
+    },
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: (v: { territoryId: string; userId: string }) =>
+      TerritoryService.unassignUser(v.territoryId, v.userId, "OWNER"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["territories"] }),
+  });
+
+  const assignTechMutation = useMutation({
+    mutationFn: (v: { territoryId: string; userId: string }) =>
+      TerritoryService.assignUser(v.territoryId, v.userId, "TECH_ASSIGNMENT"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["territories"] });
+      setTechAssignDialog(null);
+      setSelectedTechUserId("");
+    },
+  });
+
+  const unassignTechMutation = useMutation({
+    mutationFn: (v: { territoryId: string; userId: string }) =>
+      TerritoryService.unassignUser(v.territoryId, v.userId, "TECH_ASSIGNMENT"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["territories"] }),
+  });
+
+  const tree = treeQuery.data?.tree || [];
+  const allUsers = usersQuery.data?.users || [];
+  const techUsers = allUsers.filter((u) => ["TECH", "TRAINER", "TRAINEE"].includes(u.role));
+
+  const supeMap = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; territories: TerritoryNode[] }>();
+    const walk = (nodes: TerritoryNode[]) => {
+      for (const n of nodes) {
+        if (n.type === "SUPERVISOR_TERRITORY" && n.owners?.length) {
+          for (const owner of n.owners) {
+            if (!map.has(owner.id)) map.set(owner.id, { id: owner.id, name: owner.name, territories: [] });
+            map.get(owner.id)!.territories.push(n);
+          }
+        }
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(tree);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tree]);
+
+  const allSupeTerritories = useMemo(() => {
+    const result: TerritoryNode[] = [];
+    const walk = (nodes: TerritoryNode[]) => {
+      for (const n of nodes) {
+        if (n.type === "SUPERVISOR_TERRITORY") result.push(n);
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(tree);
+    return result;
+  }, [tree]);
+
+  // Build a map of tech territoryId → assigned tech user IDs, derived from
+  // user territory assignments. We get this by looking at each tech user's
+  // assignments in the users list.
+  // The tree nodes have `assigneeCount` but not the actual assignees. We
+  // need to fetch details for tech territories to get the actual techs.
+  // To keep it simple, we'll fetch details for expanded tech territories.
+  const techTerritoryDetailsQuery = useQuery({
+    queryKey: ["territories", "tech-details", Array.from(expandedSupeTerritories)],
+    queryFn: async () => {
+      // For each expanded supervisor territory, fetch its details to get
+      // children with assignments.
+      const results = await Promise.all(
+        Array.from(expandedSupeTerritories).map((id) => TerritoryService.get(id)),
+      );
+      const map = new Map<string, { id: string; name: string; role: string; assignmentType: string }[]>();
+      for (const detail of results) {
+        // detail.children are tech territories; detail.assignments are for the supe territory itself
+        // We need assignments for each child tech territory — but the details
+        // endpoint only returns assignments for the requested territory, not children.
+        // So we need to fetch each child's details.
+        for (const child of detail.children) {
+          if (child.type !== "TECH_TERRITORY") continue;
+          const childDetail = await TerritoryService.get(child.id);
+          const techs = childDetail.assignments
+            .filter((a) => ["TECH", "TRAINER", "TRAINEE"].includes(a.role))
+            .map((a) => ({ id: a.userId, name: a.name, role: a.role, assignmentType: a.assignmentType }));
+          map.set(child.id, techs);
+        }
+      }
+      return map;
+    },
+    enabled: expandedSupeTerritories.size > 0,
+  });
+
+  function toggleSupeTerritory(id: string) {
+    setExpandedSupeTerritories((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  if (treeQuery.isLoading || usersQuery.isLoading) {
+    return <div className="text-sm text-gray-500 p-8 text-center">Loading...</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {supeMap.length === 0 ? (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">
+          No supervisors assigned to any territories yet.
+          <br />
+          Use the Tree View to create supervisor territories and assign supervisors.
+        </div>
+      ) : (
+        supeMap.map((supe) => (
+          <div key={supe.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            {/* Supervisor header */}
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                <span className="font-semibold text-gray-900">{supe.name}</span>
+                <span className="text-xs text-gray-500">Supervisor</span>
+              </div>
+              <button
+                onClick={() => setAssignDialog({ supeId: supe.id, supeName: supe.name })}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                + Add Territory
+              </button>
+            </div>
+
+            {/* Supervisor territories with expandable tech territories */}
+            <div className="divide-y divide-gray-100">
+              {supe.territories.map((t) => {
+                const isExpanded = expandedSupeTerritories.has(t.id);
+                const techTerritories = t.children?.filter((c) => c.type === "TECH_TERRITORY") || [];
+                return (
+                  <div key={t.id}>
+                    <div
+                      className="px-4 py-2.5 flex items-center gap-2 cursor-pointer hover:bg-gray-50"
+                      onClick={() => toggleSupeTerritory(t.id)}
+                    >
+                      <span className="text-gray-400 select-none w-4">
+                        {techTerritories.length > 0 ? (isExpanded ? "▾" : "▸") : ""}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {t.name}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {techTerritories.length} tech {techTerritories.length === 1 ? "area" : "areas"}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Remove ${supe.name} from ${t.name}?`)) {
+                            unassignMutation.mutate({ territoryId: t.id, userId: supe.id });
+                          }
+                        }}
+                        className="ml-auto text-xs text-red-500 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    {/* Tech territories under this supervisor territory */}
+                    {isExpanded && techTerritories.length > 0 && (
+                      <div className="pl-10 pr-4 py-2 bg-gray-50/50 space-y-1.5">
+                        {techTerritories.map((techTerr) => {
+                          const assignedTechs = techTerritoryDetailsQuery.data?.get(techTerr.id) || [];
+                          return (
+                            <div key={techTerr.id} className="flex items-center gap-2 py-1.5 px-2 bg-white rounded border border-gray-100">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700 border border-amber-200">
+                                {techTerr.name}
+                              </span>
+                              <div className="flex flex-wrap gap-1 flex-1">
+                                {assignedTechs.length === 0 ? (
+                                  <span className="text-xs text-gray-400 italic">No tech assigned</span>
+                                ) : (
+                                  assignedTechs.map((tech) => (
+                                    <span
+                                      key={tech.id}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-200"
+                                    >
+                                      {tech.name}
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`Remove ${tech.name} from ${techTerr.name}?`)) {
+                                            unassignTechMutation.mutate({ territoryId: techTerr.id, userId: tech.id });
+                                          }
+                                        }}
+                                        className="ml-0.5 hover:text-red-600"
+                                        title="Remove tech"
+                                      >
+                                        ×
+                                      </button>
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+                              <button
+                                onClick={() => setTechAssignDialog({ techTerritoryId: techTerr.id, techTerritoryName: techTerr.name })}
+                                className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
+                              >
+                                + Assign Tech
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {isExpanded && techTerritories.length === 0 && (
+                      <div className="pl-10 pr-4 py-2 text-xs text-gray-400 italic">
+                        No tech territories under this supervisor territory.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+
+      {/* Dialog: Assign supervisor territory to a supervisor */}
+      {assignDialog && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">
+              Assign territory to {assignDialog.supeName}
+            </h3>
+            <select
+              value={selectedTerritoryId}
+              onChange={(e) => setSelectedTerritoryId(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-4"
+            >
+              <option value="">Select a supervisor territory...</option>
+              {allSupeTerritories.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.code})
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setAssignDialog(null); setSelectedTerritoryId(""); }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!selectedTerritoryId || assignMutation.isPending}
+                onClick={() =>
+                  assignMutation.mutate({ territoryId: selectedTerritoryId, userId: assignDialog.supeId })
+                }
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dialog: Assign tech to a tech territory */}
+      {techAssignDialog && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">
+              Assign tech to {techAssignDialog.techTerritoryName}
+            </h3>
+            <select
+              value={selectedTechUserId}
+              onChange={(e) => setSelectedTechUserId(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-4"
+            >
+              <option value="">Select a tech...</option>
+              {techUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.role})
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setTechAssignDialog(null); setSelectedTechUserId(""); }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!selectedTechUserId || assignTechMutation.isPending}
+                onClick={() =>
+                  assignTechMutation.mutate({
+                    territoryId: techAssignDialog.techTerritoryId,
+                    userId: selectedTechUserId,
+                  })
+                }
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                Assign Tech
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

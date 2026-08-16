@@ -368,9 +368,17 @@ function TicketDetailBody({
   detail: TicketDetailResponse;
   onAssign: (techId: string | null) => void;
 }) {
+  let p: any = {};
+  try { p = JSON.parse(detail.payloadJson || "{}"); } catch { p = {}; }
+  const scope = p.scope;
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <div className="text-xs uppercase text-gray-500">Ticket Number</div>
+          <div className="font-mono text-sm text-gray-900">{detail.ticketNumber}</div>
+        </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Type</div>
           <StatusBadge value={detail.ticketType} label={formatTicketType(detail.ticketType)} />
@@ -380,8 +388,16 @@ function TicketDetailBody({
           <StatusBadge value={detail.locatorStatus} />
         </div>
         <div>
+          <div className="text-xs uppercase text-gray-500">Source</div>
+          <div>{detail.source}</div>
+        </div>
+        <div>
           <div className="text-xs uppercase text-gray-500">Created</div>
           <div>{new Date(detail.createdAt).toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase text-gray-500">Due</div>
+          <div>{detail.dueAt ? new Date(detail.dueAt).toLocaleString() : "—"}</div>
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Closed</div>
@@ -391,6 +407,20 @@ function TicketDetailBody({
               : "—"}
           </div>
         </div>
+        <div>
+          <div className="text-xs uppercase text-gray-500">Version</div>
+          <div>{detail.version}</div>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs uppercase text-gray-500 mb-1">Address</div>
+        <div className="text-sm text-gray-900">{detail.address}</div>
+        {detail.lat && detail.lng && (
+          <div className="text-xs text-gray-500 mt-1">
+            {detail.lat.toFixed(6)}, {detail.lng.toFixed(6)}
+          </div>
+        )}
       </div>
 
       <div>
@@ -410,6 +440,84 @@ function TicketDetailBody({
             tech needs to revisit it.
           </div>
         )}
+      </div>
+
+      <div>
+        <div className="text-sm font-semibold text-gray-900 mb-2">Contractor & Work Details</div>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <div className="text-xs uppercase text-gray-500">Work Type</div>
+            <div>{p.workType || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-gray-500">Contractor</div>
+            <div>{p.contractor || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-gray-500">Contractor Phone</div>
+            <div>{p.contractorPhone || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-gray-500">Contact Name</div>
+            <div>{p.contactName || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-gray-500">Contact Email</div>
+            <div>{p.contactEmail || "—"}</div>
+          </div>
+        </div>
+        {p.markingInstructions && (
+          <div className="mt-3">
+            <div className="text-xs uppercase text-gray-500">Marking Instructions</div>
+            <div className="text-sm text-gray-900 mt-1">{p.markingInstructions}</div>
+          </div>
+        )}
+      </div>
+
+      {scope && (
+        <div>
+          <div className="text-sm font-semibold text-gray-900 mb-2">Work Area Scope</div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-xs uppercase text-gray-500">Shape</div>
+              <div>{scope.shape || "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-gray-500">Size</div>
+              <div>{scope.widthFeet != null && scope.heightFeet != null ? `${scope.widthFeet} ft × ${scope.heightFeet} ft` : "—"}</div>
+            </div>
+            <div className="col-span-2">
+              <div className="text-xs uppercase text-gray-500">Bounds (N, S, E, W)</div>
+              <div className="text-xs font-mono text-gray-900">
+                {scope.latMax != null ? `${scope.latMax.toFixed(6)}, ${scope.latMin?.toFixed(6)}, ${scope.lngMax?.toFixed(6)}, ${scope.lngMin?.toFixed(6)}` : "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="text-sm font-semibold text-gray-900 mb-2">811 Lineage</div>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <div className="text-xs uppercase text-gray-500">External Root #</div>
+            <div>{p.externalRootNumber || detail.externalTicketId || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-gray-500">Sequence #</div>
+            <div>{p.sequenceNumber ?? "—"}</div>
+          </div>
+          <div className="col-span-2">
+            <div className="text-xs uppercase text-gray-500">Root Ticket ID</div>
+            <div className="text-xs font-mono text-gray-900">{p.rootTicketId || "—"}</div>
+          </div>
+          {p.parentTicketId && (
+            <div className="col-span-2">
+              <div className="text-xs uppercase text-gray-500">Parent Ticket ID</div>
+              <div className="text-xs font-mono text-gray-900">{p.parentTicketId}</div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div>

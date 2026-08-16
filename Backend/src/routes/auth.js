@@ -9,51 +9,49 @@ const JWT_EXPIRES_IN = '7d'; // Mobile tokens last longer
 const REFRESH_EXPIRES_IN = '30d';
 
 /**
- * POST /api/auth/login
- * Mobile app login endpoint
+ * Shared authentication logic used by both mobile and ops login.
+ * @param {'mobile'|'ops'} client - Which client is logging in (affects token expiry).
  */
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-
+async function authenticateLogin(email, password, client = 'mobile') {
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
+    return { status: 400, body: { error: 'Email and password required' } };
   }
 
-  // Look up user by email
-  const user = db.prepare(`
-    SELECT * FROM users WHERE email = ? AND is_active = 1
-  `).get(email);
+  const user = db.prepare(
+    'SELECT * FROM users WHERE email = ? AND is_active = 1'
+  ).get(email);
 
   if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return { status: 401, body: { error: 'Invalid credentials' } };
   }
 
   // Verify password
   let passwordValid = false;
-  if (user.password_hash === '$2b$10$YourDevHashHere.ShouldBeReplacedInProd') {
-    // Dev mode fallback - accept any password for seeded dev users
+  if (process.env.DEV_MODE === "true" && user.password_hash === '$2b$10$YourDevHashHere.ShouldBeReplacedInProd') {
     passwordValid = true;
   } else if (user.password_hash) {
     passwordValid = await bcrypt.compare(password, user.password_hash);
   }
 
   if (!passwordValid) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return { status: 401, body: { error: 'Invalid credentials' } };
   }
 
   // Check if password change is required
   if (user.password_must_change === 1) {
-    return res.status(403).json({
-      error: 'Password change required',
-      code: 'PASSWORD_MUST_CHANGE',
-      tempToken: jwt.sign({ id: user.id, mustChange: true }, JWT_SECRET, { expiresIn: '15m' }),
-    });
+    return {
+      status: 403,
+      body: {
+        error: 'Password change required',
+        code: 'PASSWORD_MUST_CHANGE',
+        tempToken: jwt.sign({ id: user.id, mustChange: true }, JWT_SECRET, { expiresIn: '15m' }),
+      },
+    };
   }
 
   // Update last login
   db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(Date.now(), user.id);
 
-  // Create JWT token
   const tokenPayload = {
     id: user.id,
     email: user.email,
@@ -62,26 +60,41 @@ router.post('/login', async (req, res) => {
     supervisorId: user.supervisor_id,
   };
 
-  const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const expiresIn = client === 'ops' ? '24h' : JWT_EXPIRES_IN;
+  const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn });
+
+  const userShape = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    areaId: user.area_id,
+    supervisorId: user.supervisor_id,
+    title: user.title,
+    phone: user.phone,
+  };
+
+  console.log(`[Auth] User ${user.email} (${user.role}) logged in via ${client}`);
+
+  if (client === 'ops') {
+    return { status: 200, body: { token, user: userShape } };
+  }
+
+  // Mobile: include refresh token with longer expiry.
   const refreshToken = jwt.sign({ id: user.id, type: 'refresh' }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES_IN });
+  return { status: 200, body: { token, refreshToken, expiresIn: JWT_EXPIRES_IN, user: userShape } };
+}
 
-  console.log(`[Mobile Auth] User ${user.email} (${user.role}) logged in`);
-
-  res.json({
-    token,
-    refreshToken,
-    expiresIn: JWT_EXPIRES_IN,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      areaId: user.area_id,
-      supervisorId: user.supervisor_id,
-      title: user.title,
-      phone: user.phone,
-    },
-  });
+/**
+ * POST /api/auth/login
+ * Unified login endpoint for mobile and ops clients.
+ * Pass { client: "ops" } for web portal login (24h token, no refresh).
+ * Default is "mobile" (7d token + 30d refresh).
+ */
+router.post('/login', async (req, res) => {
+  const { email, password, client } = req.body;
+  const result = await authenticateLogin(email, password, client || 'mobile');
+  res.status(result.status).json(result.body);
 });
 
 /**

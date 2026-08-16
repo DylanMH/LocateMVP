@@ -71,6 +71,13 @@ export function ensureTerritorySchema(db) {
   addCol('supervisor_territory_id');
   addCol('tech_territory_id');
 
+  // Add coverage_json to territories (additive — used by territoryService
+  // and the coverage route for legacy city/county/zip coverage definitions).
+  const territoryCols = db.prepare(`PRAGMA table_info(territories)`).all();
+  if (!territoryCols.some((c) => c.name === 'coverage_json')) {
+    db.exec(`ALTER TABLE territories ADD COLUMN coverage_json TEXT`);
+  }
+
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tickets_district_territory ON tickets(district_territory_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_area_territory ON tickets(area_territory_id);

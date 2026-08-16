@@ -287,6 +287,86 @@ function pruneDescendantBoundaryUnitsToParentCoverage(parentTerritoryId, allowed
   }
 }
 
+/**
+ * Auto-sync boundary units from a supervisor territory to its child tech
+ * territories. For each child tech territory, if a boundary unit's name
+ * matches the tech territory's name (case-insensitive), assign that unit
+ * to the tech territory. This ensures that when a user selects cities for
+ * a supervisor territory, the corresponding tech territories automatically
+ * get their boundary units and bbox — so they show up on the Areas map.
+ *
+ * Also re-activates previously-deactivated tech territories when their
+ * matching boundary unit is re-added to the supervisor coverage, and
+ * creates new tech territories for boundary units that have no matching
+ * child at all.
+ */
+function syncBoundaryUnitsToChildTechTerritories(supervisorTerritoryId, parentUnitIds) {
+  // Include inactive children so we can re-activate them when coverage
+  // is re-added.
+  const children = db.prepare(`
+    SELECT id, name, active
+    FROM territories
+    WHERE parent_territory_id = ? AND type = 'TECH_TERRITORY'
+  `).all(supervisorTerritoryId);
+
+  // Build a name → unitId map from the parent's boundary units
+  const units = getBoundaryUnitsForTerritory(db, supervisorTerritoryId);
+  const unitByName = new Map();
+  for (const u of units) {
+    unitByName.set(u.name.toLowerCase(), u.id);
+  }
+
+  // Build a set of child names for quick lookup
+  const childByName = new Map();
+  for (const child of children) {
+    childByName.set(child.name.toLowerCase(), child);
+  }
+
+  const supe = db.prepare(`SELECT code FROM territories WHERE id = ?`).get(supervisorTerritoryId);
+  const now = Date.now();
+
+  for (const [unitNameLower, unitId] of unitByName) {
+    const child = childByName.get(unitNameLower);
+    if (child) {
+      // Re-activate if it was previously deactivated
+      if (!child.active) {
+        db.prepare(`UPDATE territories SET active = 1, updated_at = ? WHERE id = ?`)
+          .run(now, child.id);
+      }
+      // Check if this tech territory already has this unit
+      const existing = db.prepare(`
+        SELECT 1 FROM territory_boundary_units
+        WHERE territory_id = ? AND boundary_unit_id = ?
+      `).get(child.id, unitId);
+
+      if (!existing) {
+        assignBoundaryUnitsToTerritory(db, child.id, [unitId]);
+      }
+      updateTerritoryBboxFromUnits(child.id);
+    } else {
+      // No matching child tech territory — create one
+      const unit = units.find((u) => u.name.toLowerCase() === unitNameLower);
+      const code = `${supe.code}-${unit.source_id}`;
+      const dup = db.prepare(`SELECT id FROM territories WHERE code = ?`).get(code);
+      if (dup) {
+        // A territory with this code already exists (maybe deactivated) — re-activate it
+        db.prepare(`UPDATE territories SET active = 1, updated_at = ? WHERE id = ?`)
+          .run(now, dup.id);
+        assignBoundaryUnitsToTerritory(db, dup.id, [unitId]);
+        updateTerritoryBboxFromUnits(dup.id);
+      } else {
+        const id = `terr-tech-territory-${uuidv4().slice(0, 8)}`;
+        db.prepare(`
+          INSERT INTO territories (id, code, name, type, parent_territory_id, active, created_at, updated_at)
+          VALUES (?, ?, ?, 'TECH_TERRITORY', ?, 1, ?, ?)
+        `).run(id, code, unit.name, supervisorTerritoryId, now, now);
+        assignBoundaryUnitsToTerritory(db, id, [unitId]);
+        updateTerritoryBboxFromUnits(id);
+      }
+    }
+  }
+}
+
 const router = express.Router();
 
 // ---------- LIST ----------
@@ -825,6 +905,30 @@ router.post('/:id/boundary-units', authenticateToken, requireRole('AREA_MANAGER'
   // Return updated list
   const units = updateTerritoryBboxFromUnits(req.params.id);
   pruneDescendantBoundaryUnitsToParentCoverage(req.params.id, new Set(units.map((unit) => unit.id)));
+
+  // Auto-sync boundary units to child tech territories by name match
+  // so tech territories get their bbox and show up on the Areas map.
+  if (t.type === 'SUPERVISOR_TERRITORY') {
+    syncBoundaryUnitsToChildTechTerritories(req.params.id, new Set(units.map((unit) => unit.id)));
+    // Deactivate child tech territories whose name no longer matches any
+    // selected boundary unit. When a supervisor removes a city from their
+    // coverage, the corresponding tech territory is no longer relevant.
+    // We deactivate it regardless of tech assignments — the tech can be
+    // reassigned to another territory. This keeps the sub-area list in sync
+    // with the supervisor's actual coverage.
+    const unitNames = new Set(units.map((u) => u.name.toLowerCase()));
+    const children = db.prepare(`
+      SELECT t.id, t.name
+      FROM territories t
+      WHERE t.parent_territory_id = ? AND t.type = 'TECH_TERRITORY' AND t.active = 1
+    `).all(req.params.id);
+    for (const child of children) {
+      if (!unitNames.has(child.name.toLowerCase())) {
+        db.prepare(`UPDATE territories SET active = 0, updated_at = ? WHERE id = ?`)
+          .run(Date.now(), child.id);
+      }
+    }
+  }
   
   res.json({
     territoryId: req.params.id,

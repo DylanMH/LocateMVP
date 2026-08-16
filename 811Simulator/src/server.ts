@@ -4,6 +4,32 @@ import { ticketsRoutes } from "./routes/tickets.js";
 import { responsesRoutes } from "./routes/responses.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { opsRoutes } from "./routes/ops.js";
+import { seedAreas } from "./db/seed.js";
+import { db } from "./db/db.js";
+
+// Seed service areas on startup (idempotent)
+seedAreas();
+
+// Auto-delete tickets older than 4 days to keep the DB from growing unbounded.
+// Runs on startup and then every hour.
+const MAX_TICKET_AGE_MS = 4 * 24 * 60 * 60 * 1000; // 4 days
+
+function cleanupOldTickets() {
+  const cutoff = Date.now() - MAX_TICKET_AGE_MS;
+  try {
+    const result = db.prepare(`
+      DELETE FROM tickets_811 WHERE created_at < ?
+    `).run(cutoff);
+    if (result.changes > 0) {
+      console.log(`[cleanup] Deleted ${result.changes} tickets older than 4 days (created before ${new Date(cutoff).toISOString()})`);
+    }
+  } catch (err) {
+    console.error("[cleanup] Failed to delete old tickets:", err);
+  }
+}
+
+cleanupOldTickets();
+setInterval(cleanupOldTickets, 60 * 60 * 1000); // every hour
 
 const app = Fastify({
   logger: true,

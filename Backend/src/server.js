@@ -14,6 +14,7 @@ import {
   pullTicketsFrom811,
 } from "./services/ingestionService.js";
 import { assignUnassignedTickets } from "./services/assignmentService.js";
+import { initIdempotencyStore } from "./services/idempotencyService.js";
 import { emitOpsEvent } from "./utils/opsEventBus.js";
 
 const app = express();
@@ -25,6 +26,9 @@ app.use(express.json({ limit: "25mb" }));
 
 // Initialize database
 export const db = initDatabase();
+
+// Initialize idempotency store (persists to SQLite, survives restarts)
+initIdempotencyStore(db);
 
 // Tickets will now be ingested from 811 Simulator
 
@@ -107,6 +111,37 @@ setInterval(async () => {
     );
   }
 }, 30000); // 30 seconds
+
+// Auto-delete tickets older than 4 days to keep the DB from growing unbounded.
+// Runs on startup and then every hour. Also cleans up related data
+// (production ledger entries, ticket events, notes, attachments).
+const MAX_TICKET_AGE_MS = 4 * 24 * 60 * 60 * 1000; // 4 days
+
+function cleanupOldTickets() {
+  const cutoff = Date.now() - MAX_TICKET_AGE_MS;
+  try {
+    const oldTickets = db.prepare(`SELECT id FROM tickets WHERE created_at < ?`).all(cutoff);
+    if (oldTickets.length === 0) return;
+
+    const ids = oldTickets.map((t) => t.id);
+    const ph = ids.map(() => "?").join(",");
+
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM utility_production_ledger WHERE ticket_id IN (${ph})`).run(...ids);
+      db.prepare(`DELETE FROM ticket_events WHERE ticket_id IN (${ph})`).run(...ids);
+      db.prepare(`DELETE FROM ticket_notes WHERE ticket_id IN (${ph})`).run(...ids);
+      db.prepare(`DELETE FROM ticket_attachments WHERE ticket_id IN (${ph})`).run(...ids);
+      const result = db.prepare(`DELETE FROM tickets WHERE id IN (${ph})`).run(...ids);
+      console.log(`[cleanup] Deleted ${result.changes} tickets older than 4 days (before ${new Date(cutoff).toISOString()})`);
+    });
+    tx();
+  } catch (error) {
+    console.error("[cleanup] Failed to delete old tickets:", error.message);
+  }
+}
+
+cleanupOldTickets();
+setInterval(cleanupOldTickets, 60 * 60 * 1000); // every hour
 
 // Start server
 app.listen(PORT, "0.0.0.0", () => {

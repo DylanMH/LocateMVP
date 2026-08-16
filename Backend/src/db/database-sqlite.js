@@ -139,6 +139,9 @@ CREATE TABLE IF NOT EXISTS day_sessions (
   clock_out_at INTEGER,
   clock_out_ticket_id TEXT,
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOCKED_OUT')),
+  clock_in_reason TEXT,
+  allocation_type TEXT,
+  other_reason TEXT,
   created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
   updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
   FOREIGN KEY (user_id) REFERENCES users(id),
@@ -258,6 +261,14 @@ CREATE INDEX IF NOT EXISTS idx_utility_production_ticket ON utility_production_l
 CREATE INDEX IF NOT EXISTS idx_utility_production_user ON utility_production_ledger(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_utility_production_request_customer
   ON utility_production_ledger(request_id, customer_id);
+
+CREATE TABLE IF NOT EXISTS idempotency_records (
+  request_id TEXT PRIMARY KEY,
+  result_json TEXT NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_records(created_at);
 `;
 
 db.exec(schemaSql);
@@ -311,6 +322,11 @@ ensureColumnExists(
   "last_login_at",
   "ALTER TABLE users ADD COLUMN last_login_at INTEGER",
 );
+
+// Day session allocation columns (clock-in reason tracking).
+ensureColumnExists("day_sessions", "clock_in_reason", "ALTER TABLE day_sessions ADD COLUMN clock_in_reason TEXT");
+ensureColumnExists("day_sessions", "allocation_type", "ALTER TABLE day_sessions ADD COLUMN allocation_type TEXT");
+ensureColumnExists("day_sessions", "other_reason", "ALTER TABLE day_sessions ADD COLUMN other_reason TEXT");
 
 // Area bounding box migrations
 ensureColumnExists("areas", "bbox_north", "ALTER TABLE areas ADD COLUMN bbox_north REAL");
@@ -388,6 +404,82 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_ext_root ON tickets(external_roo
 db.exec(`UPDATE tickets SET root_ticket_id = id WHERE root_ticket_id IS NULL`);
 db.exec(`UPDATE tickets SET sequence_number = 1 WHERE sequence_number IS NULL`);
 db.exec(`UPDATE tickets SET external_root_number = ticket_number WHERE external_root_number IS NULL`);
+
+// Add PENDING to locator_status CHECK so we can distinguish "awaiting tech
+// assignment" from "assigned and ready for field work." SQLite can't ALTER
+// a CHECK so we rebuild the table in place (same pattern as users role mig).
+(function migrateTicketsLocatorCheck() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").get();
+  if (!row?.sql || row.sql.includes("'PENDING'")) return;
+  console.log('[Database] Migrating tickets.locator_status CHECK to include PENDING');
+  db.pragma('foreign_keys = OFF');
+  const tx = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE tickets_new (
+        id TEXT PRIMARY KEY,
+        external_ticket_id TEXT,
+        ticket_number TEXT NOT NULL,
+        ticket_type TEXT,
+        address TEXT,
+        lat REAL,
+        lng REAL,
+        status TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CLOSED')),
+        locator_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (locator_status IN ('PENDING', 'ASSIGNED', 'ENROUTE', 'ONSITE', 'PAUSED', 'CLOSED', 'UNABLE')),
+        assigned_tech_id TEXT,
+        version INTEGER DEFAULT 1,
+        payload_json TEXT DEFAULT '{}',
+        source TEXT DEFAULT '811',
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        due_at INTEGER,
+        closed_by_name TEXT,
+        closed_at INTEGER,
+        last_811_sync_at INTEGER,
+        root_ticket_id TEXT,
+        parent_ticket_id TEXT,
+        sequence_number INTEGER DEFAULT 1,
+        external_root_number TEXT,
+        district_territory_id TEXT,
+        area_territory_id TEXT,
+        supervisor_territory_id TEXT,
+        tech_territory_id TEXT,
+        FOREIGN KEY (assigned_tech_id) REFERENCES users(id)
+      );
+      INSERT INTO tickets_new (
+        id, external_ticket_id, ticket_number, ticket_type, address,
+        lat, lng, status, locator_status, assigned_tech_id, version,
+        payload_json, source, created_at, updated_at, due_at,
+        closed_by_name, closed_at, last_811_sync_at,
+        root_ticket_id, parent_ticket_id, sequence_number, external_root_number,
+        district_territory_id, area_territory_id, supervisor_territory_id, tech_territory_id
+      )
+      SELECT
+        id, external_ticket_id, ticket_number, ticket_type, address,
+        lat, lng, status, locator_status, assigned_tech_id, version,
+        payload_json, source, created_at, updated_at, due_at,
+        closed_by_name, closed_at, last_811_sync_at,
+        root_ticket_id, parent_ticket_id, sequence_number, external_root_number,
+        NULL, NULL, NULL, NULL
+      FROM tickets;
+      DROP TABLE tickets;
+      ALTER TABLE tickets_new RENAME TO tickets;
+    `);
+    // Recreate indexes on the new table.
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_assigned_tech ON tickets(assigned_tech_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_locator_status ON tickets(locator_status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_updated_at ON tickets(updated_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_root ON tickets(root_ticket_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_ticket_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_ext_root ON tickets(external_root_number)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_district_territory ON tickets(district_territory_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_area_territory ON tickets(area_territory_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_supervisor_territory ON tickets(supervisor_territory_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_tech_territory ON tickets(tech_territory_id)`);
+  });
+  tx();
+  db.pragma('foreign_keys = ON');
+})();
 
 export function initDatabase() {
   console.log('[Database] SQLite database initialized with schema');

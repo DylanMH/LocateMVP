@@ -14,14 +14,14 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: "📊" },
-    { name: "Technicians", href: "/techs", icon: "👷" },
-    { name: "Tickets", href: "/tickets", icon: "🎫" },
-    { name: "Areas", href: "/areas", icon: "🗺️" },
+    { name: "Field Employees", href: "/techs", icon: "👷" },
+    { name: "Map View", href: "/map", icon: "🗺️" },
     { name: "Territories", href: "/territories", icon: "🏛️" },
     { name: "811 Simulator", href: "/simulator", icon: "🔧" },
   ];
 
-  const isActive = (href: string) => location.pathname === href;
+  const isActive = (href: string) =>
+    location.pathname === href || location.pathname.startsWith(href + "/");
 
   const handleLogout = () => {
     logout();

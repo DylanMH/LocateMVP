@@ -41,7 +41,8 @@ export function resolveTerritoryChainForPoint(db, lat, lng) {
 
 /**
  * Find the best matching TECH_TERRITORY for a point.
- * First checks coverage_json for cities/counties, then falls back to bbox.
+ * First checks coverage_json for cities/counties, then falls back to bbox,
+ * then falls back to nearest tech territory by centroid distance.
  */
 function findTechTerritoryForPoint(db, lat, lng) {
   const boundaryUnitMatch = findTechTerritoryFromBoundaryUnits(db, lat, lng);
@@ -49,7 +50,8 @@ function findTechTerritoryForPoint(db, lat, lng) {
 
   // Get all active tech territories
   const techTerritories = db.prepare(`
-    SELECT id, coverage_json, bbox_north, bbox_south, bbox_east, bbox_west
+    SELECT id, coverage_json, bbox_north, bbox_south, bbox_east, bbox_west,
+           center_lat, center_lng
     FROM territories
     WHERE type = 'TECH_TERRITORY' AND active = 1
   `).all();
@@ -82,7 +84,22 @@ function findTechTerritoryForPoint(db, lat, lng) {
     }
   }
 
-  return null;
+  // Final fallback: nearest tech territory by centroid distance.
+  // This catches tickets generated slightly outside a city's Census bbox
+  // (the simulator uses a wider service-area bbox than the actual city
+  // boundary). Only tech territories with a centroid are considered.
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const t of techTerritories) {
+    if (t.center_lat == null || t.center_lng == null) continue;
+    const dist = Math.pow(t.center_lat - lat, 2) + Math.pow(t.center_lng - lng, 2);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = t;
+    }
+  }
+
+  return nearest;
 }
 
 function checkPointInCities(db, lat, lng, cityNames) {
@@ -250,6 +267,83 @@ export function canUserSeeTicket(db, user, ticket) {
 }
 
 /**
+ * Return the user IDs of all TECH/TRAINEE/TRAINER users who fall under the
+ * given user's hierarchy. For a supervisor, that means techs assigned to
+ * TECH_TERRITORYs whose parent chain includes one of the supervisor's
+ * SUPERVISOR_TERRITORYs. For an area manager, techs under any supervisor
+ * territory in their area. For a district manager, techs under any area in
+ * their district. For techs themselves, just their own user id.
+ *
+ * Returns [] if the user has no downstream techs.
+ */
+export function getTechIdsUnderUser(db, userId, role) {
+  if (!userId) return [];
+  if (role === 'TECH' || role === 'TRAINEE' || role === 'TRAINER') {
+    return [userId];
+  }
+  if (role === 'MANAGER') {
+    return db.prepare(`
+      SELECT id FROM users
+      WHERE role IN ('TECH','TRAINEE','TRAINER') AND is_active = 1
+    `).all().map((r) => r.id);
+  }
+
+  const dir = getUserDirectTerritories(db, userId);
+
+  // Build the set of supervisor territory IDs whose techs we want.
+  let supervisorTerritoryIds = [];
+
+  if (role === 'SUPERVISOR') {
+    supervisorTerritoryIds = dir.SUPERVISOR_TERRITORY;
+  } else if (role === 'AREA_MANAGER') {
+    // Find supervisor territories under the user's areas.
+    if (dir.AREA.length === 0) return [];
+    const ph = dir.AREA.map(() => '?').join(',');
+    supervisorTerritoryIds = db.prepare(`
+      SELECT id FROM territories
+      WHERE type = 'SUPERVISOR_TERRITORY' AND parent_territory_id IN (${ph})
+    `).all(...dir.AREA).map((r) => r.id);
+  } else if (role === 'DISTRICT_MANAGER') {
+    // Find areas under the user's districts, then supervisor territories under those areas.
+    if (dir.DISTRICT.length === 0) return [];
+    const dph = dir.DISTRICT.map(() => '?').join(',');
+    const areaIds = db.prepare(`
+      SELECT id FROM territories
+      WHERE type = 'AREA' AND parent_territory_id IN (${dph})
+    `).all(...dir.DISTRICT).map((r) => r.id);
+    if (areaIds.length === 0) return [];
+    const aph = areaIds.map(() => '?').join(',');
+    supervisorTerritoryIds = db.prepare(`
+      SELECT id FROM territories
+      WHERE type = 'SUPERVISOR_TERRITORY' AND parent_territory_id IN (${aph})
+    `).all(...areaIds).map((r) => r.id);
+  }
+
+  if (supervisorTerritoryIds.length === 0) return [];
+
+  // Find tech territories under those supervisor territories.
+  const sph = supervisorTerritoryIds.map(() => '?').join(',');
+  const techTerritoryIds = db.prepare(`
+    SELECT id FROM territories
+    WHERE type = 'TECH_TERRITORY' AND parent_territory_id IN (${sph})
+  `).all(...supervisorTerritoryIds).map((r) => r.id);
+
+  if (techTerritoryIds.length === 0) return [];
+
+  // Find active techs assigned to those tech territories.
+  const tph = techTerritoryIds.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT DISTINCT u.id
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id IN (${tph})
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.role IN ('TECH','TRAINEE','TRAINER')
+      AND u.is_active = 1
+  `).all(...techTerritoryIds, Date.now()).map((r) => r.id);
+}
+
+/**
  * Pick a tech to assign a new ticket to, scoped to a specific tech territory.
  * Uses least-open-ticket load balancing, same policy as the legacy
  * assignmentService. Returns null if no tech is assigned to that territory.
@@ -283,6 +377,28 @@ export function pickTechForTerritory(db, techTerritoryId) {
 
   techs.sort((a, b) => (load[a.id] ?? 0) - (load[b.id] ?? 0));
   return techs[0];
+}
+
+/**
+ * Pick the supervisor who owns a given supervisor territory. Used as a
+ * fallback when no tech is assigned to a ticket's tech_territory — the
+ * ticket goes to the supervisor so it doesn't sit unassigned.
+ * Returns null if no supervisor owns that territory.
+ */
+export function pickSupervisorForTerritory(db, supervisorTerritoryId) {
+  if (!supervisorTerritoryId) return null;
+  const row = db.prepare(`
+    SELECT u.id, u.name, u.role
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id = ?
+      AND uta.assignment_type IN ('OWNER','MANAGER')
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.is_active = 1
+      AND u.role = 'SUPERVISOR'
+    LIMIT 1
+  `).get(supervisorTerritoryId, Date.now());
+  return row || null;
 }
 
 function pointInGeometry(lat, lng, geometry) {

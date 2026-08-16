@@ -11,6 +11,25 @@ import { hasRoleLevel, ROLES } from '../utils/permissions.js';
 const router = express.Router();
 
 /**
+ * Ensure a user row exists in the backend DB. Mobile devices may send clock
+ * events referencing a user id that only exists in WatermelonDB (e.g. the
+ * hardcoded DEV_USER_ID or a locally-generated UUID). If the user is missing,
+ * create a minimal placeholder row so FK constraints on clock_events,
+ * day_sessions, and break_segments don't fail.
+ */
+function ensureUserExists(userId) {
+  if (!userId) return;
+  const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (existing) return;
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO users (id, name, email, role, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, 'TECH', 1, ?, ?)
+  `).run(userId, `Mobile User ${userId.slice(0, 8)}`, `${userId.slice(0, 8)}@mobile.local`, now, now);
+  console.log(`[Timesheet] Auto-created placeholder user ${userId} for clock event`);
+}
+
+/**
  * Helper to get user from request (supports JWT auth or query param for dev)
  */
 function getUserFromRequest(req) {
@@ -121,10 +140,13 @@ function getStatements() {
         clock_out_at,
         clock_out_ticket_id,
         status,
+        clock_in_reason,
+        allocation_type,
+        other_reason,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         user_id = excluded.user_id,
         date = COALESCE(excluded.date, day_sessions.date),
@@ -132,6 +154,9 @@ function getStatements() {
         clock_out_at = COALESCE(excluded.clock_out_at, day_sessions.clock_out_at),
         clock_out_ticket_id = COALESCE(excluded.clock_out_ticket_id, day_sessions.clock_out_ticket_id),
         status = COALESCE(excluded.status, day_sessions.status),
+        clock_in_reason = COALESCE(excluded.clock_in_reason, day_sessions.clock_in_reason),
+        allocation_type = COALESCE(excluded.allocation_type, day_sessions.allocation_type),
+        other_reason = COALESCE(excluded.other_reason, day_sessions.other_reason),
         updated_at = excluded.updated_at
     `),
     insertClockEvent: db.prepare(`
@@ -228,6 +253,9 @@ function persistClockEvent(event) {
         clockInAt,
         clockOutAt,
         status,
+        clockInReason,
+        allocationType,
+        otherReason,
       } = payload;
       const now = Date.now();
 
@@ -239,6 +267,9 @@ function persistClockEvent(event) {
         eventType === 'CLOCK_OUT' ? (clockOutAt || occurredAt) : null,
         eventType === 'CLOCK_OUT' ? (ticketId || null) : null,
         status || (eventType === 'CLOCK_OUT' ? 'CLOCKED_OUT' : 'ACTIVE'),
+        eventType === 'CLOCK_IN' ? (clockInReason || null) : null,
+        allocationType || null,
+        otherReason || null,
         now,
         now,
       );
@@ -391,6 +422,10 @@ router.post('/events', (req, res) => {
       if (type === 'CLOCK_EVENT') {
         const { sessionId, userId, eventType, occurredAt } = payload;
 
+        // Ensure the user exists in the backend DB before inserting FK-dependent rows.
+        // Mobile may send events for users that only exist in WatermelonDB.
+        ensureUserExists(userId);
+
         persistClockEvent(event);
         console.log(`[Timesheet] Clock event: ${eventType} for user ${userId} at ${new Date(occurredAt).toLocaleString()}`);
 
@@ -412,7 +447,16 @@ router.post('/events', (req, res) => {
         results.push(ignoredResult);
       }
     } catch (error) {
-      console.error('[Timesheet] Error processing event:', error.message);
+      console.error(
+        '[Timesheet] Error processing event:',
+        error.message,
+        '| userId:',
+        event?.payload?.userId || '?',
+        '| sessionId:',
+        event?.payload?.sessionId || '?',
+        '| ticketId:',
+        event?.payload?.ticketId || 'none',
+      );
       const errorResult = { 
         requestId: event.requestId, 
         status: 'ERROR', 

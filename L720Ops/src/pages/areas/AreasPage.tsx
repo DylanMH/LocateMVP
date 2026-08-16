@@ -79,6 +79,12 @@ function withUniquePeople(territories: TerritoryNode[], type: "AREA" | "SUPERVIS
   return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
+interface BoundaryUnitInfo {
+  id: string;
+  name: string;
+  bbox: { north: number; south: number; east: number; west: number };
+}
+
 export function AreasPage() {
   const [selectedPersonId, setSelectedPersonId] = useState("all-area-managers");
   const [selectedTerritoryId, setSelectedTerritoryId] = useState<string | null>(null);
@@ -160,6 +166,55 @@ export function AreasPage() {
     ]);
   }, [areaTerritories, selectedPersonId, supervisorTerritories]);
 
+  // Collect the IDs of visible supervisor territories so we can fetch their
+  // individual boundary units (cities) and render each city as its own
+  // rectangle instead of one giant aggregate bbox.
+  const visibleSupervisorIds = useMemo(
+    () =>
+      visibleTerritories
+        .filter((item) => item.territory.type === "SUPERVISOR_TERRITORY")
+        .map((item) => item.territory.id),
+    [visibleTerritories],
+  );
+
+  // Fetch boundary units for all visible supervisor territories. We use a
+  // single query key that includes all the IDs so it re-fetches when the
+  // set changes.
+  const boundaryUnitsQuery = useQuery({
+    queryKey: ["areas-page", "supervisor-boundary-units", visibleSupervisorIds],
+    queryFn: async () => {
+      const results = await Promise.all(
+        visibleSupervisorIds.map((id) => TerritoryService.getTerritoryBoundaryUnits(id)),
+      );
+      const map = new Map<string, BoundaryUnitInfo[]>();
+      results.forEach((result, index) => {
+        map.set(
+          visibleSupervisorIds[index],
+          result.units.map((u) => ({
+            id: u.id,
+            name: u.name,
+            bbox: u.bbox,
+          })),
+        );
+      });
+      return map;
+    },
+    enabled: visibleSupervisorIds.length > 0,
+  });
+
+  // Flatten all boundary units from all visible supervisor territories into
+  // a single list for map rendering.
+  const allVisibleBoundaryUnits = useMemo(() => {
+    if (!boundaryUnitsQuery.data) return [];
+    const result: Array<BoundaryUnitInfo & { groupId: string }> = [];
+    for (const [supeId, units] of boundaryUnitsQuery.data) {
+      for (const unit of units) {
+        result.push({ ...unit, groupId: supeId });
+      }
+    }
+    return result;
+  }, [boundaryUnitsQuery.data]);
+
   const paletteByGroup = useMemo(
     () =>
       visibleTerritories.reduce<Record<string, string>>((acc, item, index) => {
@@ -173,15 +228,25 @@ export function AreasPage() {
 
   const mapCenter = useMemo<[number, number]>(() => {
     const centers = visibleTerritories
+      .filter((item) => item.territory.type !== "SUPERVISOR_TERRITORY")
       .map((item) => getCenter(item.territory))
       .filter((center): center is [number, number] => !!center);
+
+    // Also include boundary unit centroids for supervisor territories
+    for (const unit of allVisibleBoundaryUnits) {
+      centers.push([
+        (unit.bbox.north + unit.bbox.south) / 2,
+        (unit.bbox.east + unit.bbox.west) / 2,
+      ]);
+    }
+
     if (centers.length === 0) {
       return [31.0, -99.0];
     }
     const avgLat = centers.reduce((sum, center) => sum + center[0], 0) / centers.length;
     const avgLng = centers.reduce((sum, center) => sum + center[1], 0) / centers.length;
     return [avgLat, avgLng];
-  }, [visibleTerritories]);
+  }, [visibleTerritories, allVisibleBoundaryUnits]);
 
   const selectedTerritory = selectedTerritoryId ? territoryById[selectedTerritoryId] : null;
 
@@ -245,6 +310,10 @@ export function AreasPage() {
               </LayersControl>
 
               {visibleTerritories.map((item) => {
+                // For supervisor territories, skip the aggregate bbox — we
+                // render individual city boundary units below instead.
+                if (item.territory.type === "SUPERVISOR_TERRITORY") return null;
+
                 const bounds = getBounds(item.territory);
                 if (!bounds) return null;
                 const color = paletteByGroup[item.groupId];
@@ -270,6 +339,33 @@ export function AreasPage() {
                   </Rectangle>
                 );
               })}
+
+              {/* Render individual city boundary units for supervisor
+                  territories instead of one giant aggregate bbox. */}
+              {allVisibleBoundaryUnits.map((unit) => {
+                const color = paletteByGroup[unit.groupId] || "#2563EB";
+                const bounds: [[number, number], [number, number]] = [
+                  [unit.bbox.south, unit.bbox.west],
+                  [unit.bbox.north, unit.bbox.east],
+                ];
+                return (
+                  <Rectangle
+                    key={`bu-${unit.id}`}
+                    bounds={bounds}
+                    pathOptions={{
+                      color,
+                      weight: 2,
+                      fillOpacity: 0.15,
+                    }}
+                  >
+                    <Tooltip direction="center" className="area-label">
+                      <span style={{ fontSize: "10px", color }}>
+                        {unit.name}
+                      </span>
+                    </Tooltip>
+                  </Rectangle>
+                );
+              })}
             </MapContainer>
           )}
         </div>
@@ -283,6 +379,7 @@ export function AreasPage() {
             onSelectTerritory={(territoryId) => setSelectedTerritoryId(territoryId)}
             onClearSelection={() => setSelectedTerritoryId(null)}
             colors={paletteByGroup}
+            supervisorBoundaryUnits={boundaryUnitsQuery.data}
           />
         </div>
       </div>
@@ -298,6 +395,7 @@ function AreasSidebar({
   onSelectTerritory,
   onClearSelection,
   colors,
+  supervisorBoundaryUnits,
 }: {
   visibleTerritories: DisplayTerritory[];
   selectedTerritory: TerritoryNode | null;
@@ -306,6 +404,7 @@ function AreasSidebar({
   onSelectTerritory: (territoryId: string) => void;
   onClearSelection: () => void;
   colors: Record<string, string>;
+  supervisorBoundaryUnits?: Map<string, BoundaryUnitInfo[]>;
 }) {
   if (!selectedTerritory) {
     return (
@@ -413,6 +512,28 @@ function AreasSidebar({
               )}
             </section>
           )}
+
+          {selectedTerritory.type === "SUPERVISOR_TERRITORY" && supervisorBoundaryUnits && (() => {
+            const units = supervisorBoundaryUnits.get(selectedTerritory.id);
+            if (!units || units.length === 0) return null;
+            return (
+              <section>
+                <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
+                  Coverage Areas ({units.length})
+                </h3>
+                <div className="flex flex-wrap gap-1">
+                  {units.map((unit) => (
+                    <span
+                      key={unit.id}
+                      className="inline-flex px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    >
+                      {unit.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            );
+          })()}
 
           {selectedDetails && selectedDetails.children.length > 0 && (
             <section>
