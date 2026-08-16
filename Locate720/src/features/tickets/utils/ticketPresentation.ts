@@ -5,21 +5,24 @@ import type { LocatorStatus } from "../domain/statusMachine";
 import type { UtilityType } from "../types";
 
 export function getTicketTypeColor(ticketType?: string): string {
-  // Legacy "NORMAL" rows map to the new "ORIGINAL" color bucket.
+  // 811-standard type colors. Legacy NORMAL/ORIGINAL map to the Normal bucket.
   if (!ticketType || ticketType === "NORMAL" || ticketType === "ORIGINAL") return colors.primary;
 
   switch (ticketType) {
     case "EMERGENCY":
+      return "#EF5350"; // red
+    case "DIGUP":
+      return "#FF7043"; // deep orange
     case "NO_RESPONSE":
-      return "#EF5350";
+      return "#EF5350"; // red
     case "NON_COMPLIANT":
-      return "#66BB6A";
+      return "#FFA726"; // amber
     case "UPDATE":
     case "UPDATE_REMARK":
-    case "CORRECTION":
-      return "#42A5F5";
+      return "#42A5F5"; // blue
     case "RECALL":
-      return colors.primary;
+    case "CORRECTION": // legacy — maps to RECALL
+      return "#AB47BC"; // purple
     default:
       return colors.primary;
   }

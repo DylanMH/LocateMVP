@@ -22,8 +22,11 @@ function getStatusPriority(locatorStatus: string): number {
 
 function getTicketTypePriority(ticketType?: string): number {
   if (!ticketType) return 2;
-  if (ticketType === 'EMERGENCY' || ticketType === 'NO_RESPONSE') return 0;
-  return 1; // Normal, Update, etc.
+  // Highest priority: Emergency, DigUp (damage), No Response.
+  if (ticketType === 'EMERGENCY' || ticketType === 'DIGUP' || ticketType === 'NO_RESPONSE') return 0;
+  // High priority: Non-Compliant (short notice).
+  if (ticketType === 'NON_COMPLIANT') return 1;
+  return 2; // Normal, Update, Recall, etc.
 }
 
 function getDueDateCategory(dueAt?: number): number {

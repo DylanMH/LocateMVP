@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { SimulatorService } from "../../services/simulatorService";
 import { BackendService } from "../../services/backendService";
 import type { SimulatorTicket, SimulatorTicketDetail } from "../../types/simulator";
+import { formatTicketType, ticketTypeBadgeClass } from "../../types/ticket";
 import { SimulatorTicketDetailModal } from "../../components/SimulatorTicketDetailModal";
 import { useState } from "react";
 
@@ -255,15 +256,9 @@ export function SimulatorPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
-                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            ticket.ticketType === "EMERGENCY"
-                              ? "bg-red-100 text-red-800"
-                              : ticket.ticketType === "NORMAL"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-gray-100 text-gray-800"
-                          }`}
+                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${ticketTypeBadgeClass(ticket.ticketType)}`}
                         >
-                          {ticket.ticketType}
+                          {formatTicketType(ticket.ticketType)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

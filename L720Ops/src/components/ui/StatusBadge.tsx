@@ -18,7 +18,12 @@ export type BadgeKind =
   | "ON_PERSONAL"
   | "NORMAL"
   | "EMERGENCY"
+  | "DIGUP"
+  | "NON_COMPLIANT"
+  | "UPDATE"
+  | "UPDATE_REMARK"
   | "RECALL"
+  | "NO_RESPONSE"
   | "811"
   | "INTERNAL"
   | string;
@@ -41,9 +46,15 @@ const MAP: Record<string, string> = {
   ON_LUNCH: "bg-amber-100 text-amber-800",
   ON_PERSONAL: "bg-sky-100 text-sky-800",
 
+  // 811 ticket types
   NORMAL: "bg-blue-100 text-blue-800",
   EMERGENCY: "bg-red-100 text-red-800",
-  RECALL: "bg-orange-100 text-orange-800",
+  DIGUP: "bg-orange-100 text-orange-800",
+  NON_COMPLIANT: "bg-amber-100 text-amber-800",
+  UPDATE: "bg-sky-100 text-sky-800",
+  UPDATE_REMARK: "bg-sky-100 text-sky-800",
+  RECALL: "bg-purple-100 text-purple-800",
+  NO_RESPONSE: "bg-rose-100 text-rose-800",
 
   "811": "bg-violet-100 text-violet-800",
   INTERNAL: "bg-slate-100 text-slate-800",
@@ -52,9 +63,10 @@ const MAP: Record<string, string> = {
 interface Props {
   value: BadgeKind | null | undefined;
   className?: string;
+  label?: string;
 }
 
-export function StatusBadge({ value, className }: Props) {
+export function StatusBadge({ value, className, label }: Props) {
   if (!value) return null;
   const color = MAP[value] || "bg-gray-100 text-gray-700";
   return (
@@ -65,7 +77,7 @@ export function StatusBadge({ value, className }: Props) {
         className,
       )}
     >
-      {String(value).replace(/_/g, " ")}
+      {label ?? String(value).replace(/_/g, " ")}
     </span>
   );
 }

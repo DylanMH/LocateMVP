@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TicketChainRow, TicketDetail } from "../types/ticket";
+import { formatTicketType, ticketTypeBadgeClass } from "../types/ticket";
 import { TicketsService } from "../services/ticketsService";
 
 interface TicketDetailModalProps {
@@ -214,14 +215,8 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
                     <div className="flex justify-between">
                       <dt className="text-sm text-gray-500">Type:</dt>
                       <dd className="text-sm font-medium text-gray-900">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          ticket.ticketType === "EMERGENCY"
-                            ? "bg-red-100 text-red-800"
-                            : ticket.ticketType === "NORMAL"
-                              ? "bg-blue-100 text-blue-800"
-                              : "bg-gray-100 text-gray-800"
-                        }`}>
-                          {ticket.ticketType}
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${ticketTypeBadgeClass(ticket.ticketType)}`}>
+                          {formatTicketType(ticket.ticketType)}
                         </span>
                       </dd>
                     </div>

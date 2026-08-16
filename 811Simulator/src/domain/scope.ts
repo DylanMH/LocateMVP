@@ -61,6 +61,14 @@ function getBaseScopeSizeFeet(workType: string, ticketType: TicketType) {
     };
   }
 
+  // DigUp: high-priority damage/exposure — slightly larger scope than emergency.
+  if (ticketType === "DIGUP") {
+    return {
+      widthFeet: selected.widthFeet + 80,
+      heightFeet: selected.heightFeet + 45,
+    };
+  }
+
   if (ticketType === "RECALL") {
     return {
       widthFeet: selected.widthFeet + 35,
@@ -68,6 +76,7 @@ function getBaseScopeSizeFeet(workType: string, ticketType: TicketType) {
     };
   }
 
+  // Non-Compliant: short-notice normal-ish work — same footprint as standard.
   return selected;
 }
 

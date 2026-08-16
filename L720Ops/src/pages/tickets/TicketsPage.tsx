@@ -12,10 +12,12 @@ import {
 } from "../../components/ui";
 import { AssignTechMenu } from "../../components/features/AssignTechMenu";
 import type { TicketDetailResponse, TicketListRow } from "../../types/ops";
+import { formatTicketType } from "../../types/ticket";
 import { ArrowDownTrayIcon } from "@heroicons/react/24/outline";
 
 const LOCATOR_STATUSES = ["ASSIGNED", "ENROUTE", "ONSITE", "PAUSED", "CLOSED", "UNABLE"];
-const TICKET_TYPES = ["NORMAL", "EMERGENCY", "RECALL"];
+// 811-standard ticket types (original-eligible + linked/derived).
+const TICKET_TYPES = ["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"];
 const AREAS = ["ROYSE_CITY", "ROCKWALL", "FATE"];
 
 export function TicketsPage() {
@@ -155,7 +157,7 @@ export function TicketsPage() {
           </div>
         ),
       },
-      { key: "type", header: "Type", render: (t) => <StatusBadge value={t.ticketType} /> },
+      { key: "type", header: "Type", render: (t) => <StatusBadge value={t.ticketType} label={formatTicketType(t.ticketType)} /> },
       {
         key: "status",
         header: "Status",
@@ -244,7 +246,7 @@ export function TicketsPage() {
           <option value="">All Types</option>
           {TICKET_TYPES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {formatTicketType(s)}
             </option>
           ))}
         </select>
@@ -371,7 +373,7 @@ function TicketDetailBody({
       <div className="grid grid-cols-2 gap-4 text-sm">
         <div>
           <div className="text-xs uppercase text-gray-500">Type</div>
-          <StatusBadge value={detail.ticketType} />
+          <StatusBadge value={detail.ticketType} label={formatTicketType(detail.ticketType)} />
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Status</div>

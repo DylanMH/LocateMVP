@@ -3,26 +3,43 @@ import crypto from "node:crypto";
 import type { AreaId } from "./areas.js";
 import { buildTicketScope } from "./scope.js";
 
-// Lineage-aware ticket type taxonomy. ORIGINAL is the head of a chain;
-// the rest are linked tickets that reference a root via root_ticket_id.
-// Legacy NORMAL is kept as an alias for ORIGINAL in the API layer for back-compat.
+// 811-standard ticket type taxonomy. "Original" is NOT a type — it is a
+// lineage concept (the first/root ticket in a chain, tracked via
+// root_ticket_id + sequence_number === 1). The type describes WHAT kind of
+// 811 ticket it is.
+//
+// Original-eligible (first-call) types: NORMAL, EMERGENCY, DIGUP, NON_COMPLIANT.
+//   These can be the head of a chain (self-rooted, sequence 1).
+// Linked/derived types: UPDATE, UPDATE_REMARK, RECALL, NO_RESPONSE.
+//   These always reference an original via root_ticket_id. Per 811 rules,
+//   UPDATE and UPDATE_REMARK may only be generated against a NORMAL original;
+//   RECALL and NO_RESPONSE may attach to any original type.
 export type TicketType =
-  | "ORIGINAL"
+  | "NORMAL"
+  | "EMERGENCY"
+  | "DIGUP"
+  | "NON_COMPLIANT"
   | "UPDATE"
   | "UPDATE_REMARK"
-  | "NO_RESPONSE"
   | "RECALL"
-  | "CORRECTION"
-  | "EMERGENCY";
+  | "NO_RESPONSE";
 
-export const LINKED_TICKET_TYPES: ReadonlyArray<Exclude<TicketType, "ORIGINAL">> = [
-  "UPDATE",
-  "UPDATE_REMARK",
-  "NO_RESPONSE",
-  "RECALL",
-  "CORRECTION",
-  "EMERGENCY",
-];
+// Types that can be the first ticket called in (the head of a chain).
+export const ORIGINAL_TICKET_TYPES: ReadonlyArray<
+  Extract<TicketType, "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT">
+> = ["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT"];
+
+// Types that are derived from an existing original. These are the only types
+// accepted by createLinkedTicket().
+export const LINKED_TICKET_TYPES: ReadonlyArray<
+  Extract<TicketType, "UPDATE" | "UPDATE_REMARK" | "RECALL" | "NO_RESPONSE">
+> = ["UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"];
+
+// Linked types that, per 811 rules, may only be generated against a NORMAL
+// original. RECALL and NO_RESPONSE may attach to any original type.
+export const NORMAL_ROOT_ONLY_LINKED_TYPES: ReadonlyArray<
+  Extract<TicketType, "UPDATE" | "UPDATE_REMARK">
+> = ["UPDATE", "UPDATE_REMARK"];
 
 type UtilityType = "GAS" | "ELECTRIC" | "FIBER" | "WATER" | "SEWER" | "COPPER";
 
@@ -49,12 +66,39 @@ function randBetween(min: number, max: number) {
 }
 
 function dueAtFor(type: TicketType, now: number) {
-  if (type === "EMERGENCY") return now + randBetween(15 * 60_000, 2 * 60 * 60_000); // 15m - 2h
-  if (type === "UPDATE_REMARK" || type === "UPDATE" || type === "CORRECTION")
+  // Emergency: danger to life/health/property — 2 hour response (15m - 2h).
+  if (type === "EMERGENCY") return now + randBetween(15 * 60_000, 2 * 60 * 60_000);
+  // DigUp: utility line cut/damaged/exposed — high priority, zero hours notice (30m - 2h).
+  if (type === "DIGUP") return now + randBetween(30 * 60_000, 2 * 60 * 60_000);
+  // Non-Compliant: less than 2 business days notice (2h - 48h).
+  if (type === "NON_COMPLIANT") return now + randBetween(2 * 60 * 60_000, 48 * 60 * 60_000);
+  // Update / Update & Remark: extend life of an existing ticket (4h - 24h).
+  if (type === "UPDATE_REMARK" || type === "UPDATE")
     return now + randBetween(4 * 60 * 60_000, 24 * 60 * 60_000);
+  // Recall / No Response: reference a previous ticket (1h - 12h).
   if (type === "RECALL" || type === "NO_RESPONSE")
     return now + randBetween(1 * 60 * 60_000, 12 * 60 * 60_000);
+  // Normal: 2+ business days notice (24h - 72h).
   return now + randBetween(24 * 60 * 60_000, 72 * 60 * 60_000);
+}
+
+// Weighted pick for bulk-generated originals. Real 811 volume is dominated by
+// Normal tickets, with a smaller share of Emergency / Non-Compliant / DigUp.
+const ORIGINAL_TYPE_WEIGHTS: Array<{ type: Extract<TicketType, "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT">; weight: number }> = [
+  { type: "NORMAL", weight: 70 },
+  { type: "EMERGENCY", weight: 12 },
+  { type: "NON_COMPLIANT", weight: 10 },
+  { type: "DIGUP", weight: 8 },
+];
+
+function pickOriginalType(): Extract<TicketType, "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT"> {
+  const total = ORIGINAL_TYPE_WEIGHTS.reduce((sum, w) => sum + w.weight, 0);
+  let roll = Math.random() * total;
+  for (const entry of ORIGINAL_TYPE_WEIGHTS) {
+    roll -= entry.weight;
+    if (roll <= 0) return entry.type;
+  }
+  return "NORMAL";
 }
 
 function makeTicketNumberBase(area: AreaId, now: Date) {
@@ -215,9 +259,11 @@ export function generateTickets(params: { areaId?: AreaId; count: number }) {
       const addressLine1 = `${house} ${street}`;
       const city = aId === "ROYSE_CITY" ? "Royse City" : aId === "ROCKWALL" ? "Rockwall" : "Fate";
 
-      // All bulk-generated tickets are ORIGINALs. Real linked-ticket variety
-      // comes from createLinkedTicket(rootTicketId, type, overrides).
-      const ticketType: TicketType = "ORIGINAL";
+      // Bulk-generated tickets are originals (the head of their own chain).
+      // The 811 type is picked from the original-eligible set (Normal/Emergency/
+      // DigUp/Non-Compliant). Real linked-ticket variety comes from
+      // createLinkedTicket(rootTicketId, type, overrides).
+      const ticketType: TicketType = pickOriginalType();
       const dueAt = Math.floor(dueAtFor(ticketType, nowMs));
 
       const contractorName = pick(["ABC Boring", "Metro Fiber", "Lone Star Underground", "Rockwall Plumbing", "TX Utility Co"]);
@@ -276,7 +322,8 @@ export function generateTickets(params: { areaId?: AreaId; count: number }) {
         markingInstructions,
         customers,
         // Lineage echoed into payload so downstream L720 ingestion can map without
-        // depending on raw DB columns. Original => root is self, parent is null, seq=1.
+        // depending on raw DB columns. Originals self-root: root is self, parent
+        // is null, seq=1. "Original" is a lineage concept, not a ticket type.
         rootTicketId: ticketId,
         parentTicketId: null,
         sequenceNumber: 1,
@@ -341,12 +388,16 @@ export function generateTickets(params: { areaId?: AreaId; count: number }) {
  * and will accrue its own time/footage/notes/photos downstream. Linkage is
  * purely for history/visibility — never for merging productivity or billing.
  *
+ * 811 RULE: UPDATE and UPDATE_REMARK may only be generated against a chain
+ * whose root is a NORMAL ticket. RECALL and NO_RESPONSE may attach to any
+ * original type (NORMAL, EMERGENCY, DIGUP, NON_COMPLIANT).
+ *
  * rootTicketId may reference the original OR any linked ticket in the chain;
  * the real root is resolved via tickets_811.root_ticket_id.
  */
 export function createLinkedTicket(params: {
   rootTicketId: string;
-  type: Exclude<TicketType, "ORIGINAL">;
+  type: Exclude<TicketType, "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT">;
   overrides?: {
     markingInstructions?: string;
     dueAt?: number;
@@ -370,6 +421,15 @@ export function createLinkedTicket(params: {
     : (db.prepare(`SELECT * FROM tickets_811 WHERE id = ?`).get(rootId) as any);
   if (!rootRow) {
     throw new Error(`Chain root ${rootId} not found for ticket ${requestedRootId}`);
+  }
+
+  // Enforce 811 rule: UPDATE / UPDATE_REMARK require a NORMAL root.
+  if (NORMAL_ROOT_ONLY_LINKED_TYPES.includes(type as any)) {
+    if (rootRow.ticket_type !== "NORMAL") {
+      throw new Error(
+        `${type} tickets may only be generated against a NORMAL original (root is ${rootRow.ticket_type})`,
+      );
+    }
   }
 
   const nowMs = Date.now();
@@ -427,12 +487,13 @@ export function createLinkedTicket(params: {
     contactEmail: rootRow.contact_email,
     markingInstructions,
     customers,
-    // Lineage — root is always the ORIGINAL. parent is the ticket this one was spawned from.
+    // Lineage — root is always the chain's original (head). parent is the
+    // ticket this one was spawned from.
     rootTicketId: rootId,
     parentTicketId: requested.id,
     sequenceNumber,
     externalRootNumber,
-    urgent: overrides.urgent === true || type === "EMERGENCY",
+    urgent: overrides.urgent === true,
     additionalNotes: overrides.additionalNotes || undefined,
   };
 

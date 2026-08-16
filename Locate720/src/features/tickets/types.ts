@@ -7,16 +7,23 @@ export type TicketStatus =
     | "ONSITE"
     | "CLOSED";
 
+// 811-standard ticket types. "Original" is NOT a type — it is a lineage
+// concept (the root of a chain, tracked via rootTicketId / sequenceNumber).
+// Original-eligible (first-call): NORMAL, EMERGENCY, DIGUP, NON_COMPLIANT.
+// Linked/derived: UPDATE, UPDATE_REMARK, RECALL, NO_RESPONSE.
+// ORIGINAL/CORRECTION are kept as legacy aliases for back-compat with
+// pre-811-standard local rows.
 export type TicketType =
-    | "ORIGINAL"
-    | "NORMAL" // legacy alias for ORIGINAL (pre-lineage tickets)
+    | "NORMAL"
+    | "EMERGENCY"
+    | "DIGUP"
+    | "NON_COMPLIANT"
     | "UPDATE"
     | "UPDATE_REMARK"
-    | "NON_COMPLIANT"
     | "RECALL"
-    | "CORRECTION"
-    | "EMERGENCY"
-    | "NO_RESPONSE";
+    | "NO_RESPONSE"
+    | "ORIGINAL" // legacy — treated as NORMAL
+    | "CORRECTION"; // legacy — treated as RECALL
 
 export type TicketViewStatusFilter = "OPEN" | "CLOSED";
 export type TicketAssignedFilter = "MINE" | "ALL";

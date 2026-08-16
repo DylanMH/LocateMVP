@@ -1,8 +1,13 @@
+// 811-standard ticket types (mirrors the simulator's generator taxonomy).
 export type SimulatorTicketType =
   | "NORMAL"
+  | "EMERGENCY"
+  | "DIGUP"
+  | "NON_COMPLIANT"
+  | "UPDATE"
   | "UPDATE_REMARK"
   | "RECALL"
-  | "EMERGENCY";
+  | "NO_RESPONSE";
 export type SimulatorStatus = "NEW" | "SENT_TO_MEMBER" | "RESPONDED" | "CLOSED";
 export type SimulatorAreaId = "ROYSE_CITY" | "ROCKWALL" | "FATE";
 

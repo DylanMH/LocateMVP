@@ -19,23 +19,24 @@ function getStableAccountNumber(source: Partial<OriginalTicketMemberLike> = {}) 
 }
 
 export function formatTicketType(ticketType?: string): string {
-  // Legacy "NORMAL" rows and unset types render as "Original" \u2014 this aligns the
-  // pre-lineage corpus with the new linked-ticket taxonomy.
-  if (!ticketType || ticketType === "NORMAL" || ticketType === "ORIGINAL") return "Original";
+  // 811-standard labels. "Original" is a lineage concept, not a type — unset
+  // or legacy NORMAL/ORIGINAL rows render as "Normal".
+  if (!ticketType || ticketType === "NORMAL" || ticketType === "ORIGINAL") return "Normal";
 
   switch (ticketType) {
+    case "EMERGENCY":
+      return "Emergency";
+    case "DIGUP":
+      return "Dig Up";
+    case "NON_COMPLIANT":
+      return "Non Compliant";
     case "UPDATE":
       return "Update";
     case "UPDATE_REMARK":
       return "Update / Remark";
-    case "NON_COMPLIANT":
-      return "Non Compliant";
     case "RECALL":
+    case "CORRECTION": // legacy — CORRECTION's meaning matches 811 RECALL
       return "Recall";
-    case "CORRECTION":
-      return "Correction";
-    case "EMERGENCY":
-      return "Emergency";
     case "NO_RESPONSE":
       return "No Response";
     default:

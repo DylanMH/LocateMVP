@@ -36,7 +36,7 @@ function parsePayloadJson(payloadJson?: string) {
 function buildScopePayload(params: {
   ticketId: string;
   ticketNumber: string;
-  ticketType: "NORMAL" | "RECALL" | "EMERGENCY";
+  ticketType: "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT" | "UPDATE" | "UPDATE_REMARK" | "RECALL" | "NO_RESPONSE";
   areaId: "ROYSE_CITY" | "ROCKWALL" | "FATE";
   lat: number;
   lng: number;
@@ -50,7 +50,7 @@ function buildScopePayload(params: {
     centerLat: lat,
     centerLng: lng,
     workType: normalizedWorkType,
-    ticketType: ticketType === "RECALL" ? "RECALL" : ticketType === "EMERGENCY" ? "EMERGENCY" : "NORMAL",
+    ticketType,
     areaBounds: getAreaBounds(areaId),
   });
 }
@@ -242,7 +242,7 @@ export async function opsRoutes(app: FastifyInstance) {
     try {
       const bodySchema = z.object({
         ticketNumber: z.string().min(1),
-        ticketType: z.enum(["NORMAL", "RECALL", "EMERGENCY"]).default("NORMAL"),
+        ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).default("NORMAL"),
         areaId: z.enum(["ROYSE_CITY", "ROCKWALL", "FATE"]),
         address: z.string().min(1),
         lat: z.number(),
@@ -393,7 +393,7 @@ export async function opsRoutes(app: FastifyInstance) {
 
       const bodySchema = z.object({
         ticketNumber: z.string().min(1).optional(),
-        ticketType: z.enum(["NORMAL", "RECALL", "EMERGENCY"]).optional(),
+        ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).optional(),
         status: z
           .enum(["NEW", "SENT_TO_MEMBER", "RESPONDED", "CLOSED"])
           .optional(),

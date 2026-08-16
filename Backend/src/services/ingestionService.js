@@ -490,13 +490,14 @@ function map811TicketToL720(ticket811, existingPayload = {}) {
     originalTicketData
   };
 
-  // Migrate legacy NORMAL -> ORIGINAL for lineage taxonomy consistency.
-  const incomingType = ticket811.ticketType || 'ORIGINAL';
-  const normalizedType = incomingType === 'NORMAL' ? 'ORIGINAL' : incomingType;
+  // 811-standard ticket type. "Original" is a lineage concept (root of a
+  // chain), not a type — see docs/linked-tickets-architecture.md. Default to
+  // NORMAL when the source omits a type.
+  const incomingType = ticket811.ticketType || 'NORMAL';
 
   return {
     ticket_number: ticket811.ticketNumber,
-    ticket_type: normalizedType,
+    ticket_type: incomingType,
     address: ticket811.address,
     lat: ticket811.lat,
     lng: ticket811.lng,

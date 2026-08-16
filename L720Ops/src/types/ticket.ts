@@ -1,12 +1,69 @@
+// 811-standard ticket types. "Original" is NOT a type — it is a lineage
+// concept (the root of a chain, tracked via rootTicketId / sequenceNumber).
+// Original-eligible (first-call): NORMAL, EMERGENCY, DIGUP, NON_COMPLIANT.
+// Linked/derived: UPDATE, UPDATE_REMARK, RECALL, NO_RESPONSE.
 export type TicketType =
-  | "ORIGINAL"
-  | "NORMAL" // legacy alias for ORIGINAL
+  | "NORMAL"
+  | "EMERGENCY"
+  | "DIGUP"
+  | "NON_COMPLIANT"
   | "UPDATE"
   | "UPDATE_REMARK"
-  | "NO_RESPONSE"
   | "RECALL"
-  | "CORRECTION"
-  | "EMERGENCY";
+  | "NO_RESPONSE";
+
+// Human-readable label for a ticket type. Legacy ORIGINAL/CORRECTION values
+// (from pre-811-standard data) are normalized for display.
+export function formatTicketType(ticketType?: string): string {
+  if (!ticketType) return "Normal";
+  switch (ticketType) {
+    case "NORMAL":
+    case "ORIGINAL": // legacy
+      return "Normal";
+    case "EMERGENCY":
+      return "Emergency";
+    case "DIGUP":
+      return "Dig Up";
+    case "NON_COMPLIANT":
+      return "Non Compliant";
+    case "UPDATE":
+      return "Update";
+    case "UPDATE_REMARK":
+      return "Update / Remark";
+    case "RECALL":
+    case "CORRECTION": // legacy — CORRECTION's meaning matches 811 RECALL
+      return "Recall";
+    case "NO_RESPONSE":
+      return "No Response";
+    default:
+      return ticketType;
+  }
+}
+
+// Tailwind badge classes for a ticket type. Used by ticket type badges across
+// the ops portal. Legacy ORIGINAL/CORRECTION map to their normalized buckets.
+export function ticketTypeBadgeClass(ticketType?: string): string {
+  switch (ticketType) {
+    case "EMERGENCY":
+      return "bg-red-100 text-red-800";
+    case "DIGUP":
+      return "bg-orange-100 text-orange-800";
+    case "NON_COMPLIANT":
+      return "bg-amber-100 text-amber-800";
+    case "UPDATE":
+    case "UPDATE_REMARK":
+      return "bg-sky-100 text-sky-800";
+    case "RECALL":
+    case "CORRECTION": // legacy
+      return "bg-purple-100 text-purple-800";
+    case "NO_RESPONSE":
+      return "bg-rose-100 text-rose-800";
+    case "NORMAL":
+    case "ORIGINAL": // legacy
+    default:
+      return "bg-blue-100 text-blue-800";
+  }
+}
 export type TicketStatus =
   | "OPEN"
   | "ASSIGNED"
