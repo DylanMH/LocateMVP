@@ -22,12 +22,13 @@ const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
 // Locator status machine (mirrors mobile statusMachine.ts).
 // MANAGER can bypass for admin overrides.
 const ALLOWED_LOCATOR_TRANSITIONS = {
+  PENDING: ["ASSIGNED"],   // Tech assigned → ready for field work
   ASSIGNED: ["ENROUTE"],
   ENROUTE: ["ONSITE"],
   ONSITE: ["PAUSED"],
   PAUSED: ["ONSITE"],
-  CLOSED: ["ASSIGNED"],   // Reopen: return to assigned for re-locate
-  UNABLE: ["ASSIGNED"],   // Reopen: return to assigned for re-locate
+  CLOSED: ["ASSIGNED"],    // Reopen: return to assigned for re-locate
+  UNABLE: ["ASSIGNED"],    // Reopen: return to assigned for re-locate
 };
 
 function isValidLocatorTransition(from, to) {
@@ -1172,7 +1173,12 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
 
   const now = Date.now();
   db.prepare(
-    "UPDATE tickets SET assigned_tech_id = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+    `UPDATE tickets
+     SET assigned_tech_id = ?,
+         locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
+         updated_at = ?,
+         version = version + 1
+     WHERE id = ?`,
   ).run(resolvedTechId, now, ticketId);
 
   db.prepare(

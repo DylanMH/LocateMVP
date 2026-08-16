@@ -276,8 +276,8 @@ export async function upsert811Ticket(db, ticket811) {
       lat: l720Ticket.lat,
       lng: l720Ticket.lng,
       status: 'OPEN',
-      locatorStatus: 'ASSIGNED',
-      assignedTechId: null, // will be set by assignment service
+      locatorStatus: 'PENDING',   // awaiting tech assignment
+      assignedTechId: null,       // will be set by assignment service
       dueAt: l720Ticket.due_at,
       createdAt: l720Ticket.created_at,
       updatedAt: l720Ticket.updated_at,

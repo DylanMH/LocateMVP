@@ -28,7 +28,10 @@ export function assignTicketToTechTerritory(db, ticketId, techTerritoryId) {
 
     db.prepare(`
       UPDATE tickets
-      SET assigned_tech_id = ?, updated_at = ?, version = version + 1
+      SET assigned_tech_id = ?,
+          locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
+          updated_at = ?,
+          version = version + 1
       WHERE id = ?
     `).run(tech.id, Date.now(), ticketId);
 

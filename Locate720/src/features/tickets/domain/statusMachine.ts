@@ -8,6 +8,7 @@
  */
 
 export type LocatorStatus =
+  | "PENDING"
   | "ASSIGNED"
   | "ENROUTE"
   | "ONSITE"
@@ -16,12 +17,13 @@ export type LocatorStatus =
   | "UNABLE";
 
 const ALLOWED_TRANSITIONS: Readonly<Record<LocatorStatus, readonly LocatorStatus[]>> = {
+  PENDING: ["ASSIGNED"],   // Tech assigned → ready for field work
   ASSIGNED: ["ENROUTE"],
   ENROUTE: ["ONSITE"],
-  ONSITE: ["PAUSED"], // Can only pause from onsite, not go back to enroute
-  PAUSED: ["ONSITE"], // Can only resume to onsite, not enroute
-  CLOSED: ["ASSIGNED"], // Reopen: return to assigned for re-locate
-  UNABLE: ["ASSIGNED"], // Reopen: return to assigned for re-locate
+  ONSITE: ["PAUSED"],      // Can only pause from onsite, not go back to enroute
+  PAUSED: ["ONSITE"],      // Can only resume to onsite, not enroute
+  CLOSED: ["ASSIGNED"],    // Reopen: return to assigned for re-locate
+  UNABLE: ["ASSIGNED"],    // Reopen: return to assigned for re-locate
 } as const;
 
 /** Returns whether a locator status transition is allowed. */
