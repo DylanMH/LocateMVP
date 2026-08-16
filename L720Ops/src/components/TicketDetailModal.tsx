@@ -14,6 +14,8 @@ type TicketPayloadCustomer = {
   name?: string;
   utility?: string;
   accountNumber?: string;
+  memberCode?: string;
+  companyName?: string;
 };
 
 type TicketPayloadMarking = {
@@ -25,13 +27,27 @@ type TicketPayloadMarking = {
   notes?: string;
 };
 
+type TicketPayloadScope = {
+  shape?: string;
+  centerLat?: number;
+  centerLng?: number;
+  latMin?: number;
+  latMax?: number;
+  lngMin?: number;
+  lngMax?: number;
+  widthFeet?: number;
+  heightFeet?: number;
+};
+
 type TicketPayload = {
+  externalSource?: string;
   workType?: string;
   contractor?: string;
   contractorPhone?: string;
   contactName?: string;
   contactEmail?: string;
   markingInstructions?: string;
+  scope?: TicketPayloadScope;
   enrouteStartedAt?: number;
   enrouteEndedAt?: number;
   onsiteStartedAt?: number;
@@ -42,6 +58,10 @@ type TicketPayload = {
   customers?: TicketPayloadCustomer[];
   customerMarking?: Record<string, TicketPayloadMarking>;
   customerMarkings?: Record<string, TicketPayloadMarking>;
+  rootTicketId?: string;
+  parentTicketId?: string | null;
+  sequenceNumber?: number;
+  externalRootNumber?: string;
 };
 
 const formatDuration = (millis: number): string => {
@@ -384,6 +404,72 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
                 </div>
 
                 <div>
+                  <h4 className="text-sm font-medium text-gray-900">Work Area Scope</h4>
+                  <dl className="mt-2 space-y-2">
+                    {payload.scope ? (
+                      <>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Shape:</dt>
+                          <dd className="text-sm font-medium text-gray-900">{payload.scope.shape || "N/A"}</dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Center:</dt>
+                          <dd className="text-sm font-medium text-gray-900">
+                            {payload.scope.centerLat != null && payload.scope.centerLng != null
+                              ? `${payload.scope.centerLat.toFixed(6)}, ${payload.scope.centerLng.toFixed(6)}`
+                              : "N/A"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Bounds (N/S/E/W):</dt>
+                          <dd className="text-sm font-medium text-gray-900">
+                            {payload.scope.latMax != null
+                              ? `${payload.scope.latMax.toFixed(6)}, ${payload.scope.latMin?.toFixed(6)}, ${payload.scope.lngMax?.toFixed(6)}, ${payload.scope.lngMin?.toFixed(6)}`
+                              : "N/A"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Width:</dt>
+                          <dd className="text-sm font-medium text-gray-900">{payload.scope.widthFeet != null ? `${payload.scope.widthFeet} ft` : "N/A"}</dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-gray-500">Height:</dt>
+                          <dd className="text-sm font-medium text-gray-900">{payload.scope.heightFeet != null ? `${payload.scope.heightFeet} ft` : "N/A"}</dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">No scope data available.</div>
+                    )}
+                  </dl>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-medium text-gray-900">811 Lineage</h4>
+                  <dl className="mt-2 space-y-2">
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">External Source:</dt>
+                      <dd className="text-sm font-medium text-gray-900">{payload.externalSource || ticket.source || "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">External Root #:</dt>
+                      <dd className="text-sm font-medium text-gray-900">{ticket.externalRootNumber || payload.externalRootNumber || "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">Sequence #:</dt>
+                      <dd className="text-sm font-medium text-gray-900">{ticket.sequenceNumber ?? payload.sequenceNumber ?? "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">Root Ticket ID:</dt>
+                      <dd className="text-sm font-mono text-gray-900 text-xs">{ticket.rootTicketId || payload.rootTicketId || "N/A"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500">Parent Ticket ID:</dt>
+                      <dd className="text-sm font-mono text-gray-900 text-xs">{ticket.parentTicketId || payload.parentTicketId || "N/A"}</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <div>
                   <h4 className="text-sm font-medium text-gray-900">Contractor & Work Details</h4>
                   <dl className="mt-2 space-y-2">
                     <div className="flex justify-between">
@@ -434,6 +520,14 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
                               <div>
                                 <div className="text-xs text-gray-500">Utility Type</div>
                                 <div className="text-sm font-medium text-gray-900">{customer.utility || "N/A"}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-500">Member Code</div>
+                                <div className="text-sm font-medium text-gray-900">{customer.memberCode || "N/A"}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-500">Company Name</div>
+                                <div className="text-sm font-medium text-gray-900">{customer.companyName || "N/A"}</div>
                               </div>
                               <div>
                                 <div className="text-xs text-gray-500">Account</div>
