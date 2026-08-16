@@ -1015,6 +1015,13 @@ router.get("/tickets", authenticateToken, (req, res) => {
       query += " AND assigned_tech_id IN (SELECT id FROM users WHERE area_id = ?)";
       params.push(areaId);
     }
+    if (req.query.territoryId) {
+      // Filter by any territory level. A ticket matches if its
+      // tech/supervisor/area/district territory ID equals the given ID.
+      query += " AND (tech_territory_id = ? OR supervisor_territory_id = ? OR area_territory_id = ? OR district_territory_id = ?)";
+      const tid = req.query.territoryId;
+      params.push(tid, tid, tid, tid);
+    }
     if (assignedTechId) {
       query += " AND assigned_tech_id = ?";
       params.push(assignedTechId);
