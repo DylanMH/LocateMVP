@@ -115,7 +115,7 @@ function computeTicketTimeAllocation(ticket) {
 function getLiveClockState(userId) {
   const session = db
     .prepare(
-      `SELECT id, clock_in_at, status, clock_in_reason, allocation_type, other_reason, clock_out_ticket_id
+      `SELECT id, clock_in_at, clock_out_at, status, clock_in_reason, allocation_type, other_reason, clock_out_ticket_id
        FROM day_sessions
        WHERE user_id = ? AND status = 'ACTIVE'
        ORDER BY clock_in_at DESC
@@ -123,7 +123,38 @@ function getLiveClockState(userId) {
     )
     .get(userId);
 
-  if (!session) return { clockStatus: "CLOCKED_OUT", currentSession: null };
+  // No active session — look up the most recent CLOCKED_OUT session so
+  // the ops page can show which ticket the tech clocked out on.
+  if (!session) {
+    const lastClosed = db
+      .prepare(
+        `SELECT id, clock_in_at, clock_out_at, clock_out_ticket_id
+         FROM day_sessions
+         WHERE user_id = ? AND status = 'CLOCKED_OUT'
+         ORDER BY clock_out_at DESC
+         LIMIT 1`,
+      )
+      .get(userId);
+
+    let clockOutTicket = null;
+    if (lastClosed?.clock_out_ticket_id) {
+      const t = db.prepare("SELECT id, ticket_number FROM tickets WHERE id = ?").get(lastClosed.clock_out_ticket_id);
+      clockOutTicket = t ? { id: t.id, ticketNumber: t.ticket_number } : null;
+    }
+
+    return {
+      clockStatus: "CLOCKED_OUT",
+      currentSession: lastClosed
+        ? {
+            sessionId: lastClosed.id,
+            clockInAt: lastClosed.clock_in_at,
+            clockOutAt: lastClosed.clock_out_at,
+            clockOutTicket,
+            currentTicket: null,
+          }
+        : null,
+    };
+  }
 
   const openBreak = db
     .prepare(
