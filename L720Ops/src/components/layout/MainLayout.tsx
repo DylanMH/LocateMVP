@@ -14,7 +14,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: "📊" },
-    { name: "Technicians", href: "/techs", icon: "👷" },
+    { name: "Field Employees", href: "/techs", icon: "👷" },
     { name: "Map View", href: "/map", icon: "🗺️" },
     { name: "Territories", href: "/territories", icon: "🏛️" },
     { name: "811 Simulator", href: "/simulator", icon: "🔧" },

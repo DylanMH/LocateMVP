@@ -432,7 +432,7 @@ export function TechsPage() {
         rows={techsQuery.data?.techs}
         rowKey={(t) => t.id}
         loading={techsQuery.isLoading}
-        empty={{ title: "No technicians match your filters" }}
+        empty={{ title: "No field employees match your filters" }}
       />
 
       <CreateUserModal

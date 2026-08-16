@@ -12,6 +12,7 @@ import { getChainWithSummaries } from "../services/ticketChainService.js";
 import {
   buildTicketVisibilityFilter,
   canUserSeeTicket,
+  getUserDirectTerritories,
 } from "../services/territoryService.js";
 
 const router = express.Router();
@@ -727,7 +728,7 @@ router.get("/techs", authenticateToken, (req, res) => {
     const { area, status, search } = req.query;
     const range = resolveRange(req);
 
-    let query = "SELECT id, name, email, role, area_id, supervisor_id, created_at FROM users WHERE role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR') AND is_active = 1";
+    let query = "SELECT id, name, email, role, area_id, supervisor_id, created_at FROM users WHERE role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER') AND is_active = 1";
     const params = [];
 
     if (area) {
@@ -835,9 +836,47 @@ router.get("/techs/:id/tickets", authenticateToken, (req, res) => {
     const { status, locatorStatus } = req.query;
     const range = resolveRange(req);
 
-    let query =
-      "SELECT * FROM tickets WHERE assigned_tech_id = ? AND (updated_at >= ? OR locator_status NOT IN ('CLOSED','UNABLE'))";
-    const params = [id, range.startMs];
+    // Look up the user to determine their role and territory scope.
+    // Hierarchy: a supervisor sees all tickets in their supervisor territory,
+    // an area manager sees all tickets in their area, a district manager sees
+    // all tickets in their district, and a tech sees tickets in their tech
+    // territories (plus any directly assigned to them).
+    const user = db.prepare("SELECT id, role FROM users WHERE id = ?").get(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const dir = getUserDirectTerritories(db, id);
+    let whereSql;
+    let params;
+
+    if (user.role === "MANAGER") {
+      whereSql = "1=1";
+      params = [];
+    } else if (user.role === "DISTRICT_MANAGER" && dir.DISTRICT.length) {
+      const ph = dir.DISTRICT.map(() => "?").join(",");
+      whereSql = `tickets.district_territory_id IN (${ph})`;
+      params = [...dir.DISTRICT];
+    } else if (user.role === "AREA_MANAGER" && dir.AREA.length) {
+      const ph = dir.AREA.map(() => "?").join(",");
+      whereSql = `tickets.area_territory_id IN (${ph})`;
+      params = [...dir.AREA];
+    } else if (user.role === "SUPERVISOR" && dir.SUPERVISOR_TERRITORY.length) {
+      const ph = dir.SUPERVISOR_TERRITORY.map(() => "?").join(",");
+      whereSql = `tickets.supervisor_territory_id IN (${ph})`;
+      params = [...dir.SUPERVISOR_TERRITORY];
+    } else if (dir.TECH_TERRITORY.length) {
+      const ph = dir.TECH_TERRITORY.map(() => "?").join(",");
+      whereSql = `(tickets.tech_territory_id IN (${ph}) OR tickets.assigned_tech_id = ?)`;
+      params = [...dir.TECH_TERRITORY, id];
+    } else {
+      // Fallback: only tickets directly assigned to this user.
+      whereSql = "tickets.assigned_tech_id = ?";
+      params = [id];
+    }
+
+    let query = `SELECT * FROM tickets WHERE (${whereSql}) AND (updated_at >= ? OR locator_status NOT IN ('CLOSED','UNABLE'))`;
+    params.push(range.startMs);
 
     if (status) {
       query += " AND status = ?";

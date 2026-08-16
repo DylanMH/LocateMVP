@@ -322,14 +322,14 @@ export function TechDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={tech?.name || "Technician"}
+        title={tech?.name || "Loading…"}
         subtitle={
           <Link
             to="/techs"
             className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
           >
             <ArrowLeftIcon className="h-4 w-4" />
-            Back to technicians
+            Back to field employees
           </Link>
         }
         actions={<RangeToggle value={range} onChange={setRange} />}
@@ -344,7 +344,15 @@ export function TechDetailPage() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-5 flex flex-wrap items-center gap-6">
             <div>
               <div className="text-xs uppercase tracking-wide text-gray-500">
-                Sub Areas
+                Role
+              </div>
+              <div className="text-sm font-medium text-gray-900">
+                {tech.role || "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-gray-500">
+                Assigned Territories
               </div>
               <div className="text-sm font-medium text-gray-900">
                 {tech.assignedTerritories && tech.assignedTerritories.length > 0
@@ -432,7 +440,7 @@ export function TechDetailPage() {
             <div className="px-5 py-4 border-b border-gray-100">
               <h3 className="text-sm font-semibold text-gray-900">Ticket Map</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                Tech sub-area boundaries with ticket markers and scope boxes
+                Territory boundaries with ticket markers and scope boxes
               </p>
             </div>
             <div style={{ height: "400px" }}>
