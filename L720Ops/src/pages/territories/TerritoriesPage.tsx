@@ -45,8 +45,11 @@ const DEFAULT_ROLE_FOR_TYPE: Record<TerritoryType, UserRole> = {
 
 const TECH_ASSIGNABLE_ROLES: UserRole[] = ["TECH", "TRAINER", "TRAINEE"];
 
+type TabId = "tree" | "supervisors";
+
 export function TerritoriesPage() {
   const qc = useQueryClient();
+  const [tab, setTab] = useState<TabId>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<
@@ -158,12 +161,31 @@ export function TerritoriesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Territories</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Geographic hierarchy: District → Area → Supervisor Territory → Tech Territory. Users
-            are assigned at any level to scope their ticket visibility and routing.
+            Manage supervisor assignments and geographic territory hierarchy.
           </p>
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        {(["tree", "supervisors"] as TabId[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+              tab === t
+                ? "bg-white text-blue-600 border border-b-white border-gray-200 -mb-px"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t === "tree" ? "Tree View" : "Supervisor Assignments"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "supervisors" ? (
+        <SupervisorAssignmentsPanel />
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Tree */}
         <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-3">
@@ -1241,6 +1263,191 @@ function AssignTechTerritoriesDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+{/* Close the tab conditional */}
+      )}
+
+{/* ── Supervisor Assignments Panel ────────────────────────── */}
+function SupervisorAssignmentsPanel() {
+  const qc = useQueryClient();
+  const [assignDialog, setAssignDialog] = useState<{ supeId: string; supeName: string } | null>(null);
+  const [selectedTerritoryId, setSelectedTerritoryId] = useState("");
+
+  const treeQuery = useQuery({
+    queryKey: ["territories", "tree"],
+    queryFn: () => TerritoryService.getTree(),
+  });
+
+  const usersQuery = useQuery({
+    queryKey: ["ops", "users", "list"],
+    queryFn: () => AuthService.getUsers({ includeInactive: false }),
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (v: { territoryId: string; userId: string }) =>
+      TerritoryService.assignUser(v.territoryId, v.userId, "OWNER"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["territories"] });
+      setAssignDialog(null);
+    },
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: (v: { territoryId: string; userId: string }) =>
+      TerritoryService.unassignUser(v.territoryId, v.userId, "OWNER"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["territories"] }),
+  });
+
+  const tree = treeQuery.data?.tree || [];
+
+  const supeMap = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; territories: TerritoryNode[] }>();
+    const walk = (nodes: TerritoryNode[]) => {
+      for (const n of nodes) {
+        if (n.type === "SUPERVISOR_TERRITORY" && n.owners?.length) {
+          for (const owner of n.owners) {
+            if (!map.has(owner.id)) map.set(owner.id, { id: owner.id, name: owner.name, territories: [] });
+            map.get(owner.id)!.territories.push(n);
+          }
+        }
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(tree);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tree]);
+
+  const allSupeTerritories = useMemo(() => {
+    const result: TerritoryNode[] = [];
+    const walk = (nodes: TerritoryNode[]) => {
+      for (const n of nodes) {
+        if (n.type === "SUPERVISOR_TERRITORY") result.push(n);
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(tree);
+    return result;
+  }, [tree]);
+
+  if (treeQuery.isLoading || usersQuery.isLoading) {
+    return <div className="text-sm text-gray-500 p-8 text-center">Loading...</div>;
+  }
+
+  return (
+    <div>
+      {supeMap.length === 0 ? (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">
+          No supervisors assigned to any territories yet.
+          <br />
+          Use the Tree View to create supervisor territories and assign supervisors.
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Supervisor</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Assigned Territories</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Tech Territories</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {supeMap.map((supe) => (
+                <tr key={supe.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{supe.name}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {supe.territories.map((t) => (
+                        <span
+                          key={t.id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        >
+                          {t.name}
+                          <button
+                            onClick={() => {
+                              if (confirm(`Remove ${supe.name} from ${t.name}?`)) {
+                                unassignMutation.mutate({ territoryId: t.id, userId: supe.id });
+                              }
+                            }}
+                            className="ml-0.5 hover:text-red-600"
+                            title="Remove"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {supe.territories.flatMap((t) =>
+                        t.children?.map((c) => (
+                          <span key={c.id} className="inline-flex px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">
+                            {c.name}
+                          </span>
+                        )) || []
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => setAssignDialog({ supeId: supe.id, supeName: supe.name })}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      + Add Territory
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {assignDialog && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">
+              Assign territory to {assignDialog.supeName}
+            </h3>
+            <select
+              value={selectedTerritoryId}
+              onChange={(e) => setSelectedTerritoryId(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-4"
+            >
+              <option value="">Select a supervisor territory...</option>
+              {allSupeTerritories.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.code})
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setAssignDialog(null); setSelectedTerritoryId(""); }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!selectedTerritoryId || assignMutation.isPending}
+                onClick={() =>
+                  assignMutation.mutate({ territoryId: selectedTerritoryId, userId: assignDialog.supeId })
+                }
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

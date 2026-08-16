@@ -46,15 +46,29 @@ type UtilityType = "GAS" | "ELECTRIC" | "FIBER" | "WATER" | "SEWER" | "COPPER";
 const UTIL_POOL: UtilityType[] = ["GAS","ELECTRIC","FIBER","WATER","SEWER","COPPER"];
 
 const STREET_BY_CITY: Record<AreaId, string[]> = {
-  ROYSE_CITY: ["W Main St", "E Main St", "FM 35", "I-30 Frontage Rd", "Hwy 66", "Elm St", "Oak St", "Archie St"],
-  ROCKWALL: ["Ridge Rd", "John King Blvd", "Goliad St", "E Rusk St", "Yellow Jacket Ln", "Horizon Rd", "Lakeshore Dr"],
-  FATE: ["CD Boren Pkwy", "William E Crawford Ave", "Fate Main Pl", "Hwy 66", "Blackland Rd", "Shiloh Rd"],
+  JOSEPHINE: ["FM 1777", "CR 550", "Main St", "Oak St", "Elm St", "2nd St"],
+  MABANK: ["Market St", "3rd St", "Mason St", "Gun Barrel Ln", "CR 3057", "US 175"],
+  GUN_BARREL: ["Harbor Point Dr", "Legacy Dr", "Main St", "Cherokee Dr", "Mohawk Dr", "Shoreline Dr"],
+  EUSTACE: ["US 175", "FM 316", "CR 2901", "Main St", "Elm St", "Pine St"],
+  TOOL: ["Tool Rd", "CR 2324", "CR 2319", "Oak Dr", "Cedar Dr", "Harbor Dr"],
+  SEVEN_POINTS: ["Seven Points Dr", "CR 2317", "Lakeside Dr", "Oak Dr", "Shady Ln", "Point View Dr"],
+  HEATH: ["Laurence Dr", "Smirl Dr", "Hubbard Dr", "Ridge Rd", "FM 740", "Terrace Dr"],
+  MCLENDON_CHISHOLM: ["FM 550", "CR 275", "Pullen Rd", "Meadowcreek Dr", "Oak Hill Dr", "Horizon Rd"],
+  KEMP: ["US 175", "FM 1896", "9th St", "Main St", "Elm St", "CR 4021"],
+  ENCHANTED_OAKS: ["Enchanted Dr", "Oak Trail", "Cedar Creek Dr", "Lakeview Dr", "Shady Ln", "Forest Ln"],
 };
 
 const ZIP_BY_CITY: Record<AreaId, string> = {
-  ROYSE_CITY: "75189",
-  ROCKWALL: "75087",
-  FATE: "75189",
+  JOSEPHINE: "75173",
+  MABANK: "75147",
+  GUN_BARREL: "75156",
+  EUSTACE: "75124",
+  TOOL: "75143",
+  SEVEN_POINTS: "75143",
+  HEATH: "75032",
+  MCLENDON_CHISHOLM: "75032",
+  KEMP: "75143",
+  ENCHANTED_OAKS: "75156",
 };
 
 function pick<T>(arr: T[]): T {
@@ -102,10 +116,15 @@ function pickOriginalType(): Extract<TicketType, "NORMAL" | "EMERGENCY" | "DIGUP
 }
 
 function makeTicketNumberBase(area: AreaId, now: Date) {
-  // Ex: 0126-ROCK-000123
+  // Ex: 0826-JOSE-000123
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const yy = String(now.getFullYear()).slice(-2);
-  const areaCode = area === "ROYSE_CITY" ? "ROYS" : area === "ROCKWALL" ? "ROCK" : "FATE";
+  const areaCodes: Record<AreaId, string> = {
+    JOSEPHINE: "JOSE", MABANK: "MABA", GUN_BARREL: "GUNB", EUSTACE: "EUST",
+    TOOL: "TOOL", SEVEN_POINTS: "7PTS", HEATH: "HEAT",
+    MCLENDON_CHISHOLM: "MCLN", KEMP: "KEMP", ENCHANTED_OAKS: "ENCH",
+  };
+  const areaCode = areaCodes[area] || "UNKN";
   const seq = Math.floor(Math.random() * 999999);
   return `${mm}${yy}-${areaCode}-${String(seq).padStart(6, "0")}`;
 }
@@ -239,7 +258,7 @@ export function generateTickets(params: { areaId?: AreaId; count: number }) {
   const nowMs = Date.now();
   const nowDate = new Date(nowMs);
 
-  const areas: AreaId[] = ["ROYSE_CITY","ROCKWALL","FATE"];
+  const areas: AreaId[] = ["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"];
 
   const insertTicket = insertTicketStmt();
   const insertMember = insertMemberStmt();
@@ -257,7 +276,13 @@ export function generateTickets(params: { areaId?: AreaId; count: number }) {
       const house = Math.floor(randBetween(100, 9999));
       const street = pick(STREET_BY_CITY[aId]);
       const addressLine1 = `${house} ${street}`;
-      const city = aId === "ROYSE_CITY" ? "Royse City" : aId === "ROCKWALL" ? "Rockwall" : "Fate";
+      const cityNames: Record<AreaId, string> = {
+        JOSEPHINE: "Josephine", MABANK: "Mabank", GUN_BARREL: "Gun Barrel City",
+        EUSTACE: "Eustace", TOOL: "Tool", SEVEN_POINTS: "Seven Points",
+        HEATH: "Heath", MCLENDON_CHISHOLM: "McLendon-Chisholm",
+        KEMP: "Kemp", ENCHANTED_OAKS: "Enchanted Oaks",
+      };
+      const city = cityNames[aId] || "Unknown";
 
       // Bulk-generated tickets are originals (the head of their own chain).
       // The 811 type is picked from the original-eligible set (Normal/Emergency/

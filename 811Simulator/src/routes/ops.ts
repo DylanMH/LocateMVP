@@ -5,7 +5,7 @@ import { db } from "../db/db.js";
 import { buildTicketScope } from "../domain/scope.js";
 import { notifyL720BackendOf811Change } from "../services/dispatchNotifier.js";
 
-function getAreaBounds(areaId: "ROYSE_CITY" | "ROCKWALL" | "FATE") {
+function getAreaBounds(areaId: "JOSEPHINE" | "MABANK" | "GUN_BARREL" | "EUSTACE" | "TOOL" | "SEVEN_POINTS" | "HEATH" | "MCLENDON_CHISHOLM" | "KEMP" | "ENCHANTED_OAKS") {
   const area = db
     .prepare(
       `
@@ -37,7 +37,7 @@ function buildScopePayload(params: {
   ticketId: string;
   ticketNumber: string;
   ticketType: "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT" | "UPDATE" | "UPDATE_REMARK" | "RECALL" | "NO_RESPONSE";
-  areaId: "ROYSE_CITY" | "ROCKWALL" | "FATE";
+  areaId: "JOSEPHINE" | "MABANK" | "GUN_BARREL" | "EUSTACE" | "TOOL" | "SEVEN_POINTS" | "HEATH" | "MCLENDON_CHISHOLM" | "KEMP" | "ENCHANTED_OAKS";
   lat: number;
   lng: number;
   workType?: string;
@@ -243,7 +243,7 @@ export async function opsRoutes(app: FastifyInstance) {
       const bodySchema = z.object({
         ticketNumber: z.string().min(1),
         ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).default("NORMAL"),
-        areaId: z.enum(["ROYSE_CITY", "ROCKWALL", "FATE"]),
+        areaId: z.enum(["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"]),
         address: z.string().min(1),
         lat: z.number(),
         lng: z.number(),
@@ -314,13 +314,15 @@ export async function opsRoutes(app: FastifyInstance) {
         now,
         dueAt,
         body.address,
-        body.areaId === "ROYSE_CITY"
-          ? "Royse City"
-          : body.areaId === "ROCKWALL"
-            ? "Rockwall"
-            : "Fate",
+        (() => {
+          const names: Record<string,string> = { JOSEPHINE:"Josephine",MABANK:"Mabank",GUN_BARREL:"Gun Barrel City",EUSTACE:"Eustace",TOOL:"Tool",SEVEN_POINTS:"Seven Points",HEATH:"Heath",MCLENDON_CHISHOLM:"McLendon-Chisholm",KEMP:"Kemp",ENCHANTED_OAKS:"Enchanted Oaks" };
+          return names[body.areaId] || "Unknown";
+        })(),
         "TX",
-        body.areaId === "ROCKWALL" ? "75087" : "75189",
+        (() => {
+          const zips: Record<string,string> = { JOSEPHINE:"75173",MABANK:"75147",GUN_BARREL:"75156",EUSTACE:"75124",TOOL:"75143",SEVEN_POINTS:"75143",HEATH:"75032",MCLENDON_CHISHOLM:"75032",KEMP:"75143",ENCHANTED_OAKS:"75156" };
+          return zips[body.areaId] || "75143";
+        })(),
         body.lat,
         body.lng,
         body.workType || "STANDARD",
@@ -397,7 +399,7 @@ export async function opsRoutes(app: FastifyInstance) {
         status: z
           .enum(["NEW", "SENT_TO_MEMBER", "RESPONDED", "CLOSED"])
           .optional(),
-        areaId: z.enum(["ROYSE_CITY", "ROCKWALL", "FATE"]).optional(),
+        areaId: z.enum(["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"]).optional(),
         address: z.string().min(1).optional(),
         lat: z.number().optional(),
         lng: z.number().optional(),

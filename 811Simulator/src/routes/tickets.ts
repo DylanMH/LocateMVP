@@ -40,7 +40,7 @@ function shapeTicketForApi(t: any) {
 export async function ticketsRoutes(app: FastifyInstance) {
   app.post("/api/811/generate", async (req, reply) => {
     const bodySchema = z.object({
-      areaId: z.enum(["ROYSE_CITY","ROCKWALL","FATE"]).optional(),
+      areaId: z.enum(["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"]).optional(),
       count: z.number().int().min(1).max(200).default(10),
     });
     const body = bodySchema.parse(req.body ?? {});

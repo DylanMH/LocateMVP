@@ -1,4 +1,14 @@
-export type AreaId = "ROYSE_CITY" | "ROCKWALL" | "FATE";
+export type AreaId =
+  | "JOSEPHINE"
+  | "MABANK"
+  | "GUN_BARREL"
+  | "EUSTACE"
+  | "TOOL"
+  | "SEVEN_POINTS"
+  | "HEATH"
+  | "MCLENDON_CHISHOLM"
+  | "KEMP"
+  | "ENCHANTED_OAKS";
 
 export type AreaSeed = {
   id: AreaId;
@@ -12,7 +22,6 @@ export type AreaSeed = {
 };
 
 function bbox(centerLat: number, centerLng: number) {
-  // Simple “good enough” bbox for testing map + assignment.
   return {
     latMin: centerLat - 0.03,
     latMax: centerLat + 0.03,
@@ -22,25 +31,14 @@ function bbox(centerLat: number, centerLng: number) {
 }
 
 export const AREAS: AreaSeed[] = [
-  {
-    id: "ROYSE_CITY",
-    name: "Royse City, TX",
-    centerLat: 32.9751,
-    centerLng: -96.3325,
-    ...bbox(32.9751, -96.3325),
-  },
-  {
-    id: "ROCKWALL",
-    name: "Rockwall, TX",
-    centerLat: 32.9312,
-    centerLng: -96.4597,
-    ...bbox(32.9312, -96.4597),
-  },
-  {
-    id: "FATE",
-    name: "Fate, TX",
-    centerLat: 32.9432,
-    centerLng: -96.3904,
-    ...bbox(32.9432, -96.3904),
-  },
+  { id: "JOSEPHINE", name: "Josephine, TX", centerLat: 33.0596, centerLng: -96.3252, ...bbox(33.0596, -96.3252) },
+  { id: "MABANK", name: "Mabank, TX", centerLat: 32.3710, centerLng: -96.1159, ...bbox(32.3710, -96.1159) },
+  { id: "GUN_BARREL", name: "Gun Barrel City, TX", centerLat: 32.3276, centerLng: -96.1026, ...bbox(32.3276, -96.1026) },
+  { id: "EUSTACE", name: "Eustace, TX", centerLat: 32.3129, centerLng: -96.0108, ...bbox(32.3129, -96.0108) },
+  { id: "TOOL", name: "Tool, TX", centerLat: 32.2784, centerLng: -96.1763, ...bbox(32.2784, -96.1763) },
+  { id: "SEVEN_POINTS", name: "Seven Points, TX", centerLat: 32.3283, centerLng: -96.2064, ...bbox(32.3283, -96.2064) },
+  { id: "HEATH", name: "Heath, TX", centerLat: 32.8495, centerLng: -96.4750, ...bbox(32.8495, -96.4750) },
+  { id: "MCLENDON_CHISHOLM", name: "McLendon-Chisholm, TX", centerLat: 32.8423, centerLng: -96.3814, ...bbox(32.8423, -96.3814) },
+  { id: "KEMP", name: "Kemp, TX", centerLat: 32.4513, centerLng: -96.2254, ...bbox(32.4513, -96.2254) },
+  { id: "ENCHANTED_OAKS", name: "Enchanted Oaks, TX", centerLat: 32.2648, centerLng: -96.1102, ...bbox(32.2648, -96.1102) },
 ];
