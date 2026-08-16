@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
+import crypto from "node:crypto";
 import { db } from "../db/db.js";
 import {
   generateTickets,
@@ -293,6 +294,100 @@ export async function ticketsRoutes(app: FastifyInstance) {
     } catch (error) {
       console.error('[811Sim] Error closing ticket:', error);
       return reply.code(500).send({ error: "Failed to close ticket" });
+    }
+  });
+
+  // Receive assignment notification from L720 backend.
+  // The backend calls this when a ticket is assigned to a tech, so the
+  // simulator can reflect the real-world assignment state.
+  app.post("/api/811/tickets/:ticketId/assign", async (req, reply) => {
+    const { ticketId } = req.params as any;
+    const bodySchema = z.object({
+      techId: z.string().min(1),
+      techName: z.string().min(1),
+      locatorStatus: z.string().optional(),
+    });
+    const body = bodySchema.parse(req.body ?? {});
+
+    try {
+      const ticket = db.prepare(`SELECT * FROM tickets_811 WHERE id = ?`).get(ticketId) as any;
+      if (!ticket) return reply.code(404).send({ error: "Ticket not found" });
+
+      const now = Date.now();
+      const locatorStatus = body.locatorStatus || "ASSIGNED";
+
+      db.prepare(`
+        UPDATE tickets_811
+        SET status = 'ASSIGNED',
+            assigned_tech_id = ?,
+            assigned_tech_name = ?,
+            locator_status = ?,
+            updated_at = ?,
+            version = version + 1
+        WHERE id = ?
+      `).run(body.techId, body.techName, locatorStatus, now, ticketId);
+
+      db.prepare(`
+        INSERT INTO ticket_event_log_811 (id, ticket_id, type, occurred_at, payload_json)
+        VALUES (?, ?, 'ASSIGNED_TO_TECH', ?, ?)
+      `).run(
+        crypto.randomUUID(),
+        ticketId,
+        now,
+        JSON.stringify({ techId: body.techId, techName: body.techName, locatorStatus }),
+      );
+
+      console.log(`[811Sim] Ticket ${ticketId} assigned to ${body.techName} (${body.techId})`);
+      return reply.send({
+        success: true,
+        ticketId,
+        status: "ASSIGNED",
+        assignedTechName: body.techName,
+        locatorStatus,
+      });
+    } catch (error) {
+      console.error('[811Sim] Error assigning ticket:', error);
+      return reply.code(500).send({ error: "Failed to assign ticket" });
+    }
+  });
+
+  // Receive status update from L720 backend (enroute, onsite, paused, etc.)
+  app.post("/api/811/tickets/:ticketId/status", async (req, reply) => {
+    const { ticketId } = req.params as any;
+    const bodySchema = z.object({
+      locatorStatus: z.string().min(1),
+      techName: z.string().optional(),
+    });
+    const body = bodySchema.parse(req.body ?? {});
+
+    try {
+      const ticket = db.prepare(`SELECT * FROM tickets_811 WHERE id = ?`).get(ticketId) as any;
+      if (!ticket) return reply.code(404).send({ error: "Ticket not found" });
+
+      const now = Date.now();
+      db.prepare(`
+        UPDATE tickets_811
+        SET locator_status = ?,
+            updated_at = ?,
+            version = version + 1
+        WHERE id = ?
+      `).run(body.locatorStatus, now, ticketId);
+
+      db.prepare(`
+        INSERT INTO ticket_event_log_811 (id, ticket_id, type, occurred_at, payload_json)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        crypto.randomUUID(),
+        ticketId,
+        `STATUS_${body.locatorStatus}`,
+        now,
+        JSON.stringify({ locatorStatus: body.locatorStatus, techName: body.techName }),
+      );
+
+      return reply.send({ success: true, ticketId, locatorStatus: body.locatorStatus });
+    } catch (error) {
+      console.error('[811Sim] Error updating ticket status:', error);
+      return reply.code(500).send({ error: "Failed to update status" });
     }
   });
 }

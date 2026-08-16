@@ -8,8 +8,9 @@ export type SimulatorTicketType =
   | "UPDATE_REMARK"
   | "RECALL"
   | "NO_RESPONSE";
-export type SimulatorStatus = "NEW" | "SENT_TO_MEMBER" | "RESPONDED" | "CLOSED";
-export type SimulatorAreaId = "ROYSE_CITY" | "ROCKWALL" | "FATE";
+export type SimulatorStatus = "NEW" | "SENT_TO_MEMBER" | "ASSIGNED" | "RESPONDED" | "CLOSED";
+export type SimulatorLocatorStatus = "PENDING" | "ASSIGNED" | "ENROUTE" | "ONSITE" | "PAUSED" | "CLOSED" | "UNABLE";
+export type SimulatorAreaId = string;
 
 export interface SimulatorMember {
   id: string;
@@ -27,6 +28,9 @@ export interface SimulatorTicket {
   ticketNumber: string;
   ticketType: SimulatorTicketType;
   status: SimulatorStatus;
+  locatorStatus?: SimulatorLocatorStatus | null;
+  assignedTechName?: string | null;
+  assignedTechId?: string | null;
   areaId: SimulatorAreaId;
   address: string;
   lat: number;
@@ -97,6 +101,7 @@ export interface SimulatorAreaStats {
   total: number;
   new: number;
   sent: number;
+  assigned: number;
   responded: number;
   closed: number;
 }

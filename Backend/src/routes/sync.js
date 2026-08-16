@@ -488,6 +488,22 @@ router.post("/events", (req, res) => {
           }
         }
 
+        // Notify the 811 simulator of status changes (ENROUTE, ONSITE, PAUSED, etc.)
+        // so the simulator reflects real-world locator state.
+        if (ticket.source === '811' && nextStatus !== "CLOSED") {
+          const techName = ticket.assigned_tech_id
+            ? (db.prepare("SELECT name FROM users WHERE id = ?").get(ticket.assigned_tech_id)?.name || "Unknown")
+            : "Unknown";
+          fetch(
+            `${process.env.SIMULATOR_URL || 'http://localhost:4100'}/api/811/tickets/${ticketId}/status`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ locatorStatus: nextStatus, techName }),
+            },
+          ).catch((err) => console.error('[Sync] Failed to notify simulator of status change:', err.message));
+        }
+
         emitOpsEvent("ticket.updated", {
           ticketId,
           ticketNumber: ticket.ticket_number,

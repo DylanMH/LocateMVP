@@ -208,6 +208,7 @@ export function SimulatorPage() {
                   <option value="">All Status</option>
                   <option value="NEW">New</option>
                   <option value="SENT_TO_MEMBER">Sent to Member</option>
+                  <option value="ASSIGNED">Assigned</option>
                   <option value="RESPONDED">Responded</option>
                   <option value="CLOSED">Closed</option>
                 </select>
@@ -267,16 +268,28 @@ export function SimulatorPage() {
                             ticket.status === "NEW"
                               ? "bg-yellow-100 text-yellow-800"
                               : ticket.status === "SENT_TO_MEMBER"
-                                ? "bg-blue-100 text-blue-800"
-                                : ticket.status === "RESPONDED"
-                                  ? "bg-green-100 text-green-800"
-                                  : ticket.status === "CLOSED"
-                                    ? "bg-gray-100 text-gray-800"
-                                    : "bg-red-100 text-red-800"
+                                ? "bg-cyan-100 text-cyan-800"
+                                : ticket.status === "ASSIGNED"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : ticket.status === "RESPONDED"
+                                    ? "bg-green-100 text-green-800"
+                                    : ticket.status === "CLOSED"
+                                      ? "bg-gray-100 text-gray-800"
+                                      : "bg-red-100 text-red-800"
                           }`}
                         >
                           {ticket.status}
                         </span>
+                        {ticket.assignedTechName && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            Tech: {ticket.assignedTechName}
+                          </div>
+                        )}
+                        {ticket.locatorStatus && ticket.locatorStatus !== "PENDING" && (
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            Locator: {ticket.locatorStatus}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {ticket.areaId}

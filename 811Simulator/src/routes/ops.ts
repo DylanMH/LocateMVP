@@ -115,6 +115,9 @@ export async function opsRoutes(app: FastifyInstance) {
         ticketNumber: ticket.ticket_number,
         ticketType: ticket.ticket_type,
         status: ticket.status,
+        locatorStatus: ticket.locator_status || null,
+        assignedTechName: ticket.assigned_tech_name || null,
+        assignedTechId: ticket.assigned_tech_id || null,
         areaId: ticket.area_id,
         address: `${ticket.address_line1}, ${ticket.city}, ${ticket.state} ${ticket.zip}`,
         lat: ticket.lat,
@@ -400,7 +403,7 @@ export async function opsRoutes(app: FastifyInstance) {
         ticketNumber: z.string().min(1).optional(),
         ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).optional(),
         status: z
-          .enum(["NEW", "SENT_TO_MEMBER", "RESPONDED", "CLOSED"])
+          .enum(["NEW", "SENT_TO_MEMBER", "ASSIGNED", "RESPONDED", "CLOSED"])
           .optional(),
         areaId: z.enum(AREA_IDS).optional(),
         address: z.string().min(1).optional(),
@@ -672,11 +675,12 @@ export async function opsRoutes(app: FastifyInstance) {
       const areas = db
         .prepare(
           `
-        SELECT 
+        SELECT
           area_id as areaId,
           COUNT(*) as total,
           COUNT(CASE WHEN status = 'NEW' THEN 1 END) as new,
           COUNT(CASE WHEN status = 'SENT_TO_MEMBER' THEN 1 END) as sent,
+          COUNT(CASE WHEN status = 'ASSIGNED' THEN 1 END) as assigned,
           COUNT(CASE WHEN status = 'RESPONDED' THEN 1 END) as responded,
           COUNT(CASE WHEN status = 'CLOSED' THEN 1 END) as closed
         FROM tickets_811

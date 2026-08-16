@@ -1456,6 +1456,18 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
     assignedTechId: resolvedTechId,
   });
 
+  // Notify the 811 simulator of the assignment so it can reflect real-world state
+  if (resolvedTechId && tech) {
+    fetch(
+      `${process.env.SIMULATOR_URL || 'http://localhost:4100'}/api/811/tickets/${ticketId}/assign`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ techId: resolvedTechId, techName: tech.name, locatorStatus: 'ASSIGNED' }),
+      },
+    ).catch((err) => console.error('[OPS] Failed to notify simulator of manual assignment:', err.message));
+  }
+
   return { ok: true, tech };
 }
 
