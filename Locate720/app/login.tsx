@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "../src/features/auth/AuthContext";
@@ -256,10 +257,17 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View className="px-6 py-8">
-          <Text className="text-3xl font-bold" style={{ color: colors.text }}>
+          <View className="items-center mb-6">
+            <Image
+              source={require("../assets/images/locate720-icon.png")}
+              style={{ width: 96, height: 96, borderRadius: 20 }}
+              resizeMode="contain"
+            />
+          </View>
+          <Text className="text-3xl font-bold text-center" style={{ color: colors.text }}>
             Locate720
           </Text>
-          <Text className="text-base mt-2" style={{ color: colors.muted }}>
+          <Text className="text-base mt-2 text-center" style={{ color: colors.muted }}>
             Sign in to your account
           </Text>
 
