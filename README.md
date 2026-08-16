@@ -9,6 +9,7 @@ This monorepo contains four cooperating sub-systems that simulate the entire pip
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
+- [Live Demo](#live-demo)
 - [Sub-Systems](#sub-systems)
   - [811Simulator](#811simulator)
   - [Backend](#backend)
@@ -47,11 +48,72 @@ This monorepo contains four cooperating sub-systems that simulate the entire pip
 
 ---
 
+## Live Demo
+
+A live demo of the full system is deployed and accessible from anywhere — no local setup required.
+
+### Operations Portal (Web)
+
+The ops portal is where supervisors, managers, and administrators monitor and manage the entire locate operation.
+
+**URL:** `http://15.204.247.173`
+
+**Login:** Any username and password will work (dev auth accepts all credentials).
+
+#### What you can do and see
+
+| Page | What's there |
+|---|---|
+| **Dashboard** | Live ops overview — clocked-in techs, on-break count, open/overdue tickets, total footage, locates closed, live tech board, real-time activity feed, customer summary. Range toggle (day/week/month). |
+| **Techs** | Full tech roster with productivity metrics (tickets on board, closed, locates, footage, LPH/FPH). Click any tech to see their assigned tickets and complete timesheet history. |
+| **Supervisors** | Supervisor cards aggregate subordinate tech stats — total locates, footage, productive hours, and calculated LPH/FPH across all their techs. Click to see all tickets in their territory hierarchy. |
+| **Tickets** | Filterable ticket table covering all 300+ tickets across Texas. Filter by status, area, assigned tech, territory, or source. Click any ticket for full 811 details — contractor info, customer/utility list, marking instructions, scope geometry, lineage/chain, notes, history, and attachments. |
+| **Map View** | Geographic view of all tickets on a Leaflet map. Color-coded by status. Click markers for ticket details. See ticket distribution across all Texas areas. |
+| **Territories** | 4-level territory tree builder (District → Area → Supervisor → Tech). Visualize boundaries on a map, assign boundary units, and assign users to territories. |
+| **Simulator** | 811 simulator admin page — generate new tickets (up to 300 per batch), view simulator stats, pull tickets to backend, reset databases. See real-time assignment status flow back from the backend. |
+
+#### What's running
+
+- **300 tickets** seeded across 60+ Texas service areas
+- **110+ field employees** — district managers, area managers, supervisors, and techs
+- **4 areas** — East Texas, North Texas (Dallas/Fort Worth), Central Texas (Austin), South Texas (Houston)
+- **15 supervisor territories** with tech territories beneath each
+- Tickets auto-assign to techs by territory; supervisors see all tickets in their hierarchy
+- Tickets older than 4 days are auto-deleted to keep the demo fresh
+
+### Mobile App (Preview Build)
+
+A preview APK is available for field testing on Android devices. The app is offline-first — tickets download to the device and can be worked without a network connection.
+
+**Key features to test:**
+
+- Login with any seeded user (e.g. `user-bob-123`)
+- View assigned tickets in list and map views
+- Work a ticket: ASSIGNED → ENROUTE → ONSITE → PAUSED → CLOSED
+- Record customer markings (minutes, footage, completion per utility)
+- Add notes and photo attachments
+- Clock in/out, take lunch and personal breaks
+- View personal productivity metrics (LPH, FPH, tickets closed)
+- All changes sync back to the backend when connectivity returns
+
+**To build the preview APK:**
+
+```bash
+cd Locate720
+eas build --profile preview --platform android
+```
+
+The built APK will be available on the EAS dashboard for download and sideloading.
+
+> **Note:** The preview build points to the OVH server (`15.204.247.173`) for API calls, so it works from anywhere without your dev machine running.
+
+---
+
 ## Sub-Systems
 
 ### 811Simulator
 
-A fake 811 dispatch center that generates realistic locate tickets for three service areas in Rockwall County, Texas (Royse City, Rockwall, Fate).
+A fake 811 dispatch center that generates realistic locate tickets across the entire state of Texas — covering East Texas, North Texas (Dallas/Fort Worth), Central Texas (Austin), and South Texas (Houston) with 60+ service areas.
 
 | | |
 |---|---|
