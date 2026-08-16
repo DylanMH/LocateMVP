@@ -871,6 +871,22 @@ router.post('/:id/boundary-units', authenticateToken, requireRole('AREA_MANAGER'
   // so tech territories get their bbox and show up on the Areas map.
   if (t.type === 'SUPERVISOR_TERRITORY') {
     syncBoundaryUnitsToChildTechTerritories(req.params.id, new Set(units.map((unit) => unit.id)));
+    // Deactivate child tech territories that no longer have a matching
+    // boundary unit AND have no tech assignments — they're stale leftovers
+    // from a previous coverage selection.
+    const unitNames = new Set(units.map((u) => u.name.toLowerCase()));
+    const children = db.prepare(`
+      SELECT t.id, t.name,
+        (SELECT COUNT(*) FROM user_territory_assignments WHERE territory_id = t.id) as assign_count
+      FROM territories t
+      WHERE t.parent_territory_id = ? AND t.type = 'TECH_TERRITORY' AND t.active = 1
+    `).all(req.params.id);
+    for (const child of children) {
+      if (!unitNames.has(child.name.toLowerCase()) && child.assign_count === 0) {
+        db.prepare(`UPDATE territories SET active = 0, updated_at = ? WHERE id = ?`)
+          .run(Date.now(), child.id);
+      }
+    }
   }
   
   res.json({
