@@ -12,11 +12,12 @@ const SIMULATOR_URL = process.env.SIMULATOR_URL || 'http://localhost:4100';
 
 async function main() {
   const tickets = db.prepare(`
-    SELECT t.id, t.assigned_tech_id, t.locator_status, u.name as tech_name
+    SELECT t.id, t.external_ticket_id, t.assigned_tech_id, t.locator_status, u.name as tech_name
     FROM tickets t
     LEFT JOIN users u ON u.id = t.assigned_tech_id
     WHERE t.assigned_tech_id IS NOT NULL
       AND t.source = '811'
+      AND t.external_ticket_id IS NOT NULL
       AND t.locator_status NOT IN ('CLOSED','UNABLE')
   `).all();
 
@@ -28,7 +29,7 @@ async function main() {
   for (const t of tickets) {
     try {
       const response = await fetch(
-        `${SIMULATOR_URL}/api/811/tickets/${t.id}/assign`,
+        `${SIMULATOR_URL}/api/811/tickets/${t.external_ticket_id}/assign`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

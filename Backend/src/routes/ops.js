@@ -1457,9 +1457,9 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
   });
 
   // Notify the 811 simulator of the assignment so it can reflect real-world state
-  if (resolvedTechId && tech) {
+  if (resolvedTechId && tech && ticket.source === '811' && ticket.external_ticket_id) {
     fetch(
-      `${process.env.SIMULATOR_URL || 'http://localhost:4100'}/api/811/tickets/${ticketId}/assign`,
+      `${process.env.SIMULATOR_URL || 'http://localhost:4100'}/api/811/tickets/${ticket.external_ticket_id}/assign`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

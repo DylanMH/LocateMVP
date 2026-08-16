@@ -21,11 +21,15 @@ const SIMULATOR_URL = process.env.SIMULATOR_URL || 'http://localhost:4100';
  * Notify the 811 simulator that a ticket has been assigned to a tech.
  * Fire-and-forget — failures are logged but do not block assignment.
  */
-async function notifySimulatorOfAssignment(ticketId, techId, techName, locatorStatus) {
+async function notifySimulatorOfAssignment(db, ticketId, techId, techName, locatorStatus) {
   try {
-    const externalTicketId = ticketId; // L720 ticket id == 811 ticket id for sourced tickets
+    // The simulator's ticket ID is stored in external_ticket_id
+    const ticket = db.prepare('SELECT external_ticket_id, source FROM tickets WHERE id = ?').get(ticketId);
+    if (!ticket || ticket.source !== '811' || !ticket.external_ticket_id) {
+      return; // Not an 811 ticket, nothing to notify
+    }
     const response = await fetch(
-      `${SIMULATOR_URL}/api/811/tickets/${externalTicketId}/assign`,
+      `${SIMULATOR_URL}/api/811/tickets/${ticket.external_ticket_id}/assign`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -71,7 +75,7 @@ export function assignTicketToTechTerritory(db, ticketId, techTerritoryId, super
       const r = assignTicketToUser(db, ticketId, tech.id, tech.name);
       console.log(`[Assignment] Assigned ticket ${ticketId} to tech ${tech.name} (${tech.id}) in ${techTerritoryId}`);
       // Fire-and-forget notification to the 811 simulator
-      notifySimulatorOfAssignment(ticketId, tech.id, tech.name, 'ASSIGNED');
+      notifySimulatorOfAssignment(db, ticketId, tech.id, tech.name, 'ASSIGNED');
       return r;
     }
 
@@ -81,7 +85,7 @@ export function assignTicketToTechTerritory(db, ticketId, techTerritoryId, super
       if (supe) {
         const r = assignTicketToUser(db, ticketId, supe.id, supe.name);
         console.log(`[Assignment] Assigned ticket ${ticketId} to supervisor ${supe.name} (${supe.id}) — no tech in ${techTerritoryId}`);
-        notifySimulatorOfAssignment(ticketId, supe.id, supe.name, 'ASSIGNED');
+        notifySimulatorOfAssignment(db, ticketId, supe.id, supe.name, 'ASSIGNED');
         return r;
       }
     }
