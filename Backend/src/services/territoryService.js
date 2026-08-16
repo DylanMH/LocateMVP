@@ -285,6 +285,28 @@ export function pickTechForTerritory(db, techTerritoryId) {
   return techs[0];
 }
 
+/**
+ * Pick the supervisor who owns a given supervisor territory. Used as a
+ * fallback when no tech is assigned to a ticket's tech_territory — the
+ * ticket goes to the supervisor so it doesn't sit unassigned.
+ * Returns null if no supervisor owns that territory.
+ */
+export function pickSupervisorForTerritory(db, supervisorTerritoryId) {
+  if (!supervisorTerritoryId) return null;
+  const row = db.prepare(`
+    SELECT u.id, u.name, u.role
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id = ?
+      AND uta.assignment_type IN ('OWNER','MANAGER')
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.is_active = 1
+      AND u.role = 'SUPERVISOR'
+    LIMIT 1
+  `).get(supervisorTerritoryId, Date.now());
+  return row || null;
+}
+
 function pointInGeometry(lat, lng, geometry) {
   if (!geometry?.type || !geometry?.coordinates) return false;
 

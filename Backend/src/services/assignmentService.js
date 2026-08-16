@@ -6,37 +6,59 @@
  *
  * A ticket is always routed to its tech_territory_id (set by the
  * ingestionService via territoryService.resolveTerritoryChainForPoint).
- * If nobody is assigned to that territory, the ticket is left unassigned —
- * a supervisor will still see it via territory visibility rules.
+ * If nobody is assigned to that territory, the ticket falls back to the
+ * supervisor who owns the supervisor_territory so no ticket sits unassigned.
  */
 
-import { pickTechForTerritory } from './territoryService.js';
+import {
+  pickTechForTerritory,
+  pickSupervisorForTerritory,
+} from './territoryService.js';
+
+/**
+ * Assign a ticket to a user by their id.
+ * @returns {Object} - { success, assignedUserId?, assignedUserName?, error? }
+ */
+function assignTicketToUser(db, ticketId, userId, userName) {
+  db.prepare(`
+    UPDATE tickets
+    SET assigned_tech_id = ?,
+        locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
+        updated_at = ?,
+        version = version + 1
+    WHERE id = ?
+  `).run(userId, Date.now(), ticketId);
+  return { success: true, assignedTechId: userId, assignedTechName: userName };
+}
 
 /**
  * Assign a ticket to a tech in its tech_territory (by territory id).
+ * Falls back to the supervisor if no tech covers the territory.
  * @returns {Object} - { success, assignedTechId?, assignedTechName?, error? }
  */
-export function assignTicketToTechTerritory(db, ticketId, techTerritoryId) {
+export function assignTicketToTechTerritory(db, ticketId, techTerritoryId, supervisorTerritoryId) {
   try {
     if (!techTerritoryId) {
       return { success: false, error: 'No tech_territory_id resolved for ticket' };
     }
     const tech = pickTechForTerritory(db, techTerritoryId);
-    if (!tech) {
-      return { success: false, error: `No techs assigned to territory ${techTerritoryId}` };
+    if (tech) {
+      const r = assignTicketToUser(db, ticketId, tech.id, tech.name);
+      console.log(`[Assignment] Assigned ticket ${ticketId} to tech ${tech.name} (${tech.id}) in ${techTerritoryId}`);
+      return r;
     }
 
-    db.prepare(`
-      UPDATE tickets
-      SET assigned_tech_id = ?,
-          locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
-          updated_at = ?,
-          version = version + 1
-      WHERE id = ?
-    `).run(tech.id, Date.now(), ticketId);
+    // No tech in this territory — fall back to supervisor.
+    if (supervisorTerritoryId) {
+      const supe = pickSupervisorForTerritory(db, supervisorTerritoryId);
+      if (supe) {
+        const r = assignTicketToUser(db, ticketId, supe.id, supe.name);
+        console.log(`[Assignment] Assigned ticket ${ticketId} to supervisor ${supe.name} (${supe.id}) — no tech in ${techTerritoryId}`);
+        return r;
+      }
+    }
 
-    console.log(`[Assignment] Assigned ticket ${ticketId} to ${tech.name} (${tech.id}) in ${techTerritoryId}`);
-    return { success: true, assignedTechId: tech.id, assignedTechName: tech.name };
+    return { success: false, error: `No techs in territory ${techTerritoryId} and no supervisor found` };
   } catch (error) {
     console.error(`[Assignment] Failed to assign ticket ${ticketId}:`, error.message);
     return { success: false, error: error.message };
@@ -60,7 +82,7 @@ export function assignUnassignedTickets(db) {
   const results = { assigned: 0, errors: [] };
 
   const unassigned = db.prepare(`
-    SELECT id, tech_territory_id
+    SELECT id, tech_territory_id, supervisor_territory_id
     FROM tickets
     WHERE assigned_tech_id IS NULL
       AND locator_status NOT IN ('CLOSED','UNABLE')
@@ -73,7 +95,7 @@ export function assignUnassignedTickets(db) {
       results.errors.push(`Ticket ${t.id}: no tech_territory_id resolved`);
       continue;
     }
-    const r = assignTicketToTechTerritory(db, t.id, t.tech_territory_id);
+    const r = assignTicketToTechTerritory(db, t.id, t.tech_territory_id, t.supervisor_territory_id);
     if (r.success) results.assigned++;
     else results.errors.push(`Ticket ${t.id}: ${r.error}`);
   }
