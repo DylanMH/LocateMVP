@@ -5,7 +5,7 @@
 import { resolveTerritoryChainForPoint } from './territoryService.js';
 
 const ELEVEN_SIM_BASE_URL = 'http://localhost:4100';
-const MAX_811_PULL_LIMIT = 200;
+const MAX_811_PULL_LIMIT = 500;
 
 function getStableAccountNumber(source = {}) {
   return (

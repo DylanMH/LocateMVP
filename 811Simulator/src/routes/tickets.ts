@@ -104,7 +104,7 @@ export async function ticketsRoutes(app: FastifyInstance) {
     });
     const q = querySchema.parse(req.query ?? {});
     const since = q.since ? Number(q.since) : 0;
-    const limit = q.limit ? Math.min(200, Math.max(1, Number(q.limit))) : 50;
+    const limit = q.limit ? Math.min(500, Math.max(1, Number(q.limit))) : 50;
 
     // Find tickets that have at least one member matching memberCode
     const tickets = db.prepare(`
