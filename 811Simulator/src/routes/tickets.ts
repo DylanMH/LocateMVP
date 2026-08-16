@@ -8,6 +8,9 @@ import {
   LINKED_TICKET_TYPES,
 } from "../domain/generator.js";
 import { notifyL720BackendOf811Change } from "../services/dispatchNotifier.js";
+import { AREAS, type AreaId } from "../domain/areas.js";
+
+const AREA_IDS = AREAS.map((a) => a.id) as [AreaId, ...AreaId[]];
 
 function shapeTicketForApi(t: any) {
   let payload: any = {};
@@ -40,8 +43,8 @@ function shapeTicketForApi(t: any) {
 export async function ticketsRoutes(app: FastifyInstance) {
   app.post("/api/811/generate", async (req, reply) => {
     const bodySchema = z.object({
-      areaId: z.enum(["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"]).optional(),
-      count: z.number().int().min(1).max(200).default(10),
+      areaId: z.enum(AREA_IDS).optional(),
+      count: z.number().int().min(1).max(300).default(10),
     });
     const body = bodySchema.parse(req.body ?? {});
     const triggerAt = Date.now() - 1000;

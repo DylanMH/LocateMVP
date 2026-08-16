@@ -4,8 +4,11 @@ import crypto from "node:crypto";
 import { db } from "../db/db.js";
 import { buildTicketScope } from "../domain/scope.js";
 import { notifyL720BackendOf811Change } from "../services/dispatchNotifier.js";
+import { AREAS, type AreaId } from "../domain/areas.js";
 
-function getAreaBounds(areaId: "JOSEPHINE" | "MABANK" | "GUN_BARREL" | "EUSTACE" | "TOOL" | "SEVEN_POINTS" | "HEATH" | "MCLENDON_CHISHOLM" | "KEMP" | "ENCHANTED_OAKS") {
+const AREA_IDS = AREAS.map((a) => a.id) as [AreaId, ...AreaId[]];
+
+function getAreaBounds(areaId: string) {
   const area = db
     .prepare(
       `
@@ -37,7 +40,7 @@ function buildScopePayload(params: {
   ticketId: string;
   ticketNumber: string;
   ticketType: "NORMAL" | "EMERGENCY" | "DIGUP" | "NON_COMPLIANT" | "UPDATE" | "UPDATE_REMARK" | "RECALL" | "NO_RESPONSE";
-  areaId: "JOSEPHINE" | "MABANK" | "GUN_BARREL" | "EUSTACE" | "TOOL" | "SEVEN_POINTS" | "HEATH" | "MCLENDON_CHISHOLM" | "KEMP" | "ENCHANTED_OAKS";
+  areaId: string;
   lat: number;
   lng: number;
   workType?: string;
@@ -243,7 +246,7 @@ export async function opsRoutes(app: FastifyInstance) {
       const bodySchema = z.object({
         ticketNumber: z.string().min(1),
         ticketType: z.enum(["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"]).default("NORMAL"),
-        areaId: z.enum(["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"]),
+        areaId: z.enum(AREA_IDS),
         address: z.string().min(1),
         lat: z.number(),
         lng: z.number(),
@@ -315,13 +318,13 @@ export async function opsRoutes(app: FastifyInstance) {
         dueAt,
         body.address,
         (() => {
-          const names: Record<string,string> = { JOSEPHINE:"Josephine",MABANK:"Mabank",GUN_BARREL:"Gun Barrel City",EUSTACE:"Eustace",TOOL:"Tool",SEVEN_POINTS:"Seven Points",HEATH:"Heath",MCLENDON_CHISHOLM:"McLendon-Chisholm",KEMP:"Kemp",ENCHANTED_OAKS:"Enchanted Oaks" };
-          return names[body.areaId] || "Unknown";
+          const a = AREAS.find((x) => x.id === body.areaId);
+          return a ? a.name.replace(/, TX$/, "") : "Unknown";
         })(),
         "TX",
         (() => {
-          const zips: Record<string,string> = { JOSEPHINE:"75173",MABANK:"75147",GUN_BARREL:"75156",EUSTACE:"75124",TOOL:"75143",SEVEN_POINTS:"75143",HEATH:"75032",MCLENDON_CHISHOLM:"75032",KEMP:"75143",ENCHANTED_OAKS:"75156" };
-          return zips[body.areaId] || "75143";
+          // Default zip — not critical for simulation
+          return "75000";
         })(),
         body.lat,
         body.lng,
@@ -399,7 +402,7 @@ export async function opsRoutes(app: FastifyInstance) {
         status: z
           .enum(["NEW", "SENT_TO_MEMBER", "RESPONDED", "CLOSED"])
           .optional(),
-        areaId: z.enum(["JOSEPHINE","MABANK","GUN_BARREL","EUSTACE","TOOL","SEVEN_POINTS","HEATH","MCLENDON_CHISHOLM","KEMP","ENCHANTED_OAKS"]).optional(),
+        areaId: z.enum(AREA_IDS).optional(),
         address: z.string().min(1).optional(),
         lat: z.number().optional(),
         lng: z.number().optional(),
