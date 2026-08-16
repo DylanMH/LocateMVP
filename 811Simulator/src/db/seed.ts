@@ -15,7 +15,7 @@ export function seedAreas() {
     console.log("[seed] Area list changed — clearing old service_areas for re-seed");
     // Delete child rows first to avoid FK constraint failures.
     db.prepare(`DELETE FROM ticket_members_811`).run();
-    db.prepare(`DELETE FROM ticket_events_811`).run();
+    db.prepare(`DELETE FROM ticket_event_log_811`).run();
     db.prepare(`DELETE FROM tickets_811`).run();
     db.prepare(`DELETE FROM service_areas`).run();
   }
