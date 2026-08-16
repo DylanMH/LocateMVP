@@ -116,5 +116,19 @@ export default schemaMigrations({
         ),
       ],
     },
+    {
+      // v8: clock-in reason and allocation type for day_sessions.
+      toVersion: 8,
+      steps: [
+        addColumns({
+          table: 'day_sessions',
+          columns: [
+            { name: 'clock_in_reason', type: 'string', isOptional: true },
+            { name: 'allocation_type', type: 'string', isOptional: true },
+            { name: 'other_reason', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

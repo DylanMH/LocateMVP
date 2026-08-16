@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../src/ui/colors";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { database } from "../../src/db/database";
@@ -13,7 +14,9 @@ import { API_BASE_URL, ENDPOINTS } from "../../src/config/api";
 import { fetchWithTimeout } from "../../src/utils/fetchWithTimeout";
 import { getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
 import { parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
+import { getAllocationLabel } from "../../src/features/timesheet/components/ReasonSelectorModal";
 
+// ── Types ──────────────────────────────────────────────────
 interface ProfileMetrics {
   supervisor: string;
   ticketsOnBoard: number;
@@ -43,8 +46,10 @@ interface LocalMetricsSnapshot {
   totalUtilitiesClosed: number;
   accumulatedClockInTimeMs: number;
   hasActiveSession: boolean;
+  allocationType: string | null;
 }
 
+// ── Local Metrics ─────────────────────────────────────────
 async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapshot> {
   const today = getTodayDateString();
   const todayStartMs = new Date().setHours(0, 0, 0, 0);
@@ -54,11 +59,7 @@ async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapsh
   const [userTickets, todaySessions] = await Promise.all([
     ticketsCollection.query(Q.where("assigned_tech_id", id)).fetch(),
     sessionsCollection
-      .query(
-        Q.where("user_id", id),
-        Q.where("date", today),
-        Q.sortBy("created_at", Q.desc),
-      )
+      .query(Q.where("user_id", id), Q.where("date", today), Q.sortBy("created_at", Q.desc))
       .fetch(),
   ]);
 
@@ -67,50 +68,33 @@ async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapsh
   let totalUtilitiesClosed = 0;
 
   for (const ticket of userTickets) {
-    const wasClosedToday = !!ticket.closedAt && ticket.closedAt >= todayStartMs;
-
-    if (!wasClosedToday) {
-      continue;
-    }
-
+    if (!ticket.closedAt || ticket.closedAt < todayStartMs) continue;
     closedToday += 1;
-
-    if (ticket.closedAt && ticket.closedAt >= todayStartMs) {
-      const payload = parseTicketPayload(ticket.payloadJson);
-      const customerMarking = payload.customerMarking || payload.customerMarkings || {};
-
-      for (const marking of Object.values(customerMarking) as any[]) {
-        if (marking?.completed) {
-          totalUtilitiesClosed += 1;
-        }
-
-        const footage = parseInt(marking?.footage || "0", 10);
-        if (!Number.isNaN(footage)) {
-          totalFootageAllocated += footage;
-        }
-      }
+    const payload = parseTicketPayload(ticket.payloadJson);
+    const markings = payload.customerMarkings || payload.customerMarking || {};
+    for (const marking of Object.values(markings) as any[]) {
+      if (marking?.completed) totalUtilitiesClosed += 1;
+      const footage = parseInt(marking?.footage || "0", 10);
+      if (!Number.isNaN(footage)) totalFootageAllocated += footage;
     }
   }
 
   const ticketsOnBoard = userTickets.filter(
-    (ticket) =>
-      ticket.locatorStatus !== "CLOSED" && ticket.locatorStatus !== "UNABLE",
+    (t) => t.locatorStatus !== "CLOSED" && t.locatorStatus !== "UNABLE",
   ).length;
 
   const accumulatedClockInTimeMs = todaySessions.reduce((total, session) => {
-    if (!session.clockInAt) {
-      return total;
-    }
-
+    if (!session.clockInAt) return total;
     const endTime =
       session.status === "ACTIVE"
         ? Date.now()
         : session.clockOutAt && session.clockOutAt > session.clockInAt
           ? session.clockOutAt
           : session.clockInAt;
-
     return total + Math.max(0, endTime - session.clockInAt);
   }, 0);
+
+  const activeSession = todaySessions.find((s) => s.status === "ACTIVE");
 
   return {
     ticketsOnBoard,
@@ -118,47 +102,39 @@ async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapsh
     totalFootageAllocated,
     totalUtilitiesClosed,
     accumulatedClockInTimeMs,
-    hasActiveSession: todaySessions.some((session) => session.status === "ACTIVE"),
+    hasActiveSession: Boolean(activeSession),
+    allocationType: activeSession?.allocationType || null,
   };
 }
 
+// ── Formatting ─────────────────────────────────────────────
 function formatDuration(ms: number): string {
   const totalMinutes = Math.max(0, Math.floor(ms / 60000));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function formatRate(value: number): string {
   return Number.isFinite(value) ? value.toFixed(1) : "0.0";
 }
 
-function InfoCard({ label, value }: { label: string; value: string }) {
+// ── Mini Components ────────────────────────────────────────
+function StatPill({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <View className="rounded-xl p-4 mb-4" style={{ backgroundColor: colors.surface }}>
-      <Text className="text-sm font-semibold mb-1" style={{ color: colors.muted }}>
-        {label}
-      </Text>
-      <Text className="text-lg" style={{ color: colors.text }}>
+    <View className="items-center flex-1">
+      <Text className="text-2xl font-bold" style={{ color: color || colors.text }}>
         {value}
+      </Text>
+      <Text className="text-xs mt-0.5 text-center" style={{ color: colors.muted }}>
+        {label}
       </Text>
     </View>
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="flex-1 rounded-xl p-4" style={{ backgroundColor: colors.surface }}>
-      <Text className="text-xs font-semibold mb-1" style={{ color: colors.muted }}>
-        {label}
-      </Text>
-      <Text className="text-xl font-bold" style={{ color: colors.text }}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
+// ── Main Screen ────────────────────────────────────────────
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -168,12 +144,27 @@ export default function ProfileScreen() {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const [localClockMs, setLocalClockMs] = useState(0);
   const [hasActiveSession, setHasActiveSession] = useState(false);
+  const [allocationType, setAllocationType] = useState<string | null>(null);
   const [todayKey, setTodayKey] = useState(getTodayDateString());
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const displayedClockMs = Math.max(
-    metrics.accumulatedClockInTimeMs,
-    localClockMs,
-  );
+  const displayedClockMs = Math.max(metrics.accumulatedClockInTimeMs, localClockMs);
+
+  // Live elapsed timer while clocked in.
+  useEffect(() => {
+    if (hasActiveSession) {
+      setElapsedSec(Math.floor(localClockMs / 1000));
+      timerRef.current = setInterval(() => {
+        setElapsedSec((s) => s + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [hasActiveSession, localClockMs]);
 
   const clockOutBeforeSignOut = async () => {
     if (!user) return;
@@ -182,231 +173,230 @@ export default function ProfileScreen() {
       endActiveBreak: true,
       requireNoActiveTickets: true,
     });
-    logger.log("[Profile] Session closeout completed before sign out");
   };
 
   const loadProfileMetrics = useCallback(async () => {
     if (!user) return;
-
     setIsRefreshing(true);
     setMetricsError(null);
 
     try {
-      const fallbackMetrics = await buildLocalMetricsSnapshot(user.id);
-      const fallbackHours = fallbackMetrics.accumulatedClockInTimeMs / 3600000;
+      const fallback = await buildLocalMetricsSnapshot(user.id);
+      const fallbackHours = fallback.accumulatedClockInTimeMs / 3600000;
 
       const response = await fetchWithTimeout(
         `${API_BASE_URL}${ENDPOINTS.users}/${encodeURIComponent(user.id)}/productivity-summary`,
       );
 
-      if (!response.ok) {
-        throw new Error(`Failed to load productivity summary (${response.status})`);
-      }
+      if (!response.ok) throw new Error(`Failed (${response.status})`);
 
-      const summaryData = await response.json();
-      const totalUtilitiesClosed =
-        summaryData?.totalUtilitiesClosed ?? fallbackMetrics.totalUtilitiesClosed;
-      const totalFootageAllocated =
-        summaryData?.totalFootageAllocated ?? fallbackMetrics.totalFootageAllocated;
-      const accumulatedClockInTimeMs =
-        summaryData?.accumulatedClockInTimeMs ?? fallbackMetrics.accumulatedClockInTimeMs;
-      const workedHours = accumulatedClockInTimeMs / 3600000;
+      const d = await response.json();
+      const uClosed = d?.totalUtilitiesClosed ?? fallback.totalUtilitiesClosed;
+      const footage = d?.totalFootageAllocated ?? fallback.totalFootageAllocated;
+      const clockMs = d?.accumulatedClockInTimeMs ?? fallback.accumulatedClockInTimeMs;
+      const workedH = clockMs / 3600000;
 
       setMetrics({
-        supervisor: summaryData?.supervisor || "Not assigned",
-        ticketsOnBoard: summaryData?.ticketsOnBoard ?? fallbackMetrics.ticketsOnBoard,
-        closedToday: summaryData?.closedToday ?? fallbackMetrics.closedToday,
-        totalFootageAllocated,
-        totalUtilitiesClosed,
-        lph:
-          summaryData?.lph ??
-          (fallbackHours > 0 ? totalUtilitiesClosed / fallbackHours : 0),
-        fph:
-          summaryData?.fph ??
-          (fallbackHours > 0 ? totalFootageAllocated / fallbackHours : 0),
-        accumulatedClockInTimeMs,
+        supervisor: d?.supervisor || "Not assigned",
+        ticketsOnBoard: d?.ticketsOnBoard ?? fallback.ticketsOnBoard,
+        closedToday: d?.closedToday ?? fallback.closedToday,
+        totalFootageAllocated: footage,
+        totalUtilitiesClosed: uClosed,
+        lph: d?.lph ?? (fallbackHours > 0 ? uClosed / fallbackHours : 0),
+        fph: d?.fph ?? (fallbackHours > 0 ? footage / fallbackHours : 0),
+        accumulatedClockInTimeMs: clockMs,
       });
-      setLocalClockMs(fallbackMetrics.accumulatedClockInTimeMs);
-      setHasActiveSession(fallbackMetrics.hasActiveSession);
+      setLocalClockMs(fallback.accumulatedClockInTimeMs);
+      setHasActiveSession(fallback.hasActiveSession);
+      setAllocationType(fallback.allocationType);
     } catch (error) {
       logger.error("[Profile] Failed to load metrics:", error);
-      const fallbackMetrics = await buildLocalMetricsSnapshot(user.id);
-      const fallbackHours = fallbackMetrics.accumulatedClockInTimeMs / 3600000;
-
+      const fallback = await buildLocalMetricsSnapshot(user.id);
+      const fallbackHours = fallback.accumulatedClockInTimeMs / 3600000;
       setMetrics({
         supervisor: "Not assigned",
-        ticketsOnBoard: fallbackMetrics.ticketsOnBoard,
-        closedToday: fallbackMetrics.closedToday,
-        totalFootageAllocated: fallbackMetrics.totalFootageAllocated,
-        totalUtilitiesClosed: fallbackMetrics.totalUtilitiesClosed,
-        lph:
-          fallbackHours > 0
-            ? fallbackMetrics.totalUtilitiesClosed / fallbackHours
-            : 0,
-        fph:
-          fallbackHours > 0
-            ? fallbackMetrics.totalFootageAllocated / fallbackHours
-            : 0,
-        accumulatedClockInTimeMs: fallbackMetrics.accumulatedClockInTimeMs,
+        ticketsOnBoard: fallback.ticketsOnBoard,
+        closedToday: fallback.closedToday,
+        totalFootageAllocated: fallback.totalFootageAllocated,
+        totalUtilitiesClosed: fallback.totalUtilitiesClosed,
+        lph: fallbackHours > 0 ? fallback.totalUtilitiesClosed / fallbackHours : 0,
+        fph: fallbackHours > 0 ? fallback.totalFootageAllocated / fallbackHours : 0,
+        accumulatedClockInTimeMs: fallback.accumulatedClockInTimeMs,
       });
-      setLocalClockMs(fallbackMetrics.accumulatedClockInTimeMs);
-      setHasActiveSession(fallbackMetrics.hasActiveSession);
-      setMetricsError(
-        error instanceof Error
-          ? `${error.message}. Showing local fallback values where available.`
-          : "Failed to load profile metrics",
-      );
+      setLocalClockMs(fallback.accumulatedClockInTimeMs);
+      setHasActiveSession(fallback.hasActiveSession);
+      setAllocationType(fallback.allocationType);
+      setMetricsError(error instanceof Error ? `${error.message}. Showing local values.` : "Failed to load metrics");
     } finally {
       setIsRefreshing(false);
     }
   }, [user]);
 
-  useEffect(() => {
-    loadProfileMetrics();
-  }, [loadProfileMetrics]);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadProfileMetrics();
-    }, [loadProfileMetrics]),
-  );
+  useEffect(() => { loadProfileMetrics(); }, [loadProfileMetrics]);
+  useFocusEffect(useCallback(() => { loadProfileMetrics(); }, [loadProfileMetrics]));
 
   useEffect(() => {
     if (!user) return;
-
     let cancelled = false;
-
-    const refreshLocalClock = async () => {
-      const snapshot = await buildLocalMetricsSnapshot(user.id);
+    const refresh = async () => {
+      const snap = await buildLocalMetricsSnapshot(user.id);
       if (cancelled) return;
-
-      setLocalClockMs(snapshot.accumulatedClockInTimeMs);
-      setHasActiveSession(snapshot.hasActiveSession);
-
-      const nextTodayKey = getTodayDateString();
-      if (nextTodayKey !== todayKey) {
-        setTodayKey(nextTodayKey);
-        loadProfileMetrics();
-      }
+      setLocalClockMs(snap.accumulatedClockInTimeMs);
+      setHasActiveSession(snap.hasActiveSession);
+      setAllocationType(snap.allocationType);
+      const next = getTodayDateString();
+      if (next !== todayKey) { setTodayKey(next); loadProfileMetrics(); }
     };
-
-    refreshLocalClock();
-
-    const interval = setInterval(() => {
-      refreshLocalClock();
-    }, 60000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    refresh();
+    const iv = setInterval(refresh, 60000);
+    return () => { cancelled = true; clearInterval(iv); };
   }, [user, todayKey, loadProfileMetrics]);
 
   const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out? If you are clocked in, the app will clock you out first.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            if (!user) return;
-
-            setIsSigningOut(true);
-
-            try {
-              await logout({ beforeLogout: clockOutBeforeSignOut });
-              router.replace('/');
-            } catch (error) {
-              logger.error("[Profile] Failed to sign out cleanly:", error);
-              Alert.alert(
-                "Unable to Sign Out",
-                error instanceof Error
-                  ? error.message
-                  : "Failed to complete sign out. Please try again.",
-              );
-            } finally {
-              setIsSigningOut(false);
-            }
-          },
+    Alert.alert("Sign Out", "Are you sure? If clocked in, you'll be clocked out first.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out", style: "destructive",
+        onPress: async () => {
+          if (!user) return;
+          setIsSigningOut(true);
+          try {
+            await logout({ beforeLogout: clockOutBeforeSignOut });
+            router.replace("/");
+          } catch (error) {
+            logger.error("[Profile] Sign out failed:", error);
+            Alert.alert("Unable to Sign Out", error instanceof Error ? error.message : "Try again.");
+          } finally {
+            setIsSigningOut(false);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
+  // ── Render ───────────────────────────────────────────────
   return (
     <View className="flex-1" style={{ backgroundColor: colors.bg }}>
-      <ScrollView className="flex-1 px-6 pt-6">
-        <Text className="text-2xl font-bold mb-6" style={{ color: colors.text }}>
-          Profile
-        </Text>
-
-        <InfoCard label="Name" value={user?.name || "Unknown"} />
-        <InfoCard label="Email" value={user?.email || "N/A"} />
-        <InfoCard label="Role" value={user?.role || "N/A"} />
-        <InfoCard label="Supervisor" value={metrics.supervisor} />
-
-        <View className="flex-row mb-4" style={{ gap: 12 }}>
-          <MetricCard label="Tickets On Board" value={String(metrics.ticketsOnBoard)} />
-          <MetricCard label="Closed Today" value={String(metrics.closedToday)} />
+      <ScrollView className="flex-1 px-5 pt-6">
+        {/* Header */}
+        <View className="flex-row items-center justify-between mb-6">
+          <Text className="text-2xl font-bold" style={{ color: colors.text }}>Profile</Text>
+          {hasActiveSession && (
+            <View className="flex-row items-center" style={{ gap: 4 }}>
+              <View className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors.success }} />
+              <Text className="text-sm font-semibold" style={{ color: colors.success }}>On the Clock</Text>
+            </View>
+          )}
         </View>
 
-        <View className="flex-row mb-4" style={{ gap: 12 }}>
-          <MetricCard label="Utilities Closed" value={String(metrics.totalUtilitiesClosed)} />
-          <MetricCard label="Footage Allocated" value={`${metrics.totalFootageAllocated} ft`} />
+        {/* User Identity Card */}
+        <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.surface }}>
+          <View className="flex-row items-center mb-3">
+            <View className="w-12 h-12 rounded-full items-center justify-center mr-3" style={{ backgroundColor: colors.primary }}>
+              <Text className="text-lg font-bold" style={{ color: colors.text }}>
+                {(user?.name || "U")[0].toUpperCase()}
+              </Text>
+            </View>
+            <View className="flex-1">
+              <Text className="text-lg font-bold" style={{ color: colors.text }}>{user?.name || "Unknown"}</Text>
+              <Text className="text-sm" style={{ color: colors.muted }}>{user?.email || "N/A"}</Text>
+            </View>
+            <View className="rounded-lg px-2.5 py-1" style={{ backgroundColor: colors.primary + "20" }}>
+              <Text className="text-xs font-semibold" style={{ color: colors.primary }}>{user?.role || "N/A"}</Text>
+            </View>
+          </View>
+          {metrics.supervisor !== "Not assigned" && (
+            <View className="flex-row items-center mt-2 pt-2" style={{ borderTopWidth: 1, borderTopColor: colors.bg, gap: 6 }}>
+              <Ionicons name="people" size={14} color={colors.muted} />
+              <Text className="text-sm" style={{ color: colors.muted }}>
+                Supervisor: <Text style={{ color: colors.text }}>{metrics.supervisor}</Text>
+              </Text>
+            </View>
+          )}
         </View>
 
-        <View className="flex-row mb-6" style={{ gap: 12 }}>
-          <MetricCard label="LPH" value={formatRate(metrics.lph)} />
-          <MetricCard label="FPH" value={formatRate(metrics.fph)} />
+        {/* Clock Status */}
+        {hasActiveSession && (
+          <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.success + "10", borderWidth: 1, borderColor: colors.success + "20" }}>
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-xs font-semibold uppercase tracking-wider" style={{ color: colors.success }}>Clocked In</Text>
+              {allocationType && (
+                <View className="rounded-lg px-2 py-0.5" style={{ backgroundColor: colors.primary + "20" }}>
+                  <Text className="text-xs font-semibold" style={{ color: colors.primary }}>
+                    {getAllocationLabel(allocationType)}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <Text className="text-2xl font-bold" style={{ color: colors.success }}>
+              {formatDuration(elapsedSec * 1000)}
+            </Text>
+          </View>
+        )}
+
+        {/* Stats Grid */}
+        <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.surface }}>
+          <Text className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: colors.muted }}>
+            Today's Performance
+          </Text>
+          <View className="flex-row mb-5" style={{ gap: 12 }}>
+            <StatPill label="On Board" value={String(metrics.ticketsOnBoard)} color={colors.accent} />
+            <StatPill label="Closed" value={String(metrics.closedToday)} color={colors.success} />
+            <StatPill label="Utilities" value={String(metrics.totalUtilitiesClosed)} color={colors.lightBlue} />
+          </View>
+          <View className="flex-row" style={{ gap: 12 }}>
+            <StatPill label="Footage" value={`${metrics.totalFootageAllocated} ft`} />
+            <StatPill label="LPH" value={formatRate(metrics.lph)} color={colors.accent} />
+            <StatPill label="FPH" value={formatRate(metrics.fph)} color={colors.accent} />
+          </View>
         </View>
 
-        <InfoCard
-          label={hasActiveSession ? "Accumulated Clock In Time (Live Today)" : "Accumulated Clock In Time"}
-          value={formatDuration(displayedClockMs)}
-        />
+        {/* Total Clocked Today */}
+        <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.surface }}>
+          <View className="flex-row items-center justify-between">
+            <View>
+              <Text className="text-xs font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>
+                Total Clocked Today
+              </Text>
+              <Text className="text-xl font-bold mt-1" style={{ color: colors.text }}>
+                {formatDuration(displayedClockMs)}
+              </Text>
+            </View>
+            <Ionicons name="time-outline" size={28} color={colors.muted} />
+          </View>
+        </View>
 
+        {/* Error banner */}
+        {metricsError ? (
+          <View className="rounded-xl p-4 mb-5" style={{ backgroundColor: colors.danger + "15" }}>
+            <Text className="text-sm" style={{ color: colors.danger }}>{metricsError}</Text>
+          </View>
+        ) : null}
+
+        {/* Actions */}
         <Pressable
           onPress={loadProfileMetrics}
           disabled={isRefreshing || isSigningOut}
-          className="rounded-xl px-4 py-3 mb-4"
-          style={{ backgroundColor: colors.primary, opacity: isRefreshing || isSigningOut ? 0.5 : 1 }}
+          className="rounded-xl px-4 py-3.5 mb-3 flex-row items-center justify-center"
+          style={{ backgroundColor: colors.primary, opacity: isRefreshing || isSigningOut ? 0.5 : 1, gap: 8 }}
         >
           {isRefreshing ? (
             <ActivityIndicator color={colors.text} />
           ) : (
-            <Text className="text-base font-semibold text-center" style={{ color: colors.text }}>
-              Refresh Metrics
-            </Text>
+            <Ionicons name="refresh" size={18} color={colors.text} />
           )}
+          <Text className="text-base font-semibold" style={{ color: colors.text }}>Refresh</Text>
         </Pressable>
-
-        {metricsError ? (
-          <View className="rounded-xl p-4 mb-4" style={{ backgroundColor: colors.danger + "20" }}>
-            <Text style={{ color: colors.danger }}>{metricsError}</Text>
-          </View>
-        ) : null}
 
         <Pressable
           onPress={handleSignOut}
           disabled={isSigningOut}
-          className="rounded-xl px-4 py-3 mb-4"
-          style={{ backgroundColor: colors.danger, opacity: isSigningOut ? 0.5 : 1 }}
+          className="rounded-xl px-4 py-3.5 mb-6 flex-row items-center justify-center"
+          style={{ backgroundColor: colors.danger, opacity: isSigningOut ? 0.5 : 1, gap: 8 }}
         >
-          {isSigningOut ? (
-            <ActivityIndicator color={colors.text} />
-          ) : (
-            <Text className="text-base font-semibold text-center" style={{ color: colors.text }}>
-              Sign Out (Dev Testing)
-            </Text>
-          )}
+          <Ionicons name="log-out" size={18} color={colors.text} />
+          <Text className="text-base font-semibold" style={{ color: colors.text }}>Sign Out</Text>
         </Pressable>
-
-        <Text className="text-sm text-center mt-4" style={{ color: colors.muted }}>
-          Use sign out to test as different users
-        </Text>
       </ScrollView>
     </View>
   );

@@ -30,6 +30,9 @@ export interface ClockEventPayload {
   status?: SessionStatus; // Optional - only needed for CLOCK_IN/CLOCK_OUT
   reason?: string; // For personal time
   ticketId?: string; // For End Day clock out ticket selection
+  clockInReason?: string; // locating | training | truck_support | meeting | oncall | other
+  allocationType?: string; // current allocation (can change)
+  otherReason?: string; // free-text when clock_in_reason = 'other'
   [key: string]: unknown; // Index signature for compatibility
 }
 

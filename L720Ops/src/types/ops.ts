@@ -27,6 +27,11 @@ export interface CurrentSession {
   onBreak: boolean;
   breakType: "LUNCH" | "PERSONAL" | null;
   breakStartedAt: number | null;
+  clockInReason: string | null;
+  allocationType: string | null;
+  otherReason: string | null;
+  clockOutTicket: { id: string; ticketNumber: string } | null;
+  currentTicket: CurrentTicket | null;
 }
 
 export interface CurrentTicket {

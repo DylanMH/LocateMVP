@@ -115,7 +115,7 @@ function computeTicketTimeAllocation(ticket) {
 function getLiveClockState(userId) {
   const session = db
     .prepare(
-      `SELECT id, clock_in_at, status
+      `SELECT id, clock_in_at, status, clock_in_reason, allocation_type, other_reason, clock_out_ticket_id
        FROM day_sessions
        WHERE user_id = ? AND status = 'ACTIVE'
        ORDER BY clock_in_at DESC
@@ -135,6 +135,16 @@ function getLiveClockState(userId) {
     )
     .get(session.id);
 
+  // Resolve clock-out ticket info
+  let clockOutTicket = null;
+  if (session.clock_out_ticket_id) {
+    const t = db.prepare("SELECT id, ticket_number FROM tickets WHERE id = ?").get(session.clock_out_ticket_id);
+    clockOutTicket = t ? { id: t.id, ticketNumber: t.ticket_number } : null;
+  }
+
+  // Resolve current active ticket (ENROUTE/ONSITE/PAUSED)
+  const currentTicket = getTechCurrentTicket(userId);
+
   return {
     clockStatus: openBreak ? `ON_${openBreak.break_type}` : "CLOCKED_IN",
     currentSession: {
@@ -144,6 +154,11 @@ function getLiveClockState(userId) {
       onBreak: Boolean(openBreak),
       breakType: openBreak?.break_type ?? null,
       breakStartedAt: openBreak?.started_at ?? null,
+      clockInReason: session.clock_in_reason || null,
+      allocationType: session.allocation_type || null,
+      otherReason: session.other_reason || null,
+      clockOutTicket,
+      currentTicket,
     },
   };
 }

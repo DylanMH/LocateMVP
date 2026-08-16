@@ -139,6 +139,9 @@ CREATE TABLE IF NOT EXISTS day_sessions (
   clock_out_at INTEGER,
   clock_out_ticket_id TEXT,
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOCKED_OUT')),
+  clock_in_reason TEXT,
+  allocation_type TEXT,
+  other_reason TEXT,
   created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
   updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
   FOREIGN KEY (user_id) REFERENCES users(id),
@@ -319,6 +322,11 @@ ensureColumnExists(
   "last_login_at",
   "ALTER TABLE users ADD COLUMN last_login_at INTEGER",
 );
+
+// Day session allocation columns (clock-in reason tracking).
+ensureColumnExists("day_sessions", "clock_in_reason", "ALTER TABLE day_sessions ADD COLUMN clock_in_reason TEXT");
+ensureColumnExists("day_sessions", "allocation_type", "ALTER TABLE day_sessions ADD COLUMN allocation_type TEXT");
+ensureColumnExists("day_sessions", "other_reason", "ALTER TABLE day_sessions ADD COLUMN other_reason TEXT");
 
 // Area bounding box migrations
 ensureColumnExists("areas", "bbox_north", "ALTER TABLE areas ADD COLUMN bbox_north REAL");

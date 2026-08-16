@@ -140,10 +140,13 @@ function getStatements() {
         clock_out_at,
         clock_out_ticket_id,
         status,
+        clock_in_reason,
+        allocation_type,
+        other_reason,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         user_id = excluded.user_id,
         date = COALESCE(excluded.date, day_sessions.date),
@@ -151,6 +154,9 @@ function getStatements() {
         clock_out_at = COALESCE(excluded.clock_out_at, day_sessions.clock_out_at),
         clock_out_ticket_id = COALESCE(excluded.clock_out_ticket_id, day_sessions.clock_out_ticket_id),
         status = COALESCE(excluded.status, day_sessions.status),
+        clock_in_reason = COALESCE(excluded.clock_in_reason, day_sessions.clock_in_reason),
+        allocation_type = COALESCE(excluded.allocation_type, day_sessions.allocation_type),
+        other_reason = COALESCE(excluded.other_reason, day_sessions.other_reason),
         updated_at = excluded.updated_at
     `),
     insertClockEvent: db.prepare(`
@@ -247,6 +253,9 @@ function persistClockEvent(event) {
         clockInAt,
         clockOutAt,
         status,
+        clockInReason,
+        allocationType,
+        otherReason,
       } = payload;
       const now = Date.now();
 
@@ -258,6 +267,9 @@ function persistClockEvent(event) {
         eventType === 'CLOCK_OUT' ? (clockOutAt || occurredAt) : null,
         eventType === 'CLOCK_OUT' ? (ticketId || null) : null,
         status || (eventType === 'CLOCK_OUT' ? 'CLOCKED_OUT' : 'ACTIVE'),
+        eventType === 'CLOCK_IN' ? (clockInReason || null) : null,
+        allocationType || null,
+        otherReason || null,
         now,
         now,
       );
