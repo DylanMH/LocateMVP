@@ -41,7 +41,8 @@ export function resolveTerritoryChainForPoint(db, lat, lng) {
 
 /**
  * Find the best matching TECH_TERRITORY for a point.
- * First checks coverage_json for cities/counties, then falls back to bbox.
+ * First checks coverage_json for cities/counties, then falls back to bbox,
+ * then falls back to nearest tech territory by centroid distance.
  */
 function findTechTerritoryForPoint(db, lat, lng) {
   const boundaryUnitMatch = findTechTerritoryFromBoundaryUnits(db, lat, lng);
@@ -49,7 +50,8 @@ function findTechTerritoryForPoint(db, lat, lng) {
 
   // Get all active tech territories
   const techTerritories = db.prepare(`
-    SELECT id, coverage_json, bbox_north, bbox_south, bbox_east, bbox_west
+    SELECT id, coverage_json, bbox_north, bbox_south, bbox_east, bbox_west,
+           center_lat, center_lng
     FROM territories
     WHERE type = 'TECH_TERRITORY' AND active = 1
   `).all();
@@ -82,7 +84,22 @@ function findTechTerritoryForPoint(db, lat, lng) {
     }
   }
 
-  return null;
+  // Final fallback: nearest tech territory by centroid distance.
+  // This catches tickets generated slightly outside a city's Census bbox
+  // (the simulator uses a wider service-area bbox than the actual city
+  // boundary). Only tech territories with a centroid are considered.
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const t of techTerritories) {
+    if (t.center_lat == null || t.center_lng == null) continue;
+    const dist = Math.pow(t.center_lat - lat, 2) + Math.pow(t.center_lng - lng, 2);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = t;
+    }
+  }
+
+  return nearest;
 }
 
 function checkPointInCities(db, lat, lng, cityNames) {
