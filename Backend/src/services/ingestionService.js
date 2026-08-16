@@ -466,7 +466,7 @@ function map811TicketToL720(ticket811, existingPayload = {}) {
     }));
   }
 
-  const preservedCustomerMarking = existingPayload.customerMarking || existingPayload.customerMarkings || {};
+  const preservedCustomerMarking = existingPayload.customerMarkings || existingPayload.customerMarking || {};
   const originalTicketData = {
     ...(existingPayload.originalTicketData || {}),
     ...ticket811,
@@ -477,7 +477,7 @@ function map811TicketToL720(ticket811, existingPayload = {}) {
   const payloadJson = {
     ...existingPayload,
     customers,
-    customerMarking: preservedCustomerMarking,
+    customerMarkings: preservedCustomerMarking,
     scope: parsedPayload.scope || existingPayload.scope || null,
     workType: parsedPayload.workType || ticket811.workType || existingPayload.workType || 'Standard Locate',
     contractor: parsedPayload.contractor || ticket811.contractor?.name || existingPayload.contractor || 'Unknown',
@@ -509,15 +509,39 @@ function map811TicketToL720(ticket811, existingPayload = {}) {
 }
 
 /**
- * Check if ticket has pending local changes (mobile outbox events)
+ * Check if ticket has pending local changes that should block 811 overwrites.
+ *
+ * Heuristic: a ticket is "active on mobile" if the locator_status is in a
+ * field-work state (ENROUTE, ONSITE, PAUSED), meaning a tech is actively
+ * working it and their local device holds the source of truth.
+ *
+ * We also check for a recent (last 5 min) mobile-sourced ticket_event to
+ * catch the window right after a status change syncs.
+ *
  * @param {Object} db - Database instance
  * @param {string} ticketId - L720 ticket ID
- * @returns {boolean} - True if pending changes exist
+ * @returns {boolean} - True if pending/active local changes exist
  */
 function hasPendingLocalChanges(db, ticketId) {
-  // For now, simple check - in real implementation would check outbox events
-  // This is a placeholder for conflict resolution logic
-  return false;
+  const ticket = db.prepare(
+    "SELECT locator_status FROM tickets WHERE id = ?"
+  ).get(ticketId);
+  if (!ticket) return false;
+
+  // Active field-work states: tech is working this ticket on their device.
+  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED"]);
+  if (activeStates.has(ticket.locator_status)) return true;
+
+  // Check for recent mobile-sourced events (last 5 minutes).
+  const recentMobileEvent = db.prepare(`
+    SELECT 1 FROM ticket_events
+    WHERE ticket_id = ?
+      AND event_type IN ('TICKET_STATUS_SET', 'TICKET_CUSTOMER_MARKING_SET', 'TICKET_CLOSED')
+      AND created_at > ?
+    LIMIT 1
+  `).get(ticketId, Date.now() - 5 * 60 * 1000);
+
+  return Boolean(recentMobileEvent);
 }
 
 /**

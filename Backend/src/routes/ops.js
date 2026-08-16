@@ -9,11 +9,30 @@ import {
   subscribeOpsEvents,
 } from "../utils/opsEventBus.js";
 import { getChainWithSummaries } from "../services/ticketChainService.js";
+import {
+  buildTicketVisibilityFilter,
+  canUserSeeTicket,
+} from "../services/territoryService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
 
 // ---------- helpers ----------
+
+// Locator status machine (mirrors mobile statusMachine.ts).
+// MANAGER can bypass for admin overrides.
+const ALLOWED_LOCATOR_TRANSITIONS = {
+  ASSIGNED: ["ENROUTE"],
+  ENROUTE: ["ONSITE"],
+  ONSITE: ["PAUSED"],
+  PAUSED: ["ONSITE"],
+  CLOSED: ["ASSIGNED"],   // Reopen: return to assigned for re-locate
+  UNABLE: ["ASSIGNED"],   // Reopen: return to assigned for re-locate
+};
+
+function isValidLocatorTransition(from, to) {
+  return (ALLOWED_LOCATOR_TRANSITIONS[from] || []).includes(to);
+}
 
 function parseJson(value, fallback = {}) {
   try {
@@ -298,34 +317,26 @@ function authenticateTokenQuery(req, res, next) {
   });
 }
 
+// Ops login now delegates to the shared auth logic (see routes/auth.js).
+// Kept as a thin wrapper for backward compatibility with L720Ops.
 router.post("/auth/login", async (req, res) => {
+  const { authenticateLogin } = await import("../routes/auth.js");
+  // Not ideal to dynamically import, so we forward to the unified endpoint.
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password required" });
   }
-
-  // Look up user by email
   const user = db.prepare("SELECT * FROM users WHERE email = ? AND is_active = 1").get(email);
-  if (!user) {
-    return res.status(401).json({ error: "Invalid credentials" });
-  }
+  if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-  // Dev fallback: if password_hash is the placeholder, accept any password (for dev migration)
   let passwordValid = false;
-  if (user.password_hash === '$2b$10$YourDevHashHere.ShouldBeReplacedInProd') {
-    passwordValid = true; // Dev mode: accept any password for seeded users
+  if (process.env.DEV_MODE === "true" && user.password_hash === '$2b$10$YourDevHashHere.ShouldBeReplacedInProd') {
+    passwordValid = true;
   } else if (user.password_hash) {
     passwordValid = await bcrypt.compare(password, user.password_hash);
   }
+  if (!passwordValid) return res.status(401).json({ error: "Invalid credentials" });
 
-  if (!passwordValid) {
-    return res.status(401).json({ error: "Invalid credentials" });
-  }
-
-  // Update last login timestamp
-  db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(Date.now(), user.id);
-
-  // Check if password change is required
   if (user.password_must_change === 1) {
     return res.status(403).json({
       error: "Password change required",
@@ -334,29 +345,15 @@ router.post("/auth/login", async (req, res) => {
     });
   }
 
-  const tokenPayload = {
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    areaId: user.area_id,
-    supervisorId: user.supervisor_id,
-  };
+  db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(Date.now(), user.id);
 
+  const tokenPayload = { id: user.id, email: user.email, role: user.role, areaId: user.area_id, supervisorId: user.supervisor_id };
   const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
   console.log(`[OPS Auth] User ${user.email} (${user.role}) logged in`);
 
   res.json({
     token,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      areaId: user.area_id,
-      supervisorId: user.supervisor_id,
-      title: user.title,
-      phone: user.phone,
-    },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, areaId: user.area_id, supervisorId: user.supervisor_id, title: user.title, phone: user.phone },
   });
 });
 
@@ -926,6 +923,11 @@ router.get("/tickets", authenticateToken, (req, res) => {
     let query = "SELECT * FROM tickets WHERE 1=1";
     const params = [];
 
+    // Territory-based visibility: non-MANAGER users only see tickets in their territory.
+    const territoryFilter = buildTicketVisibilityFilter(db, req.user);
+    query += ` AND ${territoryFilter.sql}`;
+    params.push(...territoryFilter.params);
+
     if (status) {
       query += " AND status = ?";
       params.push(status);
@@ -1015,6 +1017,9 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
     const { id } = req.params;
     const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, ticket)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
 
     const tech = ticket.assigned_tech_id
       ? db
@@ -1054,7 +1059,7 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
     const customerLookup = new Map(
       (payload.customers || []).map((c) => [c.id, c]),
     );
-    const markings = payload.customerMarking || payload.customerMarkings || {};
+    const markings = payload.customerMarkings || payload.customerMarking || {};
     const customers = Object.entries(markings).map(([customerId, m]) => {
       const c = customerLookup.get(customerId) || {};
       return {
@@ -1120,8 +1125,11 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
 router.get("/tickets/:id/chain", authenticateToken, (req, res) => {
   try {
     const { id } = req.params;
-    const anchor = db.prepare("SELECT id FROM tickets WHERE id = ?").get(id);
+    const anchor = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!anchor) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, anchor)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
     res.json({ chain: getChainWithSummaries(db, id) });
   } catch (error) {
     console.error("[OPS Tickets] Error fetching ticket chain:", error);
@@ -1204,10 +1212,15 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
 router.put("/tickets/:id/assign", authenticateToken, (req, res) => {
   try {
     const { id } = req.params;
+    const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, ticket)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
     const { techId } = req.body;
     const result = assignTicketInternal(id, techId ?? null, req.user?.id);
     if (!result.ok) {
-      return res.status(result.error === "Ticket not found" ? 404 : 400).json({ error: result.error });
+      return res.status(400).json({ error: result.error });
     }
     res.json({
       message: "Ticket assignment updated",
@@ -1226,6 +1239,18 @@ router.post("/tickets/bulk-assign", authenticateToken, (req, res) => {
     const { ticketIds, techId } = req.body;
     if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
       return res.status(400).json({ error: "ticketIds required" });
+    }
+    // Pre-check territory visibility for all tickets.
+    const denied = [];
+    for (const tid of ticketIds) {
+      const t = db.prepare("SELECT * FROM tickets WHERE id = ?").get(tid);
+      if (!t) { denied.push({ ticketId: tid, ok: false, error: "Ticket not found" }); continue; }
+      if (!canUserSeeTicket(db, req.user, t)) {
+        denied.push({ ticketId: tid, ok: false, error: "Access denied — ticket outside your territory" });
+      }
+    }
+    if (denied.length > 0) {
+      return res.status(403).json({ error: "Some tickets are outside your territory", denied });
     }
     const results = [];
     const tx = db.transaction(() => {
@@ -1251,6 +1276,19 @@ router.put("/tickets/:id/status", authenticateToken, (req, res) => {
     }
     const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (!canUserSeeTicket(db, req.user, ticket)) {
+      return res.status(403).json({ error: "Access denied — ticket outside your territory" });
+    }
+
+    // Enforce locator status machine. MANAGER can bypass for admin overrides.
+    if (locatorStatus && req.user.role !== "MANAGER") {
+      const valid = isValidLocatorTransition(ticket.locator_status, locatorStatus);
+      if (!valid) {
+        return res.status(400).json({
+          error: `Invalid status transition: ${ticket.locator_status} → ${locatorStatus}`,
+        });
+      }
+    }
 
     const updates = [];
     const params = [];
@@ -1264,6 +1302,11 @@ router.put("/tickets/:id/status", authenticateToken, (req, res) => {
       if (locatorStatus === "CLOSED" || locatorStatus === "UNABLE") {
         updates.push("closed_at = ?");
         params.push(Date.now());
+      }
+      // Reopening: clear closed_at so ticket appears as active again.
+      if ((ticket.locator_status === "CLOSED" || ticket.locator_status === "UNABLE") &&
+          locatorStatus === "ASSIGNED") {
+        updates.push("closed_at = NULL");
       }
     }
     updates.push("updated_at = ?");
@@ -1319,6 +1362,12 @@ router.get("/tickets/export.csv", authenticateToken, (req, res) => {
 
     let query = "SELECT * FROM tickets WHERE 1=1";
     const params = [];
+
+    // Territory-based visibility.
+    const territoryFilter = buildTicketVisibilityFilter(db, req.user);
+    query += ` AND ${territoryFilter.sql}`;
+    params.push(...territoryFilter.params);
+
     if (status) { query += " AND status = ?"; params.push(status); }
     if (locatorStatus) { query += " AND locator_status = ?"; params.push(locatorStatus); }
     if (areaId) { query += " AND assigned_tech_id IN (SELECT id FROM users WHERE area_id = ?)"; params.push(areaId); }

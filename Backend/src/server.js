@@ -14,6 +14,7 @@ import {
   pullTicketsFrom811,
 } from "./services/ingestionService.js";
 import { assignUnassignedTickets } from "./services/assignmentService.js";
+import { initIdempotencyStore } from "./services/idempotencyService.js";
 import { emitOpsEvent } from "./utils/opsEventBus.js";
 
 const app = express();
@@ -25,6 +26,9 @@ app.use(express.json({ limit: "25mb" }));
 
 // Initialize database
 export const db = initDatabase();
+
+// Initialize idempotency store (persists to SQLite, survives restarts)
+initIdempotencyStore(db);
 
 // Tickets will now be ingested from 811 Simulator
 

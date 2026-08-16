@@ -267,7 +267,7 @@ router.get('/:id/utility-production-summary', (req, res) => {
 
   const ticketSummaries = tickets.map((ticket) => {
     const payload = parsePayload(ticket.payload_json);
-    const customerMarking = payload.customerMarking || payload.customerMarkings || {};
+    const customerMarking = payload.customerMarkings || payload.customerMarking || {};
     const customerLookup = buildCustomerLookup(payload);
     const enrouteMillis = getEnrouteMillis(payload, ticket.locator_status);
     const onsiteMillis = getOnsiteMillis(payload, ticket.locator_status);

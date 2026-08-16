@@ -258,6 +258,14 @@ CREATE INDEX IF NOT EXISTS idx_utility_production_ticket ON utility_production_l
 CREATE INDEX IF NOT EXISTS idx_utility_production_user ON utility_production_ledger(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_utility_production_request_customer
   ON utility_production_ledger(request_id, customer_id);
+
+CREATE TABLE IF NOT EXISTS idempotency_records (
+  request_id TEXT PRIMARY KEY,
+  result_json TEXT NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_records(created_at);
 `;
 
 db.exec(schemaSql);
