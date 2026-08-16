@@ -287,6 +287,47 @@ function pruneDescendantBoundaryUnitsToParentCoverage(parentTerritoryId, allowed
   }
 }
 
+/**
+ * Auto-sync boundary units from a supervisor territory to its child tech
+ * territories. For each child tech territory, if a boundary unit's name
+ * matches the tech territory's name (case-insensitive), assign that unit
+ * to the tech territory. This ensures that when a user selects cities for
+ * a supervisor territory, the corresponding tech territories automatically
+ * get their boundary units and bbox — so they show up on the Areas map.
+ */
+function syncBoundaryUnitsToChildTechTerritories(supervisorTerritoryId, parentUnitIds) {
+  const children = db.prepare(`
+    SELECT id, name
+    FROM territories
+    WHERE parent_territory_id = ? AND type = 'TECH_TERRITORY' AND active = 1
+  `).all(supervisorTerritoryId);
+
+  if (children.length === 0) return;
+
+  // Build a name → unitId map from the parent's boundary units
+  const units = getBoundaryUnitsForTerritory(db, supervisorTerritoryId);
+  const unitByName = new Map();
+  for (const u of units) {
+    unitByName.set(u.name.toLowerCase(), u.id);
+  }
+
+  for (const child of children) {
+    const matchingUnitId = unitByName.get(child.name.toLowerCase());
+    if (!matchingUnitId) continue;
+
+    // Check if this tech territory already has this unit
+    const existing = db.prepare(`
+      SELECT 1 FROM territory_boundary_units
+      WHERE territory_id = ? AND boundary_unit_id = ?
+    `).get(child.id, matchingUnitId);
+
+    if (!existing) {
+      assignBoundaryUnitsToTerritory(db, child.id, [matchingUnitId]);
+      updateTerritoryBboxFromUnits(child.id);
+    }
+  }
+}
+
 const router = express.Router();
 
 // ---------- LIST ----------
@@ -825,6 +866,12 @@ router.post('/:id/boundary-units', authenticateToken, requireRole('AREA_MANAGER'
   // Return updated list
   const units = updateTerritoryBboxFromUnits(req.params.id);
   pruneDescendantBoundaryUnitsToParentCoverage(req.params.id, new Set(units.map((unit) => unit.id)));
+
+  // Auto-sync boundary units to child tech territories by name match
+  // so tech territories get their bbox and show up on the Areas map.
+  if (t.type === 'SUPERVISOR_TERRITORY') {
+    syncBoundaryUnitsToChildTechTerritories(req.params.id, new Set(units.map((unit) => unit.id)));
+  }
   
   res.json({
     territoryId: req.params.id,
