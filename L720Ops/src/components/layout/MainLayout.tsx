@@ -20,7 +20,8 @@ export function MainLayout({ children }: MainLayoutProps) {
     { name: "811 Simulator", href: "/simulator", icon: "🔧" },
   ];
 
-  const isActive = (href: string) => location.pathname === href;
+  const isActive = (href: string) =>
+    location.pathname === href || location.pathname.startsWith(href + "/");
 
   const handleLogout = () => {
     logout();
