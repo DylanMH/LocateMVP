@@ -102,9 +102,15 @@ router.post('/login', async (req, res) => {
  * Returns a curated set of demo users (one per role) for quick login
  * on the mobile app and ops portal. No passwords are returned — the
  * caller must still POST /api/auth/login with the password.
- * This is intended for dev/demo only.
+ *
+ * SECURITY: This endpoint is disabled unless DEMO_QUICK_LOGIN=true is
+ * set in the server environment. In production, this must be unset.
  */
 router.get('/demo-users', (_req, res) => {
+  if (process.env.DEMO_QUICK_LOGIN !== 'true') {
+    return res.status(404).json({ error: 'Not available' });
+  }
+
   const roles = ['DISTRICT_MANAGER', 'AREA_MANAGER', 'SUPERVISOR', 'TECH'];
   const result = [];
 
