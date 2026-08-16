@@ -11,6 +11,25 @@ import { hasRoleLevel, ROLES } from '../utils/permissions.js';
 const router = express.Router();
 
 /**
+ * Ensure a user row exists in the backend DB. Mobile devices may send clock
+ * events referencing a user id that only exists in WatermelonDB (e.g. the
+ * hardcoded DEV_USER_ID or a locally-generated UUID). If the user is missing,
+ * create a minimal placeholder row so FK constraints on clock_events,
+ * day_sessions, and break_segments don't fail.
+ */
+function ensureUserExists(userId) {
+  if (!userId) return;
+  const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (existing) return;
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO users (id, name, email, role, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, 'TECH', 1, ?, ?)
+  `).run(userId, `Mobile User ${userId.slice(0, 8)}`, `${userId.slice(0, 8)}@mobile.local`, now, now);
+  console.log(`[Timesheet] Auto-created placeholder user ${userId} for clock event`);
+}
+
+/**
  * Helper to get user from request (supports JWT auth or query param for dev)
  */
 function getUserFromRequest(req) {
@@ -391,6 +410,10 @@ router.post('/events', (req, res) => {
       if (type === 'CLOCK_EVENT') {
         const { sessionId, userId, eventType, occurredAt } = payload;
 
+        // Ensure the user exists in the backend DB before inserting FK-dependent rows.
+        // Mobile may send events for users that only exist in WatermelonDB.
+        ensureUserExists(userId);
+
         persistClockEvent(event);
         console.log(`[Timesheet] Clock event: ${eventType} for user ${userId} at ${new Date(occurredAt).toLocaleString()}`);
 
@@ -412,7 +435,16 @@ router.post('/events', (req, res) => {
         results.push(ignoredResult);
       }
     } catch (error) {
-      console.error('[Timesheet] Error processing event:', error.message);
+      console.error(
+        '[Timesheet] Error processing event:',
+        error.message,
+        '| userId:',
+        event?.payload?.userId || '?',
+        '| sessionId:',
+        event?.payload?.sessionId || '?',
+        '| ticketId:',
+        event?.payload?.ticketId || 'none',
+      );
       const errorResult = { 
         requestId: event.requestId, 
         status: 'ERROR', 
