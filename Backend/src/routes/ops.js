@@ -194,6 +194,28 @@ function getLiveClockState(userId) {
   };
 }
 
+function getTechAssignedTerritories(userId) {
+  return db
+    .prepare(
+      `SELECT t.id, t.name, t.code, t.type, t.parent_territory_id
+       FROM user_territory_assignments uta
+       JOIN territories t ON t.id = uta.territory_id
+       WHERE uta.user_id = ?
+         AND uta.assignment_type = 'TECH_ASSIGNMENT'
+         AND (uta.end_date IS NULL OR uta.end_date > ?)
+         AND t.active = 1
+       ORDER BY t.name`,
+    )
+    .all(userId, Date.now())
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      code: t.code,
+      type: t.type,
+      parentTerritoryId: t.parent_territory_id,
+    }));
+}
+
 function getTechCurrentTicket(userId) {
   const ticket = db
     .prepare(
@@ -628,6 +650,7 @@ router.get("/dashboard/tech-status", authenticateToken, (req, res) => {
     const out = techs.map((tech) => {
       const clock = getLiveClockState(tech.id);
       const currentTicket = getTechCurrentTicket(tech.id);
+      const assignedTerritories = getTechAssignedTerritories(tech.id);
       const activeTickets = db
         .prepare(
           `SELECT COUNT(*) as c FROM tickets
@@ -643,6 +666,7 @@ router.get("/dashboard/tech-status", authenticateToken, (req, res) => {
         clockStatus: clock.clockStatus,
         currentSession: clock.currentSession,
         currentTicket,
+        assignedTerritories,
         activeTickets,
       };
     });
@@ -721,6 +745,7 @@ router.get("/techs", authenticateToken, (req, res) => {
         if (status && clock.clockStatus !== status) return null;
         const prod = computeTechProductivity(tech.id, range.startMs, range.endMs);
         const currentTicket = getTechCurrentTicket(tech.id);
+        const assignedTerritories = getTechAssignedTerritories(tech.id);
         return {
           id: tech.id,
           name: tech.name,
@@ -732,6 +757,7 @@ router.get("/techs", authenticateToken, (req, res) => {
           clockStatus: clock.clockStatus,
           currentSession: clock.currentSession,
           currentTicket,
+          assignedTerritories,
           ...prod,
         };
       })
@@ -767,6 +793,7 @@ router.get("/techs/:id", authenticateToken, (req, res) => {
     const range = resolveRange(req);
     const clock = getLiveClockState(id);
     const currentTicket = getTechCurrentTicket(id);
+    const assignedTerritories = getTechAssignedTerritories(id);
     const productivity = computeTechProductivity(id, range.startMs, range.endMs);
 
     res.json({
@@ -781,6 +808,7 @@ router.get("/techs/:id", authenticateToken, (req, res) => {
       clockStatus: clock.clockStatus,
       currentSession: clock.currentSession,
       currentTicket,
+      assignedTerritories,
       range: {
         startMs: range.startMs,
         endMs: range.endMs,
@@ -1631,7 +1659,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
   try {
     const {
       name, email, password, title, role, supervisorId, areaId, phone,
-      territoryId, assignmentType,
+      territoryId, territoryIds, assignmentType,
     } = req.body;
     const viewerRole = req.user.role;
     const viewerId = req.user.id;
@@ -1677,16 +1705,24 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
       TRAINEE: 'TECH_ASSIGNMENT',
     };
     const assignTerritory = (userId) => {
-      if (!territoryId) return null;
-      const t = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(territoryId);
-      if (!t) return null;
+      // Support both legacy single territoryId and new territoryIds array.
+      const ids = Array.isArray(territoryIds) && territoryIds.length > 0
+        ? territoryIds
+        : territoryId ? [territoryId] : [];
+      if (ids.length === 0) return null;
       const finalType = assignmentType || ROLE_TO_ASSIGNMENT[role] || 'TECH_ASSIGNMENT';
-      const utaId = `uta-${userId}-${t.id}-${finalType.toLowerCase()}`;
-      db.prepare(`
-        INSERT OR IGNORE INTO user_territory_assignments (id, user_id, territory_id, assignment_type, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(utaId, userId, t.id, finalType, now);
-      return { territoryId: t.id, assignmentType: finalType };
+      const assigned = [];
+      for (const tid of ids) {
+        const t = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(tid);
+        if (!t) continue;
+        const utaId = `uta-${userId}-${t.id}-${finalType.toLowerCase()}`;
+        db.prepare(`
+          INSERT OR IGNORE INTO user_territory_assignments (id, user_id, territory_id, assignment_type, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(utaId, userId, t.id, finalType, now);
+        assigned.push({ territoryId: t.id, assignmentType: finalType });
+      }
+      return assigned.length > 0 ? assigned : null;
     };
 
     if (existing && existing.is_active === 1) {
@@ -1718,8 +1754,8 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
       });
       const assignedTerritory = tx();
 
-      console.log(`[OPS Users] Reactivated user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.territoryId}` : ''}`);
-      emitOpsEvent("user.reactivated", { userId, email, role, by: req.user.id, territoryId: assignedTerritory?.territoryId });
+      console.log(`[OPS Users] Reactivated user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.map(a => a.territoryId).join(', ')}` : ''}`);
+      emitOpsEvent("user.reactivated", { userId, email, role, by: req.user.id, territoryIds: assignedTerritory?.map(a => a.territoryId) });
 
       return res.status(200).json({
         id: userId,
@@ -1730,7 +1766,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
         phone,
         areaId,
         supervisorId,
-        territoryAssignment: assignedTerritory,
+        territoryAssignments: assignedTerritory,
         passwordMustChange: true,
       });
     }
@@ -1743,8 +1779,8 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
 
     const assignedTerritory = assignTerritory(id);
 
-    console.log(`[OPS Users] Created user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.territoryId}` : ''}`);
-    emitOpsEvent("user.created", { userId: id, email, role, by: req.user.id, territoryId: assignedTerritory?.territoryId });
+    console.log(`[OPS Users] Created user ${email} (${role}) by ${req.user.email}${assignedTerritory ? ` assigned to ${assignedTerritory.map(a => a.territoryId).join(', ')}` : ''}`);
+    emitOpsEvent("user.created", { userId: id, email, role, by: req.user.id, territoryIds: assignedTerritory?.map(a => a.territoryId) });
 
     res.status(201).json({
       id,
@@ -1755,7 +1791,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
       phone,
       areaId,
       supervisorId,
-      territoryAssignment: assignedTerritory,
+      territoryAssignments: assignedTerritory,
       passwordMustChange: true,
     });
   } catch (error) {

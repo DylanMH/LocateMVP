@@ -73,6 +73,14 @@ export interface DashboardStats {
   }>;
 }
 
+export interface AssignedTerritory {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  parentTerritoryId: string | null;
+}
+
 export interface TechStatusRow {
   id: string;
   name: string;
@@ -81,6 +89,7 @@ export interface TechStatusRow {
   clockStatus: ClockState;
   currentSession: CurrentSession | null;
   currentTicket: CurrentTicket | null;
+  assignedTerritories: AssignedTerritory[];
   activeTickets: number;
 }
 
@@ -95,6 +104,7 @@ export interface TechRow {
   clockStatus: ClockState;
   currentSession: CurrentSession | null;
   currentTicket: CurrentTicket | null;
+  assignedTerritories: AssignedTerritory[];
   ticketsOnBoard: number;
   ticketsClosedInRange: number;
   ticketsTotalClosed: number;

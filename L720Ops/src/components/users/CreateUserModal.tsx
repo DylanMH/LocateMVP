@@ -28,6 +28,7 @@ interface CreateUserModalProps {
     areaId?: string;
     phone?: string;
     territoryId?: string;
+    territoryIds?: string[];
     assignmentType?: "OWNER" | "MANAGER" | "TECH_ASSIGNMENT" | "TRAINER_SUPPORT";
   }) => void;
   territories: TerritoryOption[];
@@ -65,6 +66,7 @@ export function CreateUserModal({
     areaId: "",
     phone: "",
   });
+  const [selectedTerritoryIds, setSelectedTerritoryIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -142,7 +144,12 @@ export function CreateUserModal({
     e.preventDefault();
     setError("");
 
-    if ((isFieldRole || isSupervisorRole || isAreaManagerRole) && !formData.areaId) {
+    if (isFieldRole && selectedTerritoryIds.length === 0) {
+      setError(`At least one ${areaLabel} is required for this role.`);
+      return;
+    }
+
+    if ((isSupervisorRole || isAreaManagerRole) && !formData.areaId) {
       setError(`${areaLabel} is required for this role.`);
       return;
     }
@@ -164,18 +171,33 @@ export function CreateUserModal({
 
     setIsLoading(true);
     try {
-      await onCreate({
-        name: formData.name,
-        email: formData.email,
-        password: formData.password,
-        title: formData.title || undefined,
-        role: formData.role,
-        supervisorId: formData.supervisorId || undefined,
-        areaId: formData.areaId || undefined,
-        phone: formData.phone || undefined,
-        territoryId: formData.areaId || undefined,
-        assignmentType: isFieldRole ? "TECH_ASSIGNMENT" : isAreaManagerRole || isSupervisorRole ? "OWNER" : undefined,
-      });
+      if (isFieldRole) {
+        await onCreate({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          title: formData.title || undefined,
+          role: formData.role,
+          supervisorId: formData.supervisorId || undefined,
+          areaId: formData.areaId || undefined,
+          phone: formData.phone || undefined,
+          territoryIds: selectedTerritoryIds,
+          assignmentType: "TECH_ASSIGNMENT",
+        });
+      } else {
+        await onCreate({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          title: formData.title || undefined,
+          role: formData.role,
+          supervisorId: formData.supervisorId || undefined,
+          areaId: formData.areaId || undefined,
+          phone: formData.phone || undefined,
+          territoryId: formData.areaId || undefined,
+          assignmentType: isAreaManagerRole || isSupervisorRole ? "OWNER" : undefined,
+        });
+      }
       // Reset form
       setFormData({
         name: "",
@@ -188,6 +210,7 @@ export function CreateUserModal({
         areaId: "",
         phone: "",
       });
+      setSelectedTerritoryIds([]);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
@@ -306,9 +329,10 @@ export function CreateUserModal({
                 </label>
                 <select
                   value={formData.supervisorId}
-                  onChange={(e) =>
-                    setFormData({ ...formData, supervisorId: e.target.value, areaId: "" })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, supervisorId: e.target.value, areaId: "" });
+                    setSelectedTerritoryIds([]);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">{`No ${relationLabel}`}</option>
@@ -331,25 +355,62 @@ export function CreateUserModal({
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 {areaLabel}
               </label>
-              {areaOptions.length > 0 ? (
-                <select
-                  value={formData.areaId}
-                  onChange={(e) =>
-                    setFormData({ ...formData, areaId: e.target.value })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">No Territory Assignment</option>
-                  {areaOptions.map((area) => (
-                    <option key={area.id} value={area.id}>
-                      {area.name}
-                    </option>
-                  ))}
-                </select>
+              {isFieldRole ? (
+                // Multi-select checkbox list for field roles (tech/trainee/trainer)
+                areaOptions.length > 0 ? (
+                  <div className="border border-gray-300 rounded-md max-h-48 overflow-y-auto">
+                    {areaOptions.map((area) => {
+                      const checked = selectedTerritoryIds.includes(area.id);
+                      return (
+                        <label
+                          key={area.id}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTerritoryIds([...selectedTerritoryIds, area.id]);
+                              } else {
+                                setSelectedTerritoryIds(selectedTerritoryIds.filter((id) => id !== area.id));
+                              }
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-sm text-gray-700">{area.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500 italic">{helperText}</div>
+                )
               ) : (
-                <div className="text-sm text-gray-500 italic">
-                  {helperText}
-                </div>
+                // Single select for supervisor/area manager roles
+                areaOptions.length > 0 ? (
+                  <select
+                    value={formData.areaId}
+                    onChange={(e) =>
+                      setFormData({ ...formData, areaId: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">No Territory Assignment</option>
+                    {areaOptions.map((area) => (
+                      <option key={area.id} value={area.id}>
+                        {area.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="text-sm text-gray-500 italic">{helperText}</div>
+                )
+              )}
+              {isFieldRole && selectedTerritoryIds.length > 0 && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {selectedTerritoryIds.length} sub-area{selectedTerritoryIds.length === 1 ? "" : "s"} selected
+                </p>
               )}
             </div>
 

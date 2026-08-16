@@ -233,12 +233,25 @@ export function TechsPage() {
       },
       {
         key: "area",
-        header: "Area",
-        render: (t) => (
-          <span className="text-sm text-gray-700">
-            {t.areaId ? territoryNameById[t.areaId] || t.areaId : "—"}
-          </span>
-        ),
+        header: "Areas",
+        render: (t) => {
+          const territories = t.assignedTerritories || [];
+          if (territories.length === 0) {
+            return <span className="text-xs text-gray-400 italic">No sub areas assigned</span>;
+          }
+          return (
+            <div className="flex flex-wrap gap-1">
+              {territories.map((territory) => (
+                <span
+                  key={territory.id}
+                  className="inline-flex px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700 border border-amber-200"
+                >
+                  {territory.name}
+                </span>
+              ))}
+            </div>
+          );
+        },
       },
       {
         key: "clock",

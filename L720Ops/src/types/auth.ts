@@ -54,6 +54,7 @@ export interface CreateUserRequest {
   areaId?: string;
   phone?: string;
   territoryId?: string;
+  territoryIds?: string[];
   assignmentType?: "OWNER" | "MANAGER" | "TECH_ASSIGNMENT" | "TRAINER_SUPPORT";
 }
 

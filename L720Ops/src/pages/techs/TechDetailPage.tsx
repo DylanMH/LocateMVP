@@ -127,10 +127,12 @@ export function TechDetailPage() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-5 flex flex-wrap items-center gap-6">
             <div>
               <div className="text-xs uppercase tracking-wide text-gray-500">
-                Area
+                Sub Areas
               </div>
               <div className="text-sm font-medium text-gray-900">
-                {tech.areaId || "—"}
+                {tech.assignedTerritories && tech.assignedTerritories.length > 0
+                  ? tech.assignedTerritories.map((t) => t.name).join(", ")
+                  : "—"}
               </div>
             </div>
             <div>

@@ -72,8 +72,10 @@ export function LiveTechBoard({ techs }: Props) {
                     {allocationLabel(tech.currentSession.allocationType)}
                   </span>
                 )}
-                {tech.areaId && (
-                  <span className="text-xs text-gray-400">{tech.areaId}</span>
+                {tech.assignedTerritories && tech.assignedTerritories.length > 0 && (
+                  <span className="text-xs text-gray-400">
+                    {tech.assignedTerritories.map((t) => t.name).join(", ")}
+                  </span>
                 )}
               </div>
 
