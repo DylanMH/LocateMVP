@@ -2,12 +2,12 @@
  * API configuration for backend server
  */
 
-// Development backend URL
-// Change to your computer's local IP when testing on physical device
-// (localhost doesn't work from physical device)
+// Development backend URL — change to your computer's local IP when
+// testing on a physical device (localhost doesn't work from device).
+// Preview/production builds point to the OVH server.
 export const API_BASE_URL = __DEV__
   ? 'http://192.168.50.245:3000/api'  // Replace with your local IP
-  : 'https://api.locate720.com/api';  // Production URL (future)
+  : 'http://15.204.247.173:3000/api';  // OVH server
 
 export const ENDPOINTS = {
   tickets: '/tickets',

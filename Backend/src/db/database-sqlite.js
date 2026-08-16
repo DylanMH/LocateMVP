@@ -445,7 +445,22 @@ db.exec(`UPDATE tickets SET external_root_number = ticket_number WHERE external_
         tech_territory_id TEXT,
         FOREIGN KEY (assigned_tech_id) REFERENCES users(id)
       );
-      INSERT INTO tickets_new SELECT * FROM tickets;
+      INSERT INTO tickets_new (
+        id, external_ticket_id, ticket_number, ticket_type, address,
+        lat, lng, status, locator_status, assigned_tech_id, version,
+        payload_json, source, created_at, updated_at, due_at,
+        closed_by_name, closed_at, last_811_sync_at,
+        root_ticket_id, parent_ticket_id, sequence_number, external_root_number,
+        district_territory_id, area_territory_id, supervisor_territory_id, tech_territory_id
+      )
+      SELECT
+        id, external_ticket_id, ticket_number, ticket_type, address,
+        lat, lng, status, locator_status, assigned_tech_id, version,
+        payload_json, source, created_at, updated_at, due_at,
+        closed_by_name, closed_at, last_811_sync_at,
+        root_ticket_id, parent_ticket_id, sequence_number, external_root_number,
+        NULL, NULL, NULL, NULL
+      FROM tickets;
       DROP TABLE tickets;
       ALTER TABLE tickets_new RENAME TO tickets;
     `);
