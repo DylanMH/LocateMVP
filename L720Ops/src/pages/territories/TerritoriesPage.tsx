@@ -225,6 +225,7 @@ export function TerritoriesPage() {
           )}
         </div>
       </div>
+      )}
 
       {dialog?.kind === "create-child" && (
         <CreateTerritoryDialog
@@ -1266,9 +1267,6 @@ function AssignTechTerritoriesDialog({
     </div>
   );
 }
-
-{/* Close the tab conditional */}
-      )}
 
 {/* ── Supervisor Assignments Panel ────────────────────────── */}
 function SupervisorAssignmentsPanel() {
