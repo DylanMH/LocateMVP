@@ -589,10 +589,15 @@ export async function opsRoutes(app: FastifyInstance) {
     try {
       const { count = 5, areaId } = req.body as any;
 
+      // Treat empty string or whitespace-only areaId as "no specific area"
+      // so the generator picks randomly from all configured areas.
+      const normalizedAreaId =
+        typeof areaId === "string" && areaId.trim().length > 0 ? areaId : undefined;
+
       // Import the existing generator
       const { generateTickets } = await import("../domain/generator.js");
 
-      const tickets = generateTickets({ areaId, count });
+      const tickets = generateTickets({ areaId: normalizedAreaId as any, count });
 
       console.log(`[811 OPS] Generated ${tickets.length} test tickets`);
       await notifyL720BackendOf811Change({ since: Date.now() - 1000 });
