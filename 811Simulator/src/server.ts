@@ -4,6 +4,10 @@ import { ticketsRoutes } from "./routes/tickets.js";
 import { responsesRoutes } from "./routes/responses.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { opsRoutes } from "./routes/ops.js";
+import { seedAreas } from "./db/seed.js";
+
+// Seed service areas on startup (idempotent)
+seedAreas();
 
 const app = Fastify({
   logger: true,
