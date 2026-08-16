@@ -90,16 +90,17 @@ echo.
 echo [2/3] Building release APK with Gradle...
 cd android
 call gradlew.bat assembleRelease -x lintVitalAnalyzeRelease -x lintAnalyzeRelease
-if errorlevel 1 (
-    echo ERROR: Gradle build failed.
-    exit /b 1
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Gradle build failed with exit code %ERRORLEVEL%.
+    exit /b %ERRORLEVEL%
 )
 
 echo.
 echo [3/3] Copying APK to output directory...
+cd ..
 set "OUTPUT_NAME=locate720-v%APP_VERSION%-preview-%TIMESTAMP%-%GIT_SHORT%.apk"
-copy "app\build\outputs\apk\release\app-release.apk" "..\%BUILD_DIR%\%OUTPUT_NAME%"
-if errorlevel 1 (
+copy /Y "android\app\build\outputs\apk\release\app-release.apk" "%BUILD_DIR%\%OUTPUT_NAME%"
+if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to copy APK.
     exit /b 1
 )
