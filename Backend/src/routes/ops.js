@@ -406,6 +406,12 @@ router.post("/auth/login", async (req, res) => {
   }
   if (!passwordValid) return res.status(401).json({ error: "Invalid credentials" });
 
+  // Only supervisors and above can access the ops portal.
+  const OPS_ALLOWED_ROLES = ["SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER", "MANAGER"];
+  if (!OPS_ALLOWED_ROLES.includes(user.role)) {
+    return res.status(403).json({ error: "Technicians do not have access to the Ops Portal" });
+  }
+
   if (user.password_must_change === 1) {
     return res.status(403).json({
       error: "Password change required",
