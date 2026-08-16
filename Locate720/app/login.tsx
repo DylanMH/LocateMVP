@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,6 +14,29 @@ import { useAuth } from "../src/features/auth/AuthContext";
 import { colors } from "../src/ui/colors";
 import { API_BASE_URL } from "../src/config/api";
 
+interface DemoUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  title?: string;
+  demoPassword: string;
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  DISTRICT_MANAGER: "District Manager",
+  AREA_MANAGER: "Area Manager",
+  SUPERVISOR: "Supervisor",
+  TECH: "Tech",
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  DISTRICT_MANAGER: "#7c3aed",
+  AREA_MANAGER: "#2563eb",
+  SUPERVISOR: "#0891b2",
+  TECH: "#059669",
+};
+
 export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuth();
@@ -26,12 +49,30 @@ export default function LoginScreen() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      setError("Please enter both email and password");
-      return;
-    }
+  // Quick login state
+  const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
+  const [demoLoading, setDemoLoading] = useState(true);
+  const [showCustomLogin, setShowCustomLogin] = useState(false);
 
+  const fetchDemoUsers = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/demo-users`);
+      if (response.ok) {
+        const data = await response.json();
+        setDemoUsers(data.users || []);
+      }
+    } catch {
+      // Silent fail — quick login is a convenience, not critical
+    } finally {
+      setDemoLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDemoUsers();
+  }, [fetchDemoUsers]);
+
+  const doLogin = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
     setError(null);
 
@@ -39,16 +80,16 @@ export default function LoginScreen() {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        // Check if password change is required
         if (response.status === 403 && data.code === "PASSWORD_MUST_CHANGE") {
           setNeedsPasswordChange(true);
           setTempToken(data.tempToken);
+          setEmail(loginEmail);
           setLoading(false);
           return;
         }
@@ -67,6 +108,18 @@ export default function LoginScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogin = () => {
+    if (!email || !password) {
+      setError("Please enter both email and password");
+      return;
+    }
+    doLogin(email, password);
+  };
+
+  const handleQuickLogin = (user: DemoUser) => {
+    doLogin(user.email, user.demoPassword);
   };
 
   const handlePasswordChange = async () => {
@@ -97,11 +150,10 @@ export default function LoginScreen() {
         throw new Error(data.error || "Password change failed");
       }
 
-      // Now login with the new password
       setNeedsPasswordChange(false);
       setTempToken(null);
       setPassword(newPassword);
-      await handleLogin();
+      await doLogin(email, newPassword);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Password change failed");
       setLoading(false);
@@ -220,62 +272,141 @@ export default function LoginScreen() {
             </View>
           )}
 
-          <View className="mt-6 space-y-4">
-            <View>
-              <Text className="text-sm mb-2" style={{ color: colors.muted }}>
-                Email
+          {/* Quick login buttons — shown by default */}
+          {!showCustomLogin && (
+            <View className="mt-6 space-y-3">
+              <Text className="text-sm font-semibold" style={{ color: colors.muted }}>
+                Quick Sign In
               </Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Enter your email"
-                placeholderTextColor={colors.muted}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                className="p-4 rounded-xl"
-                style={{ backgroundColor: colors.surface, color: colors.text }}
-                editable={!loading}
-              />
-            </View>
 
-            <View>
-              <Text className="text-sm mb-2" style={{ color: colors.muted }}>
-                Password
-              </Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Enter your password"
-                placeholderTextColor={colors.muted}
-                secureTextEntry
-                className="p-4 rounded-xl"
-                style={{ backgroundColor: colors.surface, color: colors.text }}
-                editable={!loading}
-              />
-            </View>
-
-            <Pressable
-              onPress={handleLogin}
-              disabled={loading}
-              className="p-4 rounded-xl mt-4"
-              style={{ backgroundColor: colors.primary }}
-            >
-              {loading ? (
-                <ActivityIndicator color={colors.text} />
+              {demoLoading ? (
+                <View className="p-4 rounded-xl items-center" style={{ backgroundColor: colors.surface }}>
+                  <ActivityIndicator color={colors.primary} />
+                  <Text className="text-sm mt-2" style={{ color: colors.muted }}>
+                    Loading users...
+                  </Text>
+                </View>
               ) : (
-                <Text
-                  className="text-center font-semibold"
-                  style={{ color: colors.text }}
-                >
-                  Sign In
-                </Text>
+                demoUsers.map((user) => (
+                  <Pressable
+                    key={user.id}
+                    onPress={() => handleQuickLogin(user)}
+                    disabled={loading}
+                    className="p-4 rounded-xl flex-row items-center justify-between"
+                    style={{
+                      backgroundColor: colors.surface,
+                      borderLeftWidth: 4,
+                      borderLeftColor: ROLE_COLORS[user.role] || colors.primary,
+                      opacity: loading ? 0.5 : 1,
+                    }}
+                  >
+                    <View className="flex-1">
+                      <Text className="text-base font-semibold" style={{ color: colors.text }}>
+                        {user.name}
+                      </Text>
+                      <Text className="text-sm" style={{ color: colors.muted }}>
+                        {ROLE_LABELS[user.role] || user.role}
+                      </Text>
+                    </View>
+                    {loading ? (
+                      <ActivityIndicator color={colors.primary} size="small" />
+                    ) : (
+                      <Text className="text-sm font-medium" style={{ color: colors.primary }}>
+                        Sign In →
+                      </Text>
+                    )}
+                  </Pressable>
+                ))
               )}
-            </Pressable>
-          </View>
+
+              {/* Divider */}
+              <View className="flex-row items-center my-3">
+                <View className="flex-1 h-px" style={{ backgroundColor: colors.muted + "40" }} />
+                <Text className="mx-3 text-xs" style={{ color: colors.muted }}>OR</Text>
+                <View className="flex-1 h-px" style={{ backgroundColor: colors.muted + "40" }} />
+              </View>
+
+              {/* Toggle to custom login */}
+              <Pressable
+                onPress={() => setShowCustomLogin(true)}
+                className="p-4 rounded-xl"
+                style={{ backgroundColor: colors.surface }}
+              >
+                <Text className="text-center text-sm font-medium" style={{ color: colors.primary }}>
+                  Sign in with a specific account
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Custom login form — shown when toggled */}
+          {showCustomLogin && (
+            <View className="mt-6 space-y-4">
+              <View>
+                <Text className="text-sm mb-2" style={{ color: colors.muted }}>
+                  Email
+                </Text>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Enter your email"
+                  placeholderTextColor={colors.muted}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  className="p-4 rounded-xl"
+                  style={{ backgroundColor: colors.surface, color: colors.text }}
+                  editable={!loading}
+                />
+              </View>
+
+              <View>
+                <Text className="text-sm mb-2" style={{ color: colors.muted }}>
+                  Password
+                </Text>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Enter your password"
+                  placeholderTextColor={colors.muted}
+                  secureTextEntry
+                  className="p-4 rounded-xl"
+                  style={{ backgroundColor: colors.surface, color: colors.text }}
+                  editable={!loading}
+                />
+              </View>
+
+              <Pressable
+                onPress={handleLogin}
+                disabled={loading}
+                className="p-4 rounded-xl mt-4"
+                style={{ backgroundColor: colors.primary }}
+              >
+                {loading ? (
+                  <ActivityIndicator color={colors.text} />
+                ) : (
+                  <Text
+                    className="text-center font-semibold"
+                    style={{ color: colors.text }}
+                  >
+                    Sign In
+                  </Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={() => setShowCustomLogin(false)}
+                className="mt-2"
+              >
+                <Text className="text-center text-sm" style={{ color: colors.muted }}>
+                  ← Back to quick sign in
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
           <View className="mt-8">
             <Text className="text-xs text-center" style={{ color: colors.muted }}>
-              Dev mode: Use seeded user emails like bob@locate720.com with any password
+              Demo password for all accounts: password
             </Text>
           </View>
         </View>

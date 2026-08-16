@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setCurrentUser } from './devSession';
+import { SyncEngine } from '../tickets/sync/SyncEngine';
 import { logger } from '../../utils/logger';
 
 export type UserRole = 'TRAINEE' | 'TRAINER' | 'TECH' | 'SUPERVISOR' | 'AREA_MANAGER' | 'MANAGER';
@@ -88,6 +89,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async (options?: { beforeLogout?: () => Promise<void> }) => {
     try {
       await options?.beforeLogout?.();
+      // Clear SyncEngine state so it stops syncing and doesn't flush
+      // the old user's pending events after logout
+      await SyncEngine.clearCurrentUser();
       await Promise.all([
         AsyncStorage.removeItem(AUTH_USER_KEY),
         AsyncStorage.removeItem(AUTH_TOKEN_KEY),

@@ -63,7 +63,45 @@ class SyncEngineImpl {
    */
   setCurrentUser(userId: string): void {
     this.currentUserId = userId;
+    this.currentAuthToken = null; // Reset cached token so new user's token is fetched
     logger.log(`[SyncEngine] Current user set to: ${userId}`);
+  }
+
+  /**
+   * Clear the current user — called on logout.
+   * Stops the SyncEngine from syncing until a new user is set.
+   * Also marks all pending outbox events as SKIPPED so stale events
+   * from the previous user are not flushed after a new user logs in.
+   */
+  async clearCurrentUser(): Promise<void> {
+    this.currentUserId = '';
+    this.currentAuthToken = null;
+    logger.log('[SyncEngine] Current user cleared (logout)');
+
+    // Mark all pending outbox events as SKIPPED so they don't get
+    // flushed when a different user logs in. The backend would reject
+    // them anyway (userId mismatch), but this avoids the noise and
+    // prevents retry storms.
+    try {
+      const outboxCollection = database.collections.get<OutboxEvent>('outbox_events');
+      const pending = await outboxCollection
+        .query(Q.where('status', 'PENDING'))
+        .fetch();
+
+      if (pending.length > 0) {
+        await database.write(async () => {
+          for (const event of pending) {
+            await event.update((evt: OutboxEvent) => {
+              evt.status = 'SKIPPED';
+            });
+          }
+        });
+        logger.log(`[SyncEngine] Skipped ${pending.length} pending outbox events on logout`);
+        await this.loadPendingCount();
+      }
+    } catch (error) {
+      logger.error('[SyncEngine] Failed to skip pending events on logout:', error);
+    }
   }
 
   /**
@@ -410,6 +448,11 @@ class SyncEngineImpl {
       return;
     }
 
+    if (!this.currentUserId) {
+      logger.log('[SyncEngine] No current user, skipping P0 flush');
+      return;
+    }
+
     const outboxCollection = database.collections.get<OutboxEvent>('outbox_events');
     const p0Events = await outboxCollection
       .query(
@@ -496,6 +539,11 @@ class SyncEngineImpl {
   async flushP1(): Promise<void> {
     if (!this.syncState.isOnline) {
       logger.log('[SyncEngine] Offline, skipping P1 flush');
+      return;
+    }
+
+    if (!this.currentUserId) {
+      logger.log('[SyncEngine] No current user, skipping P1 flush');
       return;
     }
 

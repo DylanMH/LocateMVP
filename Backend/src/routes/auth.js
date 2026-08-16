@@ -98,6 +98,37 @@ router.post('/login', async (req, res) => {
 });
 
 /**
+ * GET /api/auth/demo-users
+ * Returns a curated set of demo users (one per role) for quick login
+ * on the mobile app and ops portal. No passwords are returned — the
+ * caller must still POST /api/auth/login with the password.
+ * This is intended for dev/demo only.
+ */
+router.get('/demo-users', (_req, res) => {
+  const roles = ['DISTRICT_MANAGER', 'AREA_MANAGER', 'SUPERVISOR', 'TECH'];
+  const result = [];
+
+  for (const role of roles) {
+    const user = db.prepare(`
+      SELECT id, name, email, role, title
+      FROM users
+      WHERE role = ? AND is_active = 1
+      ORDER BY name ASC
+      LIMIT 1
+    `).get(role);
+
+    if (user) {
+      result.push({
+        ...user,
+        demoPassword: 'password',
+      });
+    }
+  }
+
+  res.json({ users: result });
+});
+
+/**
  * POST /api/auth/refresh
  * Refresh access token using refresh token
  */

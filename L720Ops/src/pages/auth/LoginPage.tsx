@@ -236,7 +236,7 @@ export function LoginPage() {
           </form>
 
           <div className="mt-6 text-center text-sm text-gray-600">
-            <p>Dev mode: use any password with seeded user emails like bob@locate720.com</p>
+            <p>Demo: use <strong>king.henry@locate720.com</strong> / <strong>password</strong> to view as District Manager</p>
           </div>
         </div>
       </div>
