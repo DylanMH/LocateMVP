@@ -418,6 +418,15 @@ export function MapTicketsPage() {
     return levelTerritories.map((t) => ({ id: t.id, name: t.name, type: t.type }));
   }, [levelTerritories]);
 
+  // Ticket type counts from the currently loaded tickets
+  const ticketTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of tickets) {
+      counts[t.ticketType] = (counts[t.ticketType] || 0) + 1;
+    }
+    return counts;
+  }, [tickets]);
+
   const selectedTerritory = selectedTerritoryId
     ? flattenedTerritories.find((t) => t.id === selectedTerritoryId) || null
     : null;
@@ -565,6 +574,38 @@ export function MapTicketsPage() {
             </button>
           </div>
         )}
+
+        {/* Ticket type summary card */}
+        <div className="flex flex-wrap gap-2">
+          {TICKET_TYPES.map((type) => {
+            const count = ticketTypeCounts[type] || 0;
+            const label = TYPE_LABELS[type] || "?";
+            const color = STATUS_COLORS["ASSIGNED"]; // use a neutral accent
+            return (
+              <div
+                key={type}
+                className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5"
+              >
+                <span
+                  className="flex items-center justify-center rounded-full text-white font-bold"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    fontSize: 9,
+                    backgroundColor: color,
+                    fontFamily: "system-ui, sans-serif",
+                  }}
+                >
+                  {label}
+                </span>
+                <div className="flex flex-col leading-tight">
+                  <span className="text-xs text-gray-500">{formatTicketType(type)}</span>
+                  <span className="text-sm font-semibold text-gray-900 tabular-nums">{count}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Main content area */}
