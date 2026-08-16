@@ -26,7 +26,7 @@ import {
 import type { TicketDetailResponse } from "../../types/ops";
 import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -119,10 +119,11 @@ function getScopeBounds(payloadJson?: string): {
 
 function MapRefocus({ center }: { center: [number, number] | null }) {
   const map = useMap();
-  const lastKey = "";
+  const lastKey = useRef("");
   if (center) {
     const key = `${center[0].toFixed(3)},${center[1].toFixed(3)}`;
-    if (key !== lastKey) {
+    if (key !== lastKey.current) {
+      lastKey.current = key;
       map.flyTo(center, Math.max(map.getZoom(), 11), { duration: 0.8 });
     }
   }
