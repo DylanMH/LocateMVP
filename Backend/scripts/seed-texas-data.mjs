@@ -8,9 +8,11 @@
  * Run from the Backend directory:
  *   node scripts/seed-texas-data.mjs
  */
-import { db } from "../src/server.js";
+import { initDatabase } from "../src/db/database-sqlite.js";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
+
+const db = initDatabase();
 
 const now = Date.now();
 const passwordHash = bcrypt.hashSync("password", 10);

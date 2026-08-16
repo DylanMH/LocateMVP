@@ -5,8 +5,9 @@
  * Run from the Backend directory:
  *   node scripts/backfill-sim-assignments.mjs
  */
-import { db } from "../src/server.js";
+import { initDatabase } from "../src/db/database-sqlite.js";
 
+const db = initDatabase();
 const SIMULATOR_URL = process.env.SIMULATOR_URL || 'http://localhost:4100';
 
 async function main() {
