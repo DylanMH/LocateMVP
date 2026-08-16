@@ -91,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await options?.beforeLogout?.();
       // Clear SyncEngine state so it stops syncing and doesn't flush
       // the old user's pending events after logout
-      SyncEngine.clearCurrentUser();
+      await SyncEngine.clearCurrentUser();
       await Promise.all([
         AsyncStorage.removeItem(AUTH_USER_KEY),
         AsyncStorage.removeItem(AUTH_TOKEN_KEY),
