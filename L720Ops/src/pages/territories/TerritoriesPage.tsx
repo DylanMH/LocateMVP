@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TerritoryService } from "../../services/territoryService";
 import { AuthService } from "../../services/authService";
@@ -754,9 +754,13 @@ function DefineCoverageDialog({
     enabled: !!territory.id,
   });
 
-  // Initialize selected units from existing
+  // Initialize selected units from existing — only once when data first loads.
+  // Without the ref, any refetch (window focus, invalidation) would reset the
+  // user's selections back to the original set, wiping out additions/removals.
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (existingUnitsQuery.data?.units) {
+    if (existingUnitsQuery.data?.units && !initializedRef.current) {
+      initializedRef.current = true;
       setSelectedUnitIds(existingUnitsQuery.data.units.map((u) => u.id));
     }
   }, [existingUnitsQuery.data]);
