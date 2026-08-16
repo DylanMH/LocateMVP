@@ -245,7 +245,14 @@ export function TechsPage() {
         header: "Clock",
         render: (t) => (
           <div className="flex flex-col items-start gap-1">
-            <StatusBadge value={t.clockStatus} />
+            <div className="flex items-center gap-1.5">
+              <StatusBadge value={t.clockStatus} />
+              {t.currentSession?.allocationType && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700">
+                  {t.currentSession.allocationType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                </span>
+              )}
+            </div>
             {t.currentSession && (
               <span className="text-xs text-gray-500 tabular-nums">
                 {formatDuration(t.currentSession.elapsedMs)}
@@ -257,17 +264,32 @@ export function TechsPage() {
       {
         key: "current",
         header: "Current Ticket",
-        render: (t) =>
-          t.currentTicket ? (
-            <div>
-              <div className="text-sm font-medium text-gray-900">
-                {t.currentTicket.ticketNumber}
+        render: (t) => {
+          const activeTicket = t.currentSession?.currentTicket || t.currentTicket;
+          const clockOutTicket = t.currentSession?.clockOutTicket;
+          if (activeTicket) {
+            return (
+              <div>
+                <div className="text-sm font-medium text-gray-900">
+                  {activeTicket.ticketNumber}
+                </div>
+                <StatusBadge value={activeTicket.locatorStatus} />
               </div>
-              <StatusBadge value={t.currentTicket.locatorStatus} />
-            </div>
-          ) : (
-            <span className="text-xs text-gray-400">—</span>
-          ),
+            );
+          }
+          if (t.clockStatus === "CLOCKED_OUT" && clockOutTicket) {
+            return (
+              <div className="text-xs text-gray-500">
+                <span className="text-gray-400">Clocked out on </span>
+                <span className="font-medium text-gray-600">{clockOutTicket.ticketNumber}</span>
+              </div>
+            );
+          }
+          if (t.clockStatus === "CLOCKED_OUT") {
+            return <span className="text-xs text-gray-400 italic">Non assigned</span>;
+          }
+          return <span className="text-xs text-gray-400">—</span>;
+        },
       },
       {
         key: "board",
