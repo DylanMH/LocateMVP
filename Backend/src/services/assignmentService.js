@@ -76,14 +76,14 @@ export function assignTicketToArea(db, ticketId, areaCode) {
 
 /**
  * Assign every unassigned ticket by its tech_territory_id (set at ingestion).
- * Also reassigns tickets that were previously fallback-assigned to a
- * supervisor when a tech is now available for that territory.
- * @returns {{ assigned: number, reassigned: number, errors: string[] }}
+ * Only assigns tickets where assigned_tech_id IS NULL — never overrides an
+ * existing assignment, even if it was a supervisor fallback. Manual
+ * assignments by supervisors must be respected.
+ * @returns {{ assigned: number, errors: string[] }}
  */
 export function assignUnassignedTickets(db) {
-  const results = { assigned: 0, reassigned: 0, errors: [] };
+  const results = { assigned: 0, errors: [] };
 
-  // 1) Tickets with no assignment at all.
   const unassigned = db.prepare(`
     SELECT id, tech_territory_id, supervisor_territory_id
     FROM tickets
@@ -103,34 +103,7 @@ export function assignUnassignedTickets(db) {
     else results.errors.push(`Ticket ${t.id}: ${r.error}`);
   }
 
-  // 2) Tickets assigned to a non-tech (supervisor fallback) that now have a
-  //    tech available for their tech_territory. Reassign to the tech.
-  const fallbackAssigned = db.prepare(`
-    SELECT t.id, t.tech_territory_id, t.supervisor_territory_id
-    FROM tickets t
-    JOIN users u ON t.assigned_tech_id = u.id
-    WHERE u.role NOT IN ('TECH','TRAINEE','TRAINER')
-      AND t.tech_territory_id IS NOT NULL
-      AND t.locator_status NOT IN ('CLOSED','UNABLE')
-  `).all();
-
-  if (fallbackAssigned.length > 0) {
-    console.log(`[Assignment] Found ${fallbackAssigned.length} fallback-assigned tickets to re-evaluate`);
-    for (const t of fallbackAssigned) {
-      const tech = pickTechForTerritory(db, t.tech_territory_id);
-      if (tech) {
-        const r = assignTicketToUser(db, t.id, tech.id, tech.name);
-        if (r.success) {
-          results.reassigned++;
-          console.log(`[Assignment] Reassigned ticket ${t.id} from supervisor fallback to tech ${tech.name} (${tech.id})`);
-        } else {
-          results.errors.push(`Ticket ${t.id}: reassignment failed`);
-        }
-      }
-    }
-  }
-
-  console.log(`[Assignment] Complete: ${results.assigned} assigned, ${results.reassigned} reassigned, ${results.errors.length} errors`);
+  console.log(`[Assignment] Complete: ${results.assigned} assigned, ${results.errors.length} errors`);
   return results;
 }
 
