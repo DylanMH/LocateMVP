@@ -49,6 +49,9 @@ export const OpsService = {
         clockInAt: number;
         clockOutAt: number | null;
         status: string;
+        clockInReason?: string | null;
+        allocationType?: string | null;
+        otherReason?: string | null;
         workedMs: number;
         lunchMs: number;
         personalMs: number;
@@ -60,8 +63,31 @@ export const OpsService = {
           endedAt: number | null;
           reason: string | null;
         }>;
+        allocationSegments?: Array<{
+          id: string;
+          allocationType: string;
+          otherReason: string | null;
+          startedAt: number;
+          endedAt: number | null;
+        }>;
+        allocationBreakdown?: Array<{
+          type: string;
+          ms: number;
+          segments: Array<{
+            id: string;
+            startedAt: number;
+            endedAt: number | null;
+            otherReason: string | null;
+          }>;
+        }>;
       }>;
-      totals: { workedMs: number; lunchMs: number; personalMs: number; productiveMs: number };
+      totals: {
+        workedMs: number;
+        lunchMs: number;
+        personalMs: number;
+        productiveMs: number;
+        allocationBreakdown?: Array<{ type: string; ms: number }>;
+      };
     }>(`/ops/techs/${id}/timesheet`, range);
   },
   updateTech(id: string, body: { areaId?: string | null; supervisorId?: string | null }) {
@@ -69,6 +95,39 @@ export const OpsService = {
       method: "PUT",
       body: JSON.stringify(body),
     });
+  },
+  getTechsLocations() {
+    return opsFetch<{
+      techs: Array<{
+        userId: string;
+        name: string;
+        email: string;
+        role: string;
+        clockInAt: number;
+        allocationType: string | null;
+        latitude: number;
+        longitude: number;
+        accuracy?: number;
+        heading?: number;
+        speed?: number;
+        recordedAt: number;
+      }>;
+    }>("/ops/techs-locations");
+  },
+  getTechRoute(id: string, params?: QueryParams) {
+    return opsFetch<{
+      points: Array<{
+        id: string;
+        userId: string;
+        sessionId: string;
+        latitude: number;
+        longitude: number;
+        accuracy?: number;
+        heading?: number;
+        speed?: number;
+        recordedAt: number;
+      }>;
+    }>(`/ops/techs/${id}/route`, params);
   },
 
   // Tickets

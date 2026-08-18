@@ -23,6 +23,7 @@ export interface RangeSummary {
 export interface CurrentSession {
   sessionId: string;
   clockInAt: number;
+  clockOutAt?: number | null;
   elapsedMs: number;
   onBreak: boolean;
   breakType: "LUNCH" | "PERSONAL" | null;
@@ -30,6 +31,8 @@ export interface CurrentSession {
   clockInReason: string | null;
   allocationType: string | null;
   otherReason: string | null;
+  allocationStartedAt: number | null;
+  allocationElapsedMs: number;
   clockOutTicket: { id: string; ticketNumber: string } | null;
   currentTicket: CurrentTicket | null;
 }

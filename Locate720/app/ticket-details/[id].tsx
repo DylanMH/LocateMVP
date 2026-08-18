@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import withObservables from "@nozbe/with-observables";
 import { Q } from "@nozbe/watermelondb";
@@ -11,6 +11,7 @@ import { useAuth } from "../../src/features/auth/AuthContext";
 import { AllocationReconcileModal } from "../../src/features/tickets/components/AllocationReconcileModal";
 import {
   CustomersTab,
+  TimeAllocationCard,
   type CustomerMarkingByCustomerId,
 } from "../../src/features/tickets/components/CustomersTab";
 import type { TicketPayload, TicketStatus } from "../../src/features/tickets/types";
@@ -27,6 +28,7 @@ import {
   createTicketCustomerMarkingSetEvent,
   createTicketStatusSetEvent,
 } from "../../src/features/tickets/domain/outbox";
+import { triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from "../../src/utils/haptics";
 import {
   canTransitionStatus,
   isTicketClosed,
@@ -216,7 +218,7 @@ function useCustomerMarkingState(ticket?: Ticket) {
       return;
     }
 
-    const saveCustomerMarking = async () => {
+    const timer = setTimeout(async () => {
       try {
         const normalizedCustomerMarking =
           normalizeCustomerMarking(customerMarking);
@@ -254,9 +256,9 @@ function useCustomerMarkingState(ticket?: Ticket) {
       } catch (error) {
         logger.error("[TicketDetail] Failed to save customer marking:", error);
       }
-    };
+    }, 400);
 
-    saveCustomerMarking();
+    return () => clearTimeout(timer);
   }, [customerMarking, ticket, isInitialized]);
 
   return { customerMarking, setCustomerMarking };
@@ -485,9 +487,14 @@ function ActionButton({
   active?: boolean;
   onPress: () => void;
 }) {
+  const handlePress = () => {
+    triggerMediumHaptic();
+    onPress();
+  };
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled}
       className="rounded-xl px-4 py-3 mr-3"
       style={{
@@ -524,6 +531,10 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
 
   const handleStatusChange = async (nextStatus: LocatorStatus) => {
     if (!ticket) return;
+    if (ticket.locatorStatus === nextStatus) {
+      logger.log(`[TicketDetail] Ticket is already in status ${nextStatus}, ignoring duplicate transition`);
+      return;
+    }
 
     try {
       if (nextStatus === "ENROUTE" || nextStatus === "ONSITE") {
@@ -656,16 +667,47 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
       return marking && marking.completed === true;
     });
 
+  // Time allocation values for the floating card
+  const allocatableMinutes = useMemo(() => {
+    return getAllocatableMinutes(payload, ticket.locatorStatus);
+  }, [payload, ticket.locatorStatus]);
+
+  const allocatedMinutesValue = useMemo(() => {
+    return Object.values(customerMarking).reduce((sum, data) => {
+      const mins = parseInt(data.minutes || "0", 10);
+      return sum + (isNaN(mins) ? 0 : mins);
+    }, 0);
+  }, [customerMarking]);
+
+  const remainingMinutes = allocatableMinutes - allocatedMinutesValue;
+  const showFloatingTimeCard =
+    tab === "CUSTOMER" && Boolean(payload.onsiteStartedAt) && !isClosed;
+
   return (
-    <View className="flex-1" style={{ backgroundColor: colors.bg }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      className="flex-1"
+      style={{ backgroundColor: colors.bg }}
+    >
       <Stack.Screen options={{ title: "Ticket Details" }} />
+
+      {/* Floating Time Allocation Card — stays visible while scrolling the Customer tab */}
+      {showFloatingTimeCard && (
+        <TimeAllocationCard
+          allocatableMinutes={allocatableMinutes}
+          allocatedMinutes={allocatedMinutesValue}
+          remainingMinutes={remainingMinutes}
+        />
+      )}
 
       <ScrollView
         ref={scrollViewRef}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         contentContainerStyle={{
           paddingHorizontal: 16,
-          paddingTop: 16,
-          paddingBottom: 24,
+          paddingTop: showFloatingTimeCard ? 8 : 16,
+          paddingBottom: 40,
           gap: 12,
         }}
       >
@@ -932,7 +974,10 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                   All customers have been marked. You can now close this ticket.
                 </Text>
                 <Pressable
-                  onPress={() => handleStatusChange("CLOSED")}
+                  onPress={() => {
+                    triggerSuccessHaptic();
+                    handleStatusChange("CLOSED");
+                  }}
                   disabled={isReadOnly}
                   className="rounded-xl px-4 py-3"
                   style={{
@@ -982,7 +1027,7 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
           );
         })()}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

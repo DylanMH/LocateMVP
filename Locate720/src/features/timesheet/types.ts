@@ -10,7 +10,8 @@ export type ClockEventType =
   | 'LUNCH_START' 
   | 'LUNCH_END' 
   | 'PERSONAL_START' 
-  | 'PERSONAL_END';
+  | 'PERSONAL_END'
+  | 'ALLOCATION_CHANGE';
 
 // Session status
 export type SessionStatus = 'ACTIVE' | 'CLOCKED_OUT';

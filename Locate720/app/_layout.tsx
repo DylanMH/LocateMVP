@@ -8,11 +8,39 @@ import { colors } from "../src/ui/colors";
 import { database } from "../src/db/database";
 import DaySession from "../src/db/models/DaySession";
 import { Q } from "@nozbe/watermelondb";
+import { locationTracker } from "../src/features/tracking/locationTracker";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // Keep location tracking synchronized with active clocked-in session
+  useEffect(() => {
+    locationTracker.setAuthToken(token);
+
+    if (!user) {
+      locationTracker.updateClockState(null, false, null);
+      return;
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const sessionsCollection =
+      database.collections.get<DaySession>("day_sessions");
+
+    const subscription = sessionsCollection
+      .query(Q.where("user_id", user.id), Q.where("date", today))
+      .observe()
+      .subscribe((sessions) => {
+        const active = sessions.find((s) => s.status === "ACTIVE");
+        const isClockedIn = Boolean(active);
+        locationTracker.updateClockState(user.id, isClockedIn, active?.id || null);
+      });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user, token]);
 
   useEffect(() => {
     console.log(

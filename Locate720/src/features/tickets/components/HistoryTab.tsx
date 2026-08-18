@@ -12,13 +12,26 @@ import { colors } from "../../../ui/colors";
 import { SectionCard } from "./SectionCard";
 import type { Customer } from "../types";
 
+import { formatDate } from "../../../utils/date";
+
 function formatShortDate(ts?: number | null): string {
   if (!ts) return "—";
-  return new Date(ts).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDate(ts);
+}
+
+function formatCustomerMarkingSummary(marking?: { status?: string; result?: string; completed?: boolean }): string {
+  if (!marking) return "—";
+  const statusLabel = marking.completed
+    ? "Marked"
+    : marking.status
+      ? marking.status.replace(/_/g, " ")
+      : "";
+  const resultLabel = marking.result ? marking.result.replace(/_/g, " ") : "";
+
+  if (statusLabel && resultLabel) {
+    return `${statusLabel} · ${resultLabel}`;
+  }
+  return statusLabel || resultLabel || "—";
 }
 
 function CustomerStatusRow({ customer, marking }: { customer: Customer; marking?: { status?: string; result?: string; completed?: boolean } }) {
@@ -32,7 +45,7 @@ function CustomerStatusRow({ customer, marking }: { customer: Customer; marking?
         className="text-xs font-semibold ml-2"
         style={{ color: completed ? colors.success : colors.muted }}
       >
-        {completed ? "Marked" : marking?.status || "—"}
+        {formatCustomerMarkingSummary(marking)}
       </Text>
     </View>
   );

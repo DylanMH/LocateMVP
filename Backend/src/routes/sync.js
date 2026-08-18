@@ -214,8 +214,11 @@ function summarizeCustomerMarkingChange(previousPayload = {}, nextPayload = {}) 
   const nextMarking =
     nextPayload?.customerMarkings || nextPayload?.customerMarking || {};
 
+  const customerLookup = getCustomerLookup(nextPayload);
+
   let completedChanges = 0;
   let productionChanges = 0;
+  const detailSummaries = [];
 
   for (const [customerId, nextData] of Object.entries(nextMarking)) {
     const prevData = previousMarking?.[customerId] || {};
@@ -231,6 +234,14 @@ function summarizeCustomerMarkingChange(previousPayload = {}, nextPayload = {}) 
 
     if (completedChanged || statusChanged || resultChanged) {
       completedChanges += 1;
+      const cust = customerLookup.get(customerId);
+      const name = cust?.name || cust?.utility || customerId;
+      const statusText = nextData?.status ? nextData.status.replace(/_/g, " ") : "";
+      const resultText = nextData?.result ? nextData.result.replace(/_/g, " ") : "";
+      const markingDesc = [statusText, resultText].filter(Boolean).join(" - ");
+      if (markingDesc) {
+        detailSummaries.push(`${name}: ${markingDesc}`);
+      }
     }
   }
 
@@ -238,7 +249,11 @@ function summarizeCustomerMarkingChange(previousPayload = {}, nextPayload = {}) 
     return "Customer marking saved with no material changes";
   }
 
-  return `Customer marking updated for ${Object.keys(nextMarking).length} utilities (${productionChanges} production edits, ${completedChanges} status/result edits)`;
+  const baseSummary = `Customer marking updated for ${Object.keys(nextMarking).length} utilities (${productionChanges} production edits, ${completedChanges} status/result edits)`;
+  if (detailSummaries.length > 0) {
+    return `${baseSummary} [${detailSummaries.join("; ")}]`;
+  }
+  return baseSummary;
 }
 
 function recordTicketEventHistory({
@@ -255,14 +270,22 @@ function recordTicketEventHistory({
   payloadSnapshot,
 }) {
   const { insertTicketEvent } = getSyncStatements();
+  // Use a sentinel to distinguish "not provided" (use ticket's value)
+  // from "explicitly null" (use null). The ?? operator treats null as
+  // nullish, so we can't use it here.
+  const UNSET = Symbol("unset");
+  const _oldStatus = oldStatus !== undefined ? oldStatus : (ticket.status ?? null);
+  const _newStatus = newStatus !== undefined ? newStatus : (ticket.status ?? null);
+  const _oldLocator = oldLocatorStatus !== undefined ? oldLocatorStatus : (ticket.locator_status ?? null);
+  const _newLocator = newLocatorStatus !== undefined ? newLocatorStatus : (ticket.locator_status ?? null);
   insertTicketEvent.run(
     `tevt-${requestId}`,
     ticket.id,
     eventType,
-    oldStatus ?? ticket.status ?? null,
-    newStatus ?? ticket.status ?? null,
-    oldLocatorStatus ?? ticket.locator_status ?? null,
-    newLocatorStatus ?? ticket.locator_status ?? null,
+    _oldStatus,
+    _newStatus,
+    _oldLocator,
+    _newLocator,
     userId || null,
     notes || null,
     JSON.stringify(payloadSnapshot || {}),
@@ -425,19 +448,26 @@ router.post("/events", (req, res) => {
           ).run(nextStatus, updatedPayloadJson, Date.now(), ticketId);
         }
 
-        recordTicketEventHistory({
-          requestId,
-          eventType: type,
-          ticket,
-          userId: payload.userId,
-          occurredAt: event.occurredAt,
-          oldStatus: ticket.status,
-          newStatus: resultingStatus,
-          oldLocatorStatus: ticket.locator_status,
-          newLocatorStatus: resultingLocatorStatus,
-          notes: `Locator status changed from ${ticket.locator_status} to ${resultingLocatorStatus}`,
-          payloadSnapshot: JSON.parse(updatedPayloadJson || "{}"),
-        });
+        // Only record status change event in history if locator status or ticket status actually changed
+        const statusActuallyChanged =
+          ticket.status !== resultingStatus ||
+          ticket.locator_status !== resultingLocatorStatus;
+
+        if (statusActuallyChanged) {
+          recordTicketEventHistory({
+            requestId,
+            eventType: type,
+            ticket,
+            userId: payload.userId,
+            occurredAt: event.occurredAt,
+            oldStatus: ticket.status,
+            newStatus: resultingStatus,
+            oldLocatorStatus: ticket.locator_status,
+            newLocatorStatus: resultingLocatorStatus,
+            notes: `Locator status changed from ${ticket.locator_status} to ${resultingLocatorStatus}`,
+            payloadSnapshot: JSON.parse(updatedPayloadJson || "{}"),
+          });
+        }
 
         // Verify the update worked
         const verifyTicket = db
@@ -565,8 +595,8 @@ router.post("/events", (req, res) => {
           occurredAt: event.occurredAt,
           oldStatus: ticket.status,
           newStatus: ticket.status,
-          oldLocatorStatus: ticket.locator_status,
-          newLocatorStatus: ticket.locator_status,
+          oldLocatorStatus: null,
+          newLocatorStatus: null,
           notes: summarizeCustomerMarkingChange(previousPayload, mergedPayload),
           payloadSnapshot: mergedPayload,
         });
@@ -642,6 +672,23 @@ router.post("/events", (req, res) => {
           ticketId,
         );
 
+        const closedMarkings = updatedPayload?.customerMarkings || updatedPayload?.customerMarking || {};
+        const customerLookup = getCustomerLookup(updatedPayload);
+        const closedSummaryList = Object.entries(closedMarkings)
+          .map(([cId, mData]) => {
+            const cust = customerLookup.get(cId);
+            const name = cust?.name || cust?.utility || cId;
+            const statusText = mData?.status ? mData.status.replace(/_/g, " ") : "";
+            const resultText = mData?.result ? mData.result.replace(/_/g, " ") : "";
+            const desc = [statusText, resultText].filter(Boolean).join(" - ");
+            return desc ? `${name}: ${desc}` : null;
+          })
+          .filter(Boolean);
+
+        const closedNotes = closedSummaryList.length > 0
+          ? `Ticket closed from mobile workflow [${closedSummaryList.join("; ")}]`
+          : "Ticket closed from mobile workflow";
+
         recordTicketEventHistory({
           requestId,
           eventType: type,
@@ -652,7 +699,7 @@ router.post("/events", (req, res) => {
           newStatus: "CLOSED",
           oldLocatorStatus: ticket.locator_status,
           newLocatorStatus: "CLOSED",
-          notes: "Ticket closed from mobile workflow",
+          notes: closedNotes,
           payloadSnapshot: updatedPayload,
         });
 
@@ -928,6 +975,57 @@ router.get("/attachments/:id", (req, res) => {
     return res.status(404).json({ error: "Attachment not found" });
   }
   res.json({ attachment: row });
+});
+
+/**
+ * POST /api/sync/locations
+ * Ingest GPS breadcrumbs from mobile app when tech is clocked in.
+ */
+router.post("/locations", (req, res) => {
+  try {
+    const { locations } = req.body;
+    if (!Array.isArray(locations) || locations.length === 0) {
+      return res.status(400).json({ error: "locations array is required" });
+    }
+
+    const insertStmt = db.prepare(`
+      INSERT OR IGNORE INTO tech_locations (
+        id, user_id, session_id, latitude, longitude, accuracy, heading, speed, recorded_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let inserted = 0;
+    const now = Date.now();
+    for (const loc of locations) {
+      if (!loc.userId || loc.latitude == null || loc.longitude == null) continue;
+
+      // Only record location if tech has an active session
+      const activeSession = db.prepare(`
+        SELECT id FROM day_sessions WHERE user_id = ? AND status = 'ACTIVE' LIMIT 1
+      `).get(loc.userId);
+
+      if (!activeSession) continue;
+
+      const id = loc.id || `loc-${loc.userId}-${loc.recordedAt || now}-${Math.random().toString(36).slice(2, 8)}`;
+      insertStmt.run(
+        id,
+        loc.userId,
+        loc.sessionId || activeSession.id,
+        loc.latitude,
+        loc.longitude,
+        loc.accuracy || null,
+        loc.heading || null,
+        loc.speed || null,
+        loc.recordedAt || now,
+      );
+      inserted++;
+    }
+
+    res.json({ ok: true, inserted });
+  } catch (error) {
+    console.error("[Sync] Error inserting locations:", error);
+    res.status(500).json({ error: "Failed to record locations" });
+  }
 });
 
 export default router;

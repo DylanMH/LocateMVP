@@ -34,12 +34,80 @@ interface CustomersTabProps {
   isReadOnly?: boolean;
 }
 
+interface TimeAllocationCardProps {
+  allocatableMinutes: number;
+  allocatedMinutes: number;
+  remainingMinutes: number;
+}
+
+export function TimeAllocationCard({
+  allocatableMinutes,
+  allocatedMinutes,
+  remainingMinutes,
+}: TimeAllocationCardProps) {
+  return (
+    <View
+      className="rounded-xl px-4 py-3 mx-4 mt-2"
+      style={{
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: remainingMinutes < 0 ? colors.danger : colors.primary + "30",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 4,
+      }}
+    >
+      <View className="flex-row items-center justify-between">
+        <View>
+          <Text
+            className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+            style={{ color: colors.muted }}
+          >
+            Time Allocation
+          </Text>
+          <Text className="text-xs" style={{ color: colors.text }}>
+            Allocatable: {formatMinutesAsHours(allocatableMinutes)}
+          </Text>
+          <Text className="text-xs mt-0.5" style={{ color: colors.text }}>
+            Allocated: {formatMinutesAsHours(allocatedMinutes)}
+          </Text>
+        </View>
+        <View className="items-end">
+          <Text className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>
+            Remaining
+          </Text>
+          <Text
+            className="text-xl font-bold"
+            style={{
+              color: remainingMinutes < 0 ? colors.danger : colors.accent,
+            }}
+          >
+            {formatMinutesAsHours(Math.abs(remainingMinutes))}
+          </Text>
+          {remainingMinutes < 0 && (
+            <Text className="text-[10px] font-bold mt-0.5" style={{ color: colors.danger }}>
+              Over-allocated
+            </Text>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function getResultOptionsForStatus(status: MarkingStatus): MarkingResult[] {
   switch (status) {
     case "MARKED":
-      return ["PAINT_AND_FLAG", "PAINT_ONLY"];
+      return ["PAINT_AND_FLAG", "PAINT_ONLY", "FLAG_ONLY"];
     case "NOT_MARKED":
-      return ["EXCAVATION_SITE_CLEAR", "UNLOCATABLE", "NO_ACCESS"];
+      return [
+        "EXCAVATION_SITE_CLEAR",
+        "UNLOCATABLE",
+        "NO_ACCESS",
+        "OVERHEAD_NO_FACILITIES",
+      ];
     case "NOT_YET_MARKED":
       return ["MEETING_WITH_CONTRACTOR"];
     default:
@@ -53,12 +121,16 @@ function formatMarkingResult(result: MarkingResult): string {
       return "Paint and Flag";
     case "PAINT_ONLY":
       return "Paint Only";
+    case "FLAG_ONLY":
+      return "Flag Only";
     case "EXCAVATION_SITE_CLEAR":
       return "Excavation Site Clear";
     case "UNLOCATABLE":
       return "Unlocatable";
     case "NO_ACCESS":
       return "No Access";
+    case "OVERHEAD_NO_FACILITIES":
+      return "Overhead / No Facilities";
     case "MEETING_WITH_CONTRACTOR":
       return "Meeting with Contractor";
     default:
@@ -132,7 +204,10 @@ function isCustomerMarkingComplete(
 }
 
 function sanitizeNumericInput(value: string) {
-  return value.replace(/\D/g, "");
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  // Strip leading zeroes so user typing "5" doesn't produce "05"
+  return String(parseInt(digits, 10));
 }
 
 export function CustomersTab({
@@ -146,6 +221,8 @@ export function CustomersTab({
   isReadOnly = false,
 }: CustomersTabProps) {
   const sectionOffsets = useRef<Record<string, number>>({});
+  const inputOffsets = useRef<Record<string, number>>({});
+  const rootYInScroll = useRef(0);
   const [tick, setTick] = useState(0);
   const isOnsite = locatorStatus === "ONSITE";
   const isClosed =
@@ -196,71 +273,61 @@ export function CustomersTab({
     if (data.status === "MARKED" && !data.footage) return;
 
     onChange(patchCustomerMarking(value, customerId, { completed: true }));
+
+    // Find next uncompleted customer and auto-scroll to it
+    const currentIndex = customers.findIndex((c) => c.id === customerId);
+    const nextUncompleted = customers
+      .slice(currentIndex + 1)
+      .find((c) => !value[c.id]?.completed);
+
+    if (nextUncompleted) {
+      setTimeout(() => {
+        scrollToSection(nextUncompleted.id);
+      }, 150);
+    }
   };
 
   const scrollToOffset = (y?: number) => {
     if (scrollViewRef?.current && typeof y === "number") {
       scrollViewRef.current.scrollTo({
-        y: Math.max(0, y - 20),
+        y: Math.max(0, y - 60),
         animated: true,
       });
     }
   };
 
   const scrollToSection = (customerId: string, offsetWithinSection = 0) => {
-    scrollToOffset(sectionOffsets.current[customerId] + offsetWithinSection);
+    const absoluteY =
+      rootYInScroll.current +
+      (sectionOffsets.current[customerId] || 0) +
+      offsetWithinSection;
+    scrollToOffset(absoluteY);
+  };
+
+  const scrollToInput = (key: string) => {
+    const absoluteY = rootYInScroll.current + (inputOffsets.current[key] || 0);
+    if (scrollViewRef?.current) {
+      // Scroll so the input is visible above the keyboard
+      scrollViewRef.current.scrollTo({
+        y: Math.max(0, absoluteY - 120),
+        animated: true,
+      });
+    }
   };
 
   return (
-    <View onLayout={initMissing}>
+    <View
+      onLayout={(event) => {
+        rootYInScroll.current = event.nativeEvent.layout.y;
+        initMissing();
+      }}
+    >
       {!isClosed && (
         <Text className="text-sm mb-4" style={{ color: colors.muted }}>
           {isOnsite
             ? "Select marking status and result for each customer."
             : "You must be on site to enter customer data."}
         </Text>
-      )}
-
-      {payload.onsiteStartedAt && (
-        <View
-          className="rounded-xl p-4 mb-4"
-          style={{ backgroundColor: colors.surface }}
-        >
-          <Text
-            className="text-xs font-semibold mb-2"
-            style={{ color: colors.muted }}
-          >
-            Time Allocation
-          </Text>
-          <View className="flex-row items-center justify-between">
-            <View>
-              <Text className="text-sm" style={{ color: colors.text }}>
-                Allocatable: {formatMinutesAsHours(allocatableMinutes)}
-              </Text>
-              <Text className="text-sm mt-1" style={{ color: colors.text }}>
-                Allocated: {formatMinutesAsHours(allocatedMinutes)}
-              </Text>
-            </View>
-            <View className="items-end">
-              <Text className="text-xs" style={{ color: colors.muted }}>
-                Remaining
-              </Text>
-              <Text
-                className="text-2xl font-bold"
-                style={{
-                  color: remainingMinutes < 0 ? colors.danger : colors.accent,
-                }}
-              >
-                {formatMinutesAsHours(Math.abs(remainingMinutes))}
-              </Text>
-              {remainingMinutes < 0 && (
-                <Text className="text-xs mt-1" style={{ color: colors.danger }}>
-                  Over-allocated
-                </Text>
-              )}
-            </View>
-          </View>
-        </View>
       )}
 
       <View style={{ gap: 12 }}>
@@ -494,12 +561,7 @@ export function CustomersTab({
                 </View>
 
                 {data.status && resultOptions.length > 0 && (
-                  <View
-                    onLayout={(event) => {
-                      const localY = event.nativeEvent.layout.y;
-                      setTimeout(() => scrollToSection(customer.id, localY), 100);
-                    }}
-                  >
+                  <View>
                     <Text
                       className="text-xs font-semibold mb-2"
                       style={{ color: colors.muted }}
@@ -563,7 +625,12 @@ export function CustomersTab({
                   <View
                     onLayout={(event) => {
                       const localY = event.nativeEvent.layout.y;
-                      setTimeout(() => scrollToSection(customer.id, localY), 100);
+                      // Store the input section offset for this customer
+                      // so we can scroll to it on focus
+                      const customerSectionY =
+                        sectionOffsets.current[customer.id] || 0;
+                      inputOffsets.current[`${customer.id}-inputs`] =
+                        customerSectionY + localY;
                     }}
                   >
                     <Text
@@ -580,6 +647,7 @@ export function CustomersTab({
                           placeholderTextColor={colors.muted}
                           keyboardType="numeric"
                           editable={!isDisabled && !isReadOnly}
+                          onFocus={() => scrollToInput(`${customer.id}-inputs`)}
                           onChangeText={(text) =>
                             onChange(
                               patchCustomerMarking(value, customer.id, {
@@ -606,6 +674,7 @@ export function CustomersTab({
                             placeholderTextColor={colors.muted}
                             keyboardType="numeric"
                             editable={!isDisabled}
+                            onFocus={() => scrollToInput(`${customer.id}-inputs`)}
                             onChangeText={(text) =>
                               onChange(
                                 patchCustomerMarking(value, customer.id, {

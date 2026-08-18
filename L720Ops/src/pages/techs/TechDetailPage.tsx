@@ -27,7 +27,7 @@ import type { TicketDetailResponse } from "../../types/ops";
 import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -58,6 +58,34 @@ const TYPE_LABELS: Record<string, string> = {
   NO_RESPONSE: "NR",
 };
 
+const ALLOCATION_LABELS: Record<string, string> = {
+  locating: "Locating",
+  training: "Training",
+  truck_support: "Truck Support",
+  meeting: "Meeting",
+  oncall: "On Call",
+  other: "Other",
+};
+
+const ALLOCATION_COLORS: Record<string, string> = {
+  locating: "#10B981",
+  training: "#3B82F6",
+  truck_support: "#F59E0B",
+  meeting: "#8B5CF6",
+  oncall: "#EC4899",
+  other: "#6B7280",
+};
+
+function allocationLabel(v: string | null | undefined): string {
+  if (!v) return "Locating";
+  return ALLOCATION_LABELS[v] || v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function allocationColor(v: string | null | undefined): string {
+  if (!v) return ALLOCATION_COLORS.locating;
+  return ALLOCATION_COLORS[v] || ALLOCATION_COLORS.other;
+}
+
 function makeTicketIcon(color: string, label: string) {
   return L.divIcon({
     className: "ticket-div-icon",
@@ -71,6 +99,28 @@ function makeTicketIcon(color: string, label: string) {
     ">${label}</div>`,
     iconSize: [22, 22],
     iconAnchor: [11, 11],
+  });
+}
+
+function makeTechLocationIcon(name: string) {
+  const initials = name
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return L.divIcon({
+    className: "tech-live-div-icon",
+    html: `<div style="
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #10B981; border: 3px solid #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; color: #fff;
+      font-family: system-ui, sans-serif; line-height: 1;
+    ">${initials}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
   });
 }
 
@@ -114,6 +164,20 @@ function getScopeBounds(payloadJson?: string): {
     return null;
   } catch {
     return null;
+  }
+}
+
+function getAllocatedMinutesFromPayload(payloadJson?: string): number {
+  try {
+    if (!payloadJson) return 0;
+    const payload = JSON.parse(payloadJson);
+    const markings = payload?.customerMarkings || payload?.customerMarking || {};
+    return Object.values(markings).reduce((sum: number, data: any) => {
+      const mins = parseInt(data?.minutes || "0", 10);
+      return sum + (isNaN(mins) ? 0 : mins);
+    }, 0);
+  } catch {
+    return 0;
   }
 }
 
@@ -215,9 +279,70 @@ export function TechDetailPage() {
     return () => clearInterval(t);
   }, []);
 
+  // Sub tab: "list" | "map"
+  const [activeSubTab, setActiveSubTab] = useState<"list" | "map">("list");
+
+  // Filters for tickets in range
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [typeFilter, setTypeFilter] = useState<string>("ALL");
+
   const tech = techQuery.data;
-  const tickets = ticketsQuery.data?.tickets || [];
+  const rawTickets = ticketsQuery.data?.tickets || [];
+
+  // Filtered tickets based on status & type
+  const tickets = useMemo(() => {
+    return rawTickets.filter((t) => {
+      // Status filter
+      if (statusFilter !== "ALL") {
+        if (statusFilter === "OPEN") {
+          if (t.locatorStatus === "CLOSED" || t.locatorStatus === "UNABLE") return false;
+        } else if (statusFilter === "CLOSED") {
+          if (t.locatorStatus !== "CLOSED" && t.locatorStatus !== "UNABLE") return false;
+        } else if (statusFilter === "CLEARED") {
+          // All customers marked as clear / not marked
+          const payload = typeof t.payloadJson === "string" ? JSON.parse(t.payloadJson || "{}") : (t.payloadJson || {});
+          const markings = payload.customerMarkings || payload.customerMarking || {};
+          const markingList = Object.values(markings) as any[];
+          if (markingList.length === 0) return false;
+          const allCleared = markingList.every((m) => m.status === "NOT_MARKED" || m.result === "EXCAVATION_SITE_CLEAR");
+          if (!allCleared) return false;
+        } else if (statusFilter === "MARKED") {
+          // At least one customer marked
+          const payload = typeof t.payloadJson === "string" ? JSON.parse(t.payloadJson || "{}") : (t.payloadJson || {});
+          const markings = payload.customerMarkings || payload.customerMarking || {};
+          const markingList = Object.values(markings) as any[];
+          const anyMarked = markingList.some((m) => m.status === "MARKED" || m.result === "PAINT_AND_FLAG" || m.result === "PAINT_ONLY" || m.result === "FLAG_ONLY");
+          if (!anyMarked) return false;
+        } else if (statusFilter === "RESCHEDULED") {
+          // Placeholder for future rescheduling feature
+          return false;
+        } else if (t.locatorStatus !== statusFilter) {
+          return false;
+        }
+      }
+
+      // Type filter
+      if (typeFilter !== "ALL" && t.ticketType !== typeFilter) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [rawTickets, statusFilter, typeFilter]);
+
   const ticketsWithCoords = tickets.filter((t) => t.lat != null && t.lng != null);
+
+  // Tech GPS breadcrumbs / route query
+  const routeQuery = useQuery({
+    queryKey: ["ops", "tech-route", id],
+    queryFn: () => OpsService.getTechRoute(id!),
+    enabled: Boolean(id),
+    refetchInterval: 15000,
+  });
+
+  const routePoints = routeQuery.data?.points || [];
+  const latestLocation = routePoints.length > 0 ? routePoints[routePoints.length - 1] : null;
+  const routeCoordinates = routePoints.map((p) => [p.latitude, p.longitude] as [number, number]);
 
   // Flatten territory tree for lookups
   const flattenedTerritories = useMemo(
@@ -306,6 +431,20 @@ export function TechDetailPage() {
       ),
     },
     {
+      key: "allocated",
+      header: "Allocated",
+      align: "right",
+      render: (t) => {
+        const mins = getAllocatedMinutesFromPayload(t.payloadJson);
+        if (mins === 0) return <span className="text-gray-300">—</span>;
+        return (
+          <span className="tabular-nums font-medium text-gray-700">
+            {mins}m
+          </span>
+        );
+      },
+    },
+    {
       key: "updated",
       header: "Updated",
       align: "right",
@@ -374,9 +513,14 @@ export function TechDetailPage() {
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge value={tech.clockStatus} />
-                {tech.currentSession && (
+                {tech.currentSession && tech.clockStatus === "CLOCKED_IN" && (
                   <span className="text-sm font-medium text-gray-900 tabular-nums">
                     {formatDuration(now - tech.currentSession.clockInAt)}
+                  </span>
+                )}
+                {tech.currentSession && tech.clockStatus === "CLOCKED_OUT" && tech.currentSession.clockOutAt && (
+                  <span className="text-sm font-medium text-gray-500 tabular-nums">
+                    out {new Date(tech.currentSession.clockOutAt).toLocaleTimeString()}
                   </span>
                 )}
               </div>
@@ -435,147 +579,245 @@ export function TechDetailPage() {
             />
           </div>
 
-          {/* Map view — tech territory boundaries + ticket markers + ticket scope */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900">Ticket Map</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Territory boundaries with ticket markers and scope boxes
-              </p>
-            </div>
-            <div style={{ height: "400px" }}>
-              <MapContainer
-                center={mapCenter}
-                zoom={10}
-                scrollWheelZoom
-                style={{ height: "100%", width: "100%" }}
+          {/* Sub-tab bar: Tickets in Range | Ticket Map + filters */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 px-4 py-3 flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded-md border border-gray-200 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setActiveSubTab("list")}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeSubTab === "list"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-700 hover:bg-gray-50"
+                }`}
               >
-                <MapRefocus center={mapCenter} />
-                <LayersControl position="topright">
-                  <LayersControl.BaseLayer checked name="Street">
-                    <TileLayer
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    />
-                  </LayersControl.BaseLayer>
-                  <LayersControl.BaseLayer name="Satellite">
-                    <TileLayer
-                      url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                      attribution="Tiles &copy; Esri"
-                    />
-                  </LayersControl.BaseLayer>
-                </LayersControl>
+                Tickets in Range
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab("map")}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors border-l border-gray-200 ${
+                  activeSubTab === "map"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                Ticket Map
+              </button>
+            </div>
 
-                {/* Tech territory boundary rectangles */}
-                {(tech.assignedTerritories || []).map((at, idx) => {
-                  const node = flattenedTerritories.find((n) => n.id === at.id);
-                  if (!node) return null;
-                  const bounds = getBounds(node);
-                  if (!bounds) return null;
-                  const color = ["#2563EB", "#0F766E", "#DC2626", "#7C3AED"][idx % 4];
-                  return (
-                    <Rectangle
-                      key={at.id}
-                      bounds={bounds}
-                      pathOptions={{ color, weight: 2, fillOpacity: 0.08 }}
-                    >
-                      <Tooltip permanent direction="center" className="area-label">
-                        <span style={{ fontWeight: 600, color, fontSize: "11px" }}>
-                          {at.name}
-                        </span>
-                      </Tooltip>
-                    </Rectangle>
-                  );
-                })}
+            <div className="h-5 w-px bg-gray-200" />
 
-                {/* Boundary unit city rectangles */}
-                {allBoundaryUnits.map((unit) => {
-                  const bounds: [[number, number], [number, number]] = [
-                    [unit.bbox.south, unit.bbox.west],
-                    [unit.bbox.north, unit.bbox.east],
-                  ];
-                  return (
-                    <Rectangle
-                      key={`bu-${unit.territoryId}-${unit.id}`}
-                      bounds={bounds}
-                      pathOptions={{ color: "#2563EB", weight: 1.5, fillOpacity: 0.1 }}
-                    >
-                      <Tooltip direction="center" className="area-label">
-                        <span style={{ fontSize: "9px", color: "#2563EB" }}>
-                          {unit.name}
-                        </span>
-                      </Tooltip>
-                    </Rectangle>
-                  );
-                })}
+            {/* Status filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">Status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">All</option>
+                <option value="OPEN">Open</option>
+                <option value="CLOSED">Closed</option>
+                <option value="CLEARED">Cleared</option>
+                <option value="MARKED">Marked</option>
+                <option value="RESCHEDULED">Rescheduled</option>
+              </select>
+            </div>
 
-                {/* Ticket scope boxes (from payloadJson) */}
-                {ticketsWithCoords.map((ticket) => {
-                  const scope = getScopeBounds(ticket.payloadJson);
-                  if (!scope) return null;
-                  const bounds: [[number, number], [number, number]] = [
-                    [scope.latMin, scope.lngMin],
-                    [scope.latMax, scope.lngMax],
-                  ];
-                  return (
-                    <Rectangle
-                      key={`scope-${ticket.id}`}
-                      bounds={bounds}
-                      pathOptions={{
-                        color: "#F59E0B",
-                        weight: 1,
-                        fillOpacity: 0.1,
-                        dashArray: "4 4",
-                      }}
-                    />
-                  );
-                })}
+            {/* Type filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">Type:</span>
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">All</option>
+                <option value="NORMAL">Normal</option>
+                <option value="EMERGENCY">Emergency</option>
+                <option value="DIGUP">Digup</option>
+                <option value="NON_COMPLIANT">Non-Compliant</option>
+                <option value="UPDATE">Update</option>
+                <option value="UPDATE_REMARK">Update Remark</option>
+                <option value="RECALL">Recall</option>
+                <option value="NO_RESPONSE">No Response</option>
+              </select>
+            </div>
 
-                {/* Ticket markers */}
-                {ticketsWithCoords.map((ticket) => {
-                  const color = STATUS_COLORS[ticket.locatorStatus] || "#6B7280";
-                  const label = TYPE_LABELS[ticket.ticketType] || "?";
-                  return (
-                    <Marker
-                      key={ticket.id}
-                      position={[ticket.lat, ticket.lng]}
-                      icon={makeTicketIcon(color, label)}
-                      eventHandlers={{
-                        click: () => setSelectedTicketId(ticket.id),
-                      }}
-                    >
-                      <Tooltip direction="top" offset={[0, -12]}>
-                        <div className="text-xs">
-                          <div className="font-semibold">{ticket.ticketNumber}</div>
-                          <div>{formatTicketType(ticket.ticketType)} · {ticket.locatorStatus}</div>
-                          <div className="text-gray-500 truncate max-w-[200px]">{ticket.address}</div>
-                        </div>
-                      </Tooltip>
-                    </Marker>
-                  );
-                })}
-              </MapContainer>
+            <div className="ml-auto text-xs text-gray-500">
+              {tickets.length} of {rawTickets.length} tickets
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
-              <div className="bg-white rounded-lg shadow-sm border border-gray-100">
-                <div className="px-5 py-4 border-b border-gray-100">
-                  <h3 className="text-sm font-semibold text-gray-900">
-                    Tickets in range
-                  </h3>
+              {activeSubTab === "list" ? (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+                  <div className="px-5 py-4 border-b border-gray-100">
+                    <h3 className="text-sm font-semibold text-gray-900">
+                      Tickets in range
+                    </h3>
+                  </div>
+                  <DataTable
+                    columns={ticketColumns}
+                    rows={tickets}
+                    rowKey={(t) => t.id}
+                    loading={ticketsQuery.isLoading}
+                    onRowClick={(t) => setSelectedTicketId(t.id)}
+                    empty={{ title: "No tickets match the selected filters" }}
+                    className="border-none shadow-none rounded-none"
+                  />
                 </div>
-                <DataTable
-                  columns={ticketColumns}
-                  rows={tickets}
-                  rowKey={(t) => t.id}
-                  loading={ticketsQuery.isLoading}
-                  onRowClick={(t) => setSelectedTicketId(t.id)}
-                  empty={{ title: "No tickets touched in this range" }}
-                  className="border-none shadow-none rounded-none"
-                />
-              </div>
+              ) : (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-100">
+                    <h3 className="text-sm font-semibold text-gray-900">Ticket Map</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Territory boundaries with ticket markers and scope boxes
+                      {statusFilter !== "ALL" || typeFilter !== "ALL" ? " (filtered)" : ""}
+                    </p>
+                  </div>
+                  <div style={{ height: "500px" }}>
+                    <MapContainer
+                      center={mapCenter}
+                      zoom={10}
+                      scrollWheelZoom
+                      style={{ height: "100%", width: "100%" }}
+                    >
+                      <MapRefocus center={mapCenter} />
+                      <LayersControl position="topright">
+                        <LayersControl.BaseLayer checked name="Street">
+                          <TileLayer
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                          />
+                        </LayersControl.BaseLayer>
+                        <LayersControl.BaseLayer name="Satellite">
+                          <TileLayer
+                            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                            attribution="Tiles &copy; Esri"
+                          />
+                        </LayersControl.BaseLayer>
+                      </LayersControl>
+
+                      {/* Tech territory boundary rectangles */}
+                      {(tech.assignedTerritories || []).map((at, idx) => {
+                        const node = flattenedTerritories.find((n) => n.id === at.id);
+                        if (!node) return null;
+                        const bounds = getBounds(node);
+                        if (!bounds) return null;
+                        const color = ["#2563EB", "#0F766E", "#DC2626", "#7C3AED"][idx % 4];
+                        return (
+                          <Rectangle
+                            key={at.id}
+                            bounds={bounds}
+                            pathOptions={{ color, weight: 2, fillOpacity: 0.08 }}
+                          >
+                            <Tooltip permanent direction="center" className="area-label">
+                              <span style={{ fontWeight: 600, color, fontSize: "11px" }}>
+                                {at.name}
+                              </span>
+                            </Tooltip>
+                          </Rectangle>
+                        );
+                      })}
+
+                      {/* Boundary unit city rectangles */}
+                      {allBoundaryUnits.map((unit) => {
+                        const bounds: [[number, number], [number, number]] = [
+                          [unit.bbox.south, unit.bbox.west],
+                          [unit.bbox.north, unit.bbox.east],
+                        ];
+                        return (
+                          <Rectangle
+                            key={`bu-${unit.territoryId}-${unit.id}`}
+                            bounds={bounds}
+                            pathOptions={{ color: "#2563EB", weight: 1.5, fillOpacity: 0.1 }}
+                          >
+                            <Tooltip direction="center" className="area-label">
+                              <span style={{ fontSize: "9px", color: "#2563EB" }}>
+                                {unit.name}
+                              </span>
+                            </Tooltip>
+                          </Rectangle>
+                        );
+                      })}
+
+                      {/* Ticket scope boxes (from payloadJson) */}
+                      {ticketsWithCoords.map((ticket) => {
+                        const scope = getScopeBounds(ticket.payloadJson);
+                        if (!scope) return null;
+                        const bounds: [[number, number], [number, number]] = [
+                          [scope.latMin, scope.lngMin],
+                          [scope.latMax, scope.lngMax],
+                        ];
+                        return (
+                          <Rectangle
+                            key={`scope-${ticket.id}`}
+                            bounds={bounds}
+                            pathOptions={{
+                              color: "#F59E0B",
+                              weight: 1,
+                              fillOpacity: 0.1,
+                              dashArray: "4 4",
+                            }}
+                          />
+                        );
+                      })}
+
+                      {/* GPS Breadcrumb Route Trail */}
+                      {routeCoordinates.length > 1 && (
+                        <Polyline
+                          positions={routeCoordinates}
+                          pathOptions={{ color: "#10B981", weight: 3, opacity: 0.8, dashArray: "6 6" }}
+                        />
+                      )}
+
+                      {/* Latest Tech GPS Location Marker (if clocked in / tracked) */}
+                      {latestLocation && (
+                        <Marker
+                          position={[latestLocation.latitude, latestLocation.longitude]}
+                          icon={makeTechLocationIcon(tech?.name || "Tech")}
+                        >
+                          <Tooltip direction="top" offset={[0, -14]} permanent={false}>
+                            <div className="text-xs font-semibold">
+                              <div>{tech?.name} (Current Location)</div>
+                              <div className="text-gray-500 font-normal">
+                                Updated {new Date(latestLocation.recordedAt).toLocaleTimeString()}
+                              </div>
+                            </div>
+                          </Tooltip>
+                        </Marker>
+                      )}
+
+                      {/* Ticket markers */}
+                      {ticketsWithCoords.map((ticket) => {
+                        const color = STATUS_COLORS[ticket.locatorStatus] || "#6B7280";
+                        const label = TYPE_LABELS[ticket.ticketType] || "?";
+                        return (
+                          <Marker
+                            key={ticket.id}
+                            position={[ticket.lat, ticket.lng]}
+                            icon={makeTicketIcon(color, label)}
+                            eventHandlers={{
+                              click: () => setSelectedTicketId(ticket.id),
+                            }}
+                          >
+                            <Tooltip direction="top" offset={[0, -12]}>
+                              <div className="text-xs">
+                                <div className="font-semibold">{ticket.ticketNumber}</div>
+                                <div>{formatTicketType(ticket.ticketType)} · {ticket.locatorStatus}</div>
+                                <div className="text-gray-500 truncate max-w-[200px]">{ticket.address}</div>
+                              </div>
+                            </Tooltip>
+                          </Marker>
+                        );
+                      })}
+                    </MapContainer>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -584,35 +826,150 @@ export function TechDetailPage() {
                   <h3 className="text-sm font-semibold text-gray-900">
                     Timesheet
                   </h3>
+                  {tech.currentSession && tech.clockStatus === "CLOCKED_IN" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-white"
+                        style={{
+                          backgroundColor: allocationColor(tech.currentSession.allocationType),
+                        }}
+                      >
+                        {allocationLabel(tech.currentSession.allocationType)} · Active
+                      </span>
+                      <span className="text-xs text-gray-500 tabular-nums">
+                        {formatDuration(tech.currentSession.allocationElapsedMs)}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        (since {new Date(tech.currentSession.allocationStartedAt ?? tech.currentSession.clockInAt).toLocaleTimeString()})
+                      </span>
+                    </div>
+                  )}
+                  {tech.currentSession && tech.clockStatus === "CLOCKED_OUT" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+                        Clocked Out
+                      </span>
+                      {tech.currentSession.clockOutTicket && (
+                        <span className="text-xs text-gray-500">
+                          on {tech.currentSession.clockOutTicket.ticketNumber}
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400 tabular-nums">
+                        {new Date(tech.currentSession.clockOutAt ?? 0).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="px-5 py-3 space-y-3">
-                  {timesheetQuery.data?.sessions.map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          {s.date}
+                  {timesheetQuery.data?.sessions.map((s) => {
+                    const allocColor = allocationColor(s.allocationType);
+                    const isActive = !s.clockOutAt;
+                    return (
+                      <div
+                        key={s.id}
+                        className="rounded-md border border-gray-100 p-3"
+                        style={{ borderLeftWidth: "4px", borderLeftColor: allocColor }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-gray-900 text-sm">
+                                {s.date}
+                              </div>
+                              {isActive && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {new Date(s.clockInAt).toLocaleTimeString()} →{" "}
+                              {s.clockOutAt
+                                ? new Date(s.clockOutAt).toLocaleTimeString()
+                                : "active"}
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold text-white"
+                                style={{ backgroundColor: allocColor }}
+                              >
+                                {allocationLabel(s.allocationType)}
+                              </span>
+                              {s.clockInReason && s.allocationType !== s.clockInReason && (
+                                <span className="text-[10px] text-gray-500">
+                                  {s.clockInReason.replace(/_/g, " ")}
+                                </span>
+                              )}
+                              {s.otherReason && (
+                                <span className="text-[10px] italic text-gray-400">
+                                  {s.otherReason}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-semibold text-gray-900 tabular-nums">
+                              {formatDuration(s.productiveMs)}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              L {formatDuration(s.lunchMs)} · P{" "}
+                              {formatDuration(s.personalMs)}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(s.clockInAt).toLocaleTimeString()} →{" "}
-                          {s.clockOutAt
-                            ? new Date(s.clockOutAt).toLocaleTimeString()
-                            : "active"}
-                        </div>
+                        {s.allocationBreakdown && s.allocationBreakdown.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                              Allocation Breakdown
+                            </div>
+                            {s.allocationBreakdown.map((alloc) => (
+                              <div
+                                key={alloc.type}
+                                className="flex items-center justify-between text-[11px]"
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <span
+                                    className="inline-block w-2 h-2 rounded-full"
+                                    style={{ backgroundColor: allocationColor(alloc.type) }}
+                                  />
+                                  <span className="text-gray-700 font-medium">
+                                    {allocationLabel(alloc.type)}
+                                  </span>
+                                  <span className="text-gray-400">
+                                    ({alloc.segments.length} {alloc.segments.length === 1 ? "segment" : "segments"})
+                                  </span>
+                                </span>
+                                <span className="tabular-nums font-semibold text-gray-900">
+                                  {formatDuration(alloc.ms)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {s.breakSegments && s.breakSegments.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                            {s.breakSegments.map((b) => (
+                              <div
+                                key={b.id}
+                                className="flex items-center justify-between text-[11px] text-gray-600"
+                              >
+                                <span>
+                                  {b.type === "LUNCH" ? "🍽 Lunch" : "⏸ Personal"}
+                                  {b.reason ? ` · ${b.reason.replace(/_/g, " ")}` : ""}
+                                </span>
+                                <span className="tabular-nums">
+                                  {new Date(b.startedAt).toLocaleTimeString()} →{" "}
+                                  {b.endedAt
+                                    ? new Date(b.endedAt).toLocaleTimeString()
+                                    : "active"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900 tabular-nums">
-                          {formatDuration(s.productiveMs)}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          L {formatDuration(s.lunchMs)} · P{" "}
-                          {formatDuration(s.personalMs)}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {(!timesheetQuery.data ||
                     timesheetQuery.data.sessions.length === 0) && (
                     <div className="text-sm text-gray-500 text-center py-6">
@@ -621,11 +978,49 @@ export function TechDetailPage() {
                   )}
                 </div>
                 {timesheetQuery.data && (
-                  <div className="px-5 py-3 border-t border-gray-100 text-xs text-gray-500">
-                    Total productive{" "}
-                    <span className="font-semibold text-gray-900">
-                      {formatDuration(timesheetQuery.data.totals.productiveMs)}
-                    </span>
+                  <div className="px-5 py-3 border-t border-gray-100 text-xs text-gray-500 space-y-1">
+                    <div>
+                      Total productive{" "}
+                      <span className="font-semibold text-gray-900">
+                        {formatDuration(timesheetQuery.data.totals.productiveMs)}
+                      </span>
+                    </div>
+                    <div>
+                      Worked{" "}
+                      <span className="font-semibold text-gray-700">
+                        {formatDuration(timesheetQuery.data.totals.workedMs)}
+                      </span>
+                      {" · Lunch "}
+                      <span className="font-semibold text-gray-700">
+                        {formatDuration(timesheetQuery.data.totals.lunchMs)}
+                      </span>
+                      {" · Personal "}
+                      <span className="font-semibold text-gray-700">
+                        {formatDuration(timesheetQuery.data.totals.personalMs)}
+                      </span>
+                    </div>
+                    {timesheetQuery.data.totals.allocationBreakdown &&
+                      timesheetQuery.data.totals.allocationBreakdown.length > 0 && (
+                        <div className="pt-2 mt-1 border-t border-gray-100 space-y-1">
+                          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Total by Allocation
+                          </div>
+                          {timesheetQuery.data.totals.allocationBreakdown.map((alloc) => (
+                            <div key={alloc.type} className="flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <span
+                                  className="inline-block w-2 h-2 rounded-full"
+                                  style={{ backgroundColor: allocationColor(alloc.type) }}
+                                />
+                                {allocationLabel(alloc.type)}
+                              </span>
+                              <span className="font-semibold text-gray-900 tabular-nums">
+                                {formatDuration(alloc.ms)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                   </div>
                 )}
               </div>
@@ -824,6 +1219,7 @@ export function TechDetailPage() {
                       <th className="py-2 pr-2">Customer</th>
                       <th className="py-2 pr-2">Utility</th>
                       <th className="py-2 pr-2">Status</th>
+                      <th className="py-2 pr-2">Reason / Result</th>
                       <th className="py-2 pr-2 text-right">Min</th>
                       <th className="py-2 pr-2 text-right">Ft</th>
                     </tr>
@@ -834,6 +1230,9 @@ export function TechDetailPage() {
                         <td className="py-2 pr-2">{c.customerName || "—"}</td>
                         <td className="py-2 pr-2">{c.utilityType || "—"}</td>
                         <td className="py-2 pr-2"><StatusBadge value={c.status} /></td>
+                        <td className="py-2 pr-2 text-gray-700 text-xs font-medium">
+                          {c.result ? c.result.replace(/_/g, " ") : "—"}
+                        </td>
                         <td className="py-2 pr-2 text-right tabular-nums">{c.minutes}</td>
                         <td className="py-2 pr-2 text-right tabular-nums">{c.footage}</td>
                       </tr>
@@ -869,9 +1268,9 @@ export function TechDetailPage() {
                       <span>{new Date(e.createdAt).toLocaleString()}</span>
                     </div>
                     <div className="text-gray-800">
-                      {e.oldLocatorStatus && e.newLocatorStatus
+                      {e.oldLocatorStatus && e.newLocatorStatus && e.oldLocatorStatus !== e.newLocatorStatus
                         ? `${e.oldLocatorStatus} → ${e.newLocatorStatus}`
-                        : e.notes || "—"}
+                        : e.notes || (e.oldLocatorStatus ? `Status: ${e.oldLocatorStatus}` : "—")}
                     </div>
                   </li>
                 ))}

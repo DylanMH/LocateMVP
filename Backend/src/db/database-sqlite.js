@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS ticket_events (
 CREATE TABLE IF NOT EXISTS outbox_811_events (
   id TEXT PRIMARY KEY,
   ticket_id TEXT NOT NULL,
+  external_ticket_id TEXT,
   event_type TEXT NOT NULL,
   member_code TEXT NOT NULL,
   response_code TEXT,
@@ -153,7 +154,7 @@ CREATE TABLE IF NOT EXISTS clock_events (
   request_id TEXT NOT NULL UNIQUE,
   session_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  event_type TEXT NOT NULL CHECK (event_type IN ('CLOCK_IN', 'CLOCK_OUT', 'LUNCH_START', 'LUNCH_END', 'PERSONAL_START', 'PERSONAL_END')),
+  event_type TEXT NOT NULL CHECK (event_type IN ('CLOCK_IN', 'CLOCK_OUT', 'LUNCH_START', 'LUNCH_END', 'PERSONAL_START', 'PERSONAL_END', 'ALLOCATION_CHANGE')),
   occurred_at INTEGER NOT NULL,
   reason TEXT,
   ticket_id TEXT,
@@ -184,6 +185,26 @@ CREATE TABLE IF NOT EXISTS break_segments (
   FOREIGN KEY (session_id) REFERENCES day_sessions(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS allocation_segments (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  allocation_type TEXT NOT NULL,
+  other_reason TEXT,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  start_event_request_id TEXT,
+  end_event_request_id TEXT,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  FOREIGN KEY (session_id) REFERENCES day_sessions(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_allocation_segments_session ON allocation_segments(session_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_segments_user ON allocation_segments(user_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_segments_open ON allocation_segments(ended_at) WHERE ended_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS utility_production_ledger (
   id TEXT PRIMARY KEY,
@@ -262,6 +283,23 @@ CREATE INDEX IF NOT EXISTS idx_utility_production_user ON utility_production_led
 CREATE UNIQUE INDEX IF NOT EXISTS idx_utility_production_request_customer
   ON utility_production_ledger(request_id, customer_id);
 
+CREATE TABLE IF NOT EXISTS tech_locations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  session_id TEXT,
+  latitude REAL NOT NULL,
+  longitude REAL NOT NULL,
+  accuracy REAL,
+  heading REAL,
+  speed REAL,
+  recorded_at INTEGER NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tech_locations_user_time ON tech_locations(user_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_tech_locations_session ON tech_locations(session_id);
+
 CREATE TABLE IF NOT EXISTS idempotency_records (
   request_id TEXT PRIMARY KEY,
   result_json TEXT NOT NULL,
@@ -327,6 +365,47 @@ ensureColumnExists(
 ensureColumnExists("day_sessions", "clock_in_reason", "ALTER TABLE day_sessions ADD COLUMN clock_in_reason TEXT");
 ensureColumnExists("day_sessions", "allocation_type", "ALTER TABLE day_sessions ADD COLUMN allocation_type TEXT");
 ensureColumnExists("day_sessions", "other_reason", "ALTER TABLE day_sessions ADD COLUMN other_reason TEXT");
+
+// Outbound 811 events — external_ticket_id column for linking to 811 simulator.
+ensureColumnExists("outbox_811_events", "external_ticket_id", "ALTER TABLE outbox_811_events ADD COLUMN external_ticket_id TEXT");
+
+// clock_events CHECK constraint migration — add ALLOCATION_CHANGE event type.
+// SQLite can't ALTER a CHECK; rebuild the table in place.
+(function migrateClockEventsCheck() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='clock_events'").get();
+  if (!row?.sql || row.sql.includes('ALLOCATION_CHANGE')) return;
+  console.log('[Database] Migrating clock_events.event_type CHECK to include ALLOCATION_CHANGE');
+  db.pragma('foreign_keys = OFF');
+  const tx = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE clock_events_new (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        event_type TEXT NOT NULL CHECK (event_type IN ('CLOCK_IN', 'CLOCK_OUT', 'LUNCH_START', 'LUNCH_END', 'PERSONAL_START', 'PERSONAL_END', 'ALLOCATION_CHANGE')),
+        occurred_at INTEGER NOT NULL,
+        reason TEXT,
+        ticket_id TEXT,
+        device_id TEXT,
+        seq INTEGER,
+        date TEXT,
+        clock_in_at INTEGER,
+        clock_out_at INTEGER,
+        session_status TEXT CHECK (session_status IN ('ACTIVE', 'CLOCKED_OUT')),
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        FOREIGN KEY (session_id) REFERENCES day_sessions(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      INSERT INTO clock_events_new (id, request_id, session_id, user_id, event_type, occurred_at, reason, ticket_id, device_id, seq, date, clock_in_at, clock_out_at, session_status, created_at)
+        SELECT id, request_id, session_id, user_id, event_type, occurred_at, reason, ticket_id, device_id, seq, date, clock_in_at, clock_out_at, session_status, created_at FROM clock_events;
+      DROP TABLE clock_events;
+      ALTER TABLE clock_events_new RENAME TO clock_events;
+    `);
+  });
+  tx();
+  db.pragma('foreign_keys = ON');
+})();
 
 // Area bounding box migrations
 ensureColumnExists("areas", "bbox_north", "ALTER TABLE areas ADD COLUMN bbox_north REAL");

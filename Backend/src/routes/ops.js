@@ -168,6 +168,17 @@ function getLiveClockState(userId) {
     )
     .get(session.id);
 
+  // Current allocation segment (open) — for live elapsed time per allocation
+  const currentAllocSeg = db
+    .prepare(
+      `SELECT id, allocation_type, other_reason, started_at
+       FROM allocation_segments
+       WHERE session_id = ? AND ended_at IS NULL
+       ORDER BY started_at DESC
+       LIMIT 1`,
+    )
+    .get(session.id);
+
   // Resolve clock-out ticket info
   let clockOutTicket = null;
   if (session.clock_out_ticket_id) {
@@ -190,6 +201,10 @@ function getLiveClockState(userId) {
       clockInReason: session.clock_in_reason || null,
       allocationType: session.allocation_type || null,
       otherReason: session.other_reason || null,
+      allocationStartedAt: currentAllocSeg?.started_at ?? session.clock_in_at,
+      allocationElapsedMs: currentAllocSeg
+        ? Date.now() - currentAllocSeg.started_at
+        : Date.now() - session.clock_in_at,
       clockOutTicket,
       currentTicket,
     },
@@ -1041,6 +1056,11 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
           `SELECT * FROM break_segments WHERE session_id = ? ORDER BY started_at ASC`,
         )
         .all(s.id);
+      const allocSegs = db
+        .prepare(
+          `SELECT * FROM allocation_segments WHERE session_id = ? ORDER BY started_at ASC`,
+        )
+        .all(s.id);
       const now = Date.now();
       const workedMs =
         s.clock_in_at && s.clock_out_at
@@ -1056,12 +1076,35 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
         if (b.break_type === "LUNCH") lunchMs += dur;
         else if (b.break_type === "PERSONAL") personalMs += dur;
       }
+      // Per-allocation time breakdown
+      const allocationBreakdown = {};
+      for (const seg of allocSegs) {
+        const end = seg.ended_at ?? now;
+        const dur = Math.max(0, end - seg.started_at);
+        if (!allocationBreakdown[seg.allocation_type]) {
+          allocationBreakdown[seg.allocation_type] = {
+            type: seg.allocation_type,
+            ms: 0,
+            segments: [],
+          };
+        }
+        allocationBreakdown[seg.allocation_type].ms += dur;
+        allocationBreakdown[seg.allocation_type].segments.push({
+          id: seg.id,
+          startedAt: seg.started_at,
+          endedAt: seg.ended_at,
+          otherReason: seg.other_reason,
+        });
+      }
       return {
         id: s.id,
         date: s.date,
         clockInAt: s.clock_in_at,
         clockOutAt: s.clock_out_at,
         status: s.status,
+        clockInReason: s.clock_in_reason || null,
+        allocationType: s.allocation_type || null,
+        otherReason: s.other_reason || null,
         workedMs,
         lunchMs,
         personalMs,
@@ -1073,6 +1116,16 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
           endedAt: b.ended_at,
           reason: b.reason,
         })),
+        allocationSegments: allocSegs.map((seg) => ({
+          id: seg.id,
+          allocationType: seg.allocation_type,
+          otherReason: seg.other_reason,
+          startedAt: seg.started_at,
+          endedAt: seg.ended_at,
+        })),
+        allocationBreakdown: Object.values(allocationBreakdown).sort(
+          (a, b) => b.ms - a.ms,
+        ),
       };
     });
 
@@ -1082,9 +1135,16 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
         acc.lunchMs += s.lunchMs;
         acc.personalMs += s.personalMs;
         acc.productiveMs += s.productiveMs;
+        // Aggregate allocation breakdown across all sessions
+        for (const alloc of s.allocationBreakdown) {
+          if (!acc.allocationBreakdown[alloc.type]) {
+            acc.allocationBreakdown[alloc.type] = { type: alloc.type, ms: 0 };
+          }
+          acc.allocationBreakdown[alloc.type].ms += alloc.ms;
+        }
         return acc;
       },
-      { workedMs: 0, lunchMs: 0, personalMs: 0, productiveMs: 0 },
+      { workedMs: 0, lunchMs: 0, personalMs: 0, productiveMs: 0, allocationBreakdown: {} },
     );
 
     res.json({
@@ -1095,7 +1155,15 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
         label: range.label,
       },
       sessions: hydrated,
-      totals,
+      totals: {
+        workedMs: totals.workedMs,
+        lunchMs: totals.lunchMs,
+        personalMs: totals.personalMs,
+        productiveMs: totals.productiveMs,
+        allocationBreakdown: Object.values(totals.allocationBreakdown).sort(
+          (a, b) => b.ms - a.ms,
+        ),
+      },
     });
   } catch (error) {
     console.error("[OPS Techs] Error fetching timesheet:", error);
@@ -1132,6 +1200,125 @@ router.put("/techs/:id", authenticateToken, (req, res) => {
   } catch (error) {
     console.error("[OPS Techs] Error updating tech:", error);
     res.status(500).json({ error: "Failed to update technician" });
+  }
+});
+
+/**
+ * GET /api/ops/techs-locations
+ * Returns live/latest locations for all techs visible to the authenticated user.
+ * Role-based filtering:
+ *   - SUPERVISOR: sees techs in their supervisor territories
+ *   - AREA_MANAGER: sees techs under all supervisors in their areas
+ *   - DISTRICT_MANAGER / MANAGER: sees all techs
+ */
+router.get("/techs-locations", authenticateToken, (req, res) => {
+  try {
+    const viewerId = req.user?.id;
+    const viewerRole = req.user?.role;
+
+    if (!viewerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Get list of tech IDs accessible to this viewer
+    const accessibleTechIds = getTechIdsUnderUser(db, viewerId, viewerRole);
+    if (accessibleTechIds.length === 0) {
+      return res.json({ techs: [] });
+    }
+
+    const placeholders = accessibleTechIds.map(() => "?").join(",");
+
+    // Query active sessions and latest recorded location for each accessible tech
+    const rows = db.prepare(`
+      SELECT 
+        u.id as user_id,
+        u.name as user_name,
+        u.email as user_email,
+        u.role as user_role,
+        ds.id as active_session_id,
+        ds.clock_in_at,
+        ds.allocation_type,
+        tl.latitude,
+        tl.longitude,
+        tl.accuracy,
+        tl.heading,
+        tl.speed,
+        tl.recorded_at
+      FROM users u
+      JOIN day_sessions ds ON ds.user_id = u.id AND ds.status = 'ACTIVE'
+      LEFT JOIN (
+        SELECT tl1.*
+        FROM tech_locations tl1
+        JOIN (
+          SELECT user_id, MAX(recorded_at) as max_recorded
+          FROM tech_locations
+          GROUP BY user_id
+        ) tl2 ON tl1.user_id = tl2.user_id AND tl1.recorded_at = tl2.max_recorded
+      ) tl ON tl.user_id = u.id
+      WHERE u.id IN (${placeholders})
+        AND u.is_active = 1
+    `).all(...accessibleTechIds);
+
+    const techs = rows
+      .filter((r) => r.latitude !== null && r.longitude !== null)
+      .map((r) => ({
+        userId: r.user_id,
+        name: r.user_name,
+        email: r.user_email,
+        role: r.user_role,
+        clockInAt: r.clock_in_at,
+        allocationType: r.allocation_type,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        accuracy: r.accuracy,
+        heading: r.heading,
+        speed: r.speed,
+        recordedAt: r.recorded_at,
+      }));
+
+    res.json({ techs });
+  } catch (error) {
+    console.error("[OPS Techs] Error fetching techs locations:", error);
+    res.status(500).json({ error: "Failed to fetch tech locations" });
+  }
+});
+
+/**
+ * GET /api/ops/techs/:id/route
+ * Returns the breadcrumb trail/route for a specific tech (only during active/completed clocked-in sessions).
+ */
+router.get("/techs/:id/route", authenticateToken, (req, res) => {
+  try {
+    const { id } = req.params;
+    const { since, sessionId } = req.query;
+
+    let query = `
+      SELECT id, user_id, session_id, latitude, longitude, accuracy, heading, speed, recorded_at
+      FROM tech_locations
+      WHERE user_id = ?
+    `;
+    const params = [id];
+
+    if (sessionId) {
+      query += ` AND session_id = ?`;
+      params.push(sessionId);
+    } else if (since) {
+      query += ` AND recorded_at >= ?`;
+      params.push(parseInt(since, 10) || 0);
+    } else {
+      // Default to last 24 hours
+      const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      query += ` AND recorded_at >= ?`;
+      params.push(dayAgo);
+    }
+
+    query += ` ORDER BY recorded_at ASC`;
+
+    const points = db.prepare(query).all(...params);
+    res.json({ points });
+  } catch (error) {
+    console.error("[OPS Techs] Error fetching tech route:", error);
+    res.status(500).json({ error: "Failed to fetch tech route" });
   }
 });
 
