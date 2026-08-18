@@ -620,9 +620,9 @@ function TicketDetailBody({
                 <span>{new Date(e.createdAt).toLocaleString()}</span>
               </div>
               <div className="text-gray-800">
-                {e.oldLocatorStatus && e.newLocatorStatus
+                {e.oldLocatorStatus && e.newLocatorStatus && e.oldLocatorStatus !== e.newLocatorStatus
                   ? `${e.oldLocatorStatus} → ${e.newLocatorStatus}`
-                  : e.notes || "—"}
+                  : e.notes || (e.oldLocatorStatus ? `Status: ${e.oldLocatorStatus}` : "—")}
               </div>
             </li>
           ))}

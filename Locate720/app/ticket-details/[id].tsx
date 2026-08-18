@@ -217,7 +217,7 @@ function useCustomerMarkingState(ticket?: Ticket) {
       return;
     }
 
-    const saveCustomerMarking = async () => {
+    const timer = setTimeout(async () => {
       try {
         const normalizedCustomerMarking =
           normalizeCustomerMarking(customerMarking);
@@ -255,9 +255,9 @@ function useCustomerMarkingState(ticket?: Ticket) {
       } catch (error) {
         logger.error("[TicketDetail] Failed to save customer marking:", error);
       }
-    };
+    }, 400);
 
-    saveCustomerMarking();
+    return () => clearTimeout(timer);
   }, [customerMarking, ticket, isInitialized]);
 
   return { customerMarking, setCustomerMarking };

@@ -440,12 +440,12 @@ router.post("/events", (req, res) => {
           ).run(nextStatus, updatedPayloadJson, Date.now(), ticketId);
         }
 
-        // If locator status didn't change and status didn't change and no payload changes, avoid duplicate history
+        // Only record status change event in history if locator status or ticket status actually changed
         const statusActuallyChanged =
           ticket.status !== resultingStatus ||
           ticket.locator_status !== resultingLocatorStatus;
 
-        if (statusActuallyChanged || payloadUpdates) {
+        if (statusActuallyChanged) {
           recordTicketEventHistory({
             requestId,
             eventType: type,
@@ -456,9 +456,7 @@ router.post("/events", (req, res) => {
             newStatus: resultingStatus,
             oldLocatorStatus: ticket.locator_status,
             newLocatorStatus: resultingLocatorStatus,
-            notes: statusActuallyChanged
-              ? `Locator status changed from ${ticket.locator_status} to ${resultingLocatorStatus}`
-              : `Status reaffirmed: ${resultingLocatorStatus}`,
+            notes: `Locator status changed from ${ticket.locator_status} to ${resultingLocatorStatus}`,
             payloadSnapshot: JSON.parse(updatedPayloadJson || "{}"),
           });
         }
@@ -589,8 +587,8 @@ router.post("/events", (req, res) => {
           occurredAt: event.occurredAt,
           oldStatus: ticket.status,
           newStatus: ticket.status,
-          oldLocatorStatus: ticket.locator_status,
-          newLocatorStatus: ticket.locator_status,
+          oldLocatorStatus: null,
+          newLocatorStatus: null,
           notes: summarizeCustomerMarkingChange(previousPayload, mergedPayload),
           payloadSnapshot: mergedPayload,
         });
