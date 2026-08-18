@@ -23,6 +23,7 @@ export interface RangeSummary {
 export interface CurrentSession {
   sessionId: string;
   clockInAt: number;
+  clockOutAt?: number | null;
   elapsedMs: number;
   onBreak: boolean;
   breakType: "LUNCH" | "PERSONAL" | null;

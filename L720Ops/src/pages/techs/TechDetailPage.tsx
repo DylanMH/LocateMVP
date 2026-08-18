@@ -513,9 +513,14 @@ export function TechDetailPage() {
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge value={tech.clockStatus} />
-                {tech.currentSession && (
+                {tech.currentSession && tech.clockStatus === "CLOCKED_IN" && (
                   <span className="text-sm font-medium text-gray-900 tabular-nums">
                     {formatDuration(now - tech.currentSession.clockInAt)}
+                  </span>
+                )}
+                {tech.currentSession && tech.clockStatus === "CLOCKED_OUT" && tech.currentSession.clockOutAt && (
+                  <span className="text-sm font-medium text-gray-500 tabular-nums">
+                    out {new Date(tech.currentSession.clockOutAt).toLocaleTimeString()}
                   </span>
                 )}
               </div>
@@ -821,7 +826,7 @@ export function TechDetailPage() {
                   <h3 className="text-sm font-semibold text-gray-900">
                     Timesheet
                   </h3>
-                  {tech.currentSession && (
+                  {tech.currentSession && tech.clockStatus === "CLOCKED_IN" && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span
                         className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-white"
@@ -836,6 +841,21 @@ export function TechDetailPage() {
                       </span>
                       <span className="text-[10px] text-gray-400">
                         (since {new Date(tech.currentSession.allocationStartedAt ?? tech.currentSession.clockInAt).toLocaleTimeString()})
+                      </span>
+                    </div>
+                  )}
+                  {tech.currentSession && tech.clockStatus === "CLOCKED_OUT" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+                        Clocked Out
+                      </span>
+                      {tech.currentSession.clockOutTicket && (
+                        <span className="text-xs text-gray-500">
+                          on {tech.currentSession.clockOutTicket.ticketNumber}
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400 tabular-nums">
+                        {new Date(tech.currentSession.clockOutAt ?? 0).toLocaleTimeString()}
                       </span>
                     </div>
                   )}

@@ -288,7 +288,7 @@ export function TechsPage() {
           <div className="flex flex-col items-start gap-1">
             <div className="flex items-center gap-1.5">
               <StatusBadge value={t.clockStatus} />
-              {t.currentSession?.allocationType && (
+              {t.clockStatus === "CLOCKED_IN" && t.currentSession?.allocationType && (
                 <span
                   className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold text-white"
                   style={{ backgroundColor: allocationColor(t.currentSession.allocationType) }}
@@ -297,7 +297,7 @@ export function TechsPage() {
                 </span>
               )}
             </div>
-            {t.currentSession && (
+            {t.clockStatus === "CLOCKED_IN" && t.currentSession && (
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs text-gray-500 tabular-nums">
                   {formatDuration(t.currentSession.elapsedMs)} total
@@ -309,6 +309,11 @@ export function TechsPage() {
                     </span>
                   )}
               </div>
+            )}
+            {t.clockStatus === "CLOCKED_OUT" && t.currentSession?.clockOutAt && (
+              <span className="text-[10px] text-gray-400 tabular-nums">
+                out {new Date(t.currentSession.clockOutAt).toLocaleTimeString()}
+              </span>
             )}
           </div>
         ),
