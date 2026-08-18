@@ -433,18 +433,6 @@ export default function Timesheet() {
             <Text className="text-xs font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>
               Status
             </Text>
-            {isClockedIn && session?.allocationType && (
-              <Pressable
-                onPress={() => setShowAllocationChanger(true)}
-                className="flex-row items-center rounded-lg px-2.5 py-1"
-                style={{ backgroundColor: colors.primary + "20", gap: 4 }}
-              >
-                <Text className="text-xs font-semibold" style={{ color: colors.primary }}>
-                  {getAllocationLabel(session.allocationType)}
-                </Text>
-                <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
-              </Pressable>
-            )}
           </View>
           <Text
             className="text-2xl font-bold"
@@ -452,8 +440,30 @@ export default function Timesheet() {
           >
             {isClockedIn ? "On the Clock" : isClockedOut ? "Clocked Out" : "Not Clocked In"}
           </Text>
+          {isClockedIn && session?.allocationType && (
+            <Pressable
+              onPress={() => setShowAllocationChanger(true)}
+              className="mt-3 flex-row items-center justify-between rounded-xl p-3"
+              style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.primary + "40" }}
+            >
+              <View className="flex-1 mr-2">
+                <Text className="text-[11px] font-medium uppercase tracking-wider" style={{ color: colors.muted }}>
+                  Active Work Allocation
+                </Text>
+                <Text className="text-sm font-bold mt-0.5" style={{ color: colors.text }}>
+                  {getAllocationLabel(session.allocationType)}
+                </Text>
+              </View>
+              <View className="flex-row items-center rounded-lg px-2.5 py-1.5" style={{ backgroundColor: colors.primary + "20", gap: 4 }}>
+                <Text className="text-xs font-semibold" style={{ color: colors.primary }}>
+                  Change
+                </Text>
+                <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
+              </View>
+            </Pressable>
+          )}
           {isClockedIn && session?.otherReason && (
-            <Text className="text-xs mt-1 italic" style={{ color: colors.muted }}>
+            <Text className="text-xs mt-2 italic" style={{ color: colors.muted }}>
               &ldquo;{session.otherReason}&rdquo;
             </Text>
           )}

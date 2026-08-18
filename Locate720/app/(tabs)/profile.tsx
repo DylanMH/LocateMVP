@@ -391,11 +391,17 @@ export default function ProfileScreen() {
         <Pressable
           onPress={handleSignOut}
           disabled={isSigningOut}
-          className="rounded-xl px-4 py-3.5 mb-6 flex-row items-center justify-center"
-          style={{ backgroundColor: colors.danger, opacity: isSigningOut ? 0.5 : 1, gap: 8 }}
+          className="rounded-xl px-4 py-3.5 mb-10 flex-row items-center justify-center"
+          style={{ backgroundColor: colors.danger, opacity: isSigningOut ? 0.5 : 1, gap: 8, minHeight: 48 }}
         >
           <Ionicons name="log-out" size={18} color={colors.text} />
-          <Text className="text-base font-semibold" style={{ color: colors.text }}>Sign Out</Text>
+          <Text
+            className="text-base font-semibold"
+            style={{ color: colors.text, includeFontPadding: false }}
+            numberOfLines={1}
+          >
+            Sign Out
+          </Text>
         </Pressable>
       </ScrollView>
     </View>

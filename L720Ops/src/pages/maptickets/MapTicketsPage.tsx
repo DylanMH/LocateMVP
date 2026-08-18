@@ -120,6 +120,28 @@ function makeTicketIcon(color: string, label: string) {
   });
 }
 
+function makeTechLocationIcon(name: string) {
+  const initials = name
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return L.divIcon({
+    className: "tech-live-div-icon",
+    html: `<div style="
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #10B981; border: 3px solid #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; color: #fff;
+      font-family: system-ui, sans-serif; line-height: 1;
+    ">${initials}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
 // Helper to recenter the map when filters change
 function MapRefocus({ center }: { center: [number, number] | null }) {
   const map = useMap();
@@ -245,6 +267,15 @@ export function MapTicketsPage() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  // Query live tech locations for technicians visible in user's hierarchy
+  const techLocationsQuery = useQuery({
+    queryKey: ["ops", "techs-locations"],
+    queryFn: () => OpsService.getTechsLocations(),
+    refetchInterval: 15000,
+  });
+
+  const activeTechsWithLocation = techLocationsQuery.data?.techs || [];
 
   // Fetch boundary units for all supervisor AND tech territories so we can
   // render individual city rectangles at both levels.
@@ -706,6 +737,30 @@ export function MapTicketsPage() {
                     );
                   })}
 
+                  {/* Live Tech Location Markers (clocked-in techs visible to user) */}
+                  {activeTechsWithLocation.map((tech) => (
+                    <Marker
+                      key={`tech-loc-${tech.userId}`}
+                      position={[tech.latitude, tech.longitude]}
+                      icon={makeTechLocationIcon(tech.name)}
+                    >
+                      <Tooltip direction="top" offset={[0, -14]} permanent={false}>
+                        <div className="text-xs font-semibold">
+                          <div className="font-bold text-gray-900">{tech.name}</div>
+                          <div className="text-emerald-700 font-medium">Clocked In · {tech.role}</div>
+                          {tech.allocationType && (
+                            <div className="text-gray-600 font-normal">
+                              Allocation: {tech.allocationType.replace(/_/g, " ")}
+                            </div>
+                          )}
+                          <div className="text-gray-400 font-normal text-[10px] mt-0.5">
+                            Last ping: {new Date(tech.recordedAt).toLocaleTimeString()}
+                          </div>
+                        </div>
+                      </Tooltip>
+                    </Marker>
+                  ))}
+
                   {/* Ticket markers — divIcon with colored circle + type label */}
                   {ticketsWithCoords.map((ticket) => {
                     const color = STATUS_COLORS[ticket.locatorStatus] || "#6B7280";
@@ -1095,6 +1150,7 @@ function TicketDetailBody({
                 <th className="py-2 pr-2">Customer</th>
                 <th className="py-2 pr-2">Utility</th>
                 <th className="py-2 pr-2">Status</th>
+                <th className="py-2 pr-2">Reason / Result</th>
                 <th className="py-2 pr-2 text-right">Min</th>
                 <th className="py-2 pr-2 text-right">Ft</th>
               </tr>
@@ -1105,6 +1161,9 @@ function TicketDetailBody({
                   <td className="py-2 pr-2">{c.customerName || "—"}</td>
                   <td className="py-2 pr-2">{c.utilityType || "—"}</td>
                   <td className="py-2 pr-2"><StatusBadge value={c.status} /></td>
+                  <td className="py-2 pr-2 text-gray-700 text-xs font-medium">
+                    {c.result ? c.result.replace(/_/g, " ") : "—"}
+                  </td>
                   <td className="py-2 pr-2 text-right tabular-nums">{c.minutes}</td>
                   <td className="py-2 pr-2 text-right tabular-nums">{c.footage}</td>
                 </tr>

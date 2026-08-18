@@ -70,6 +70,39 @@ export const OpsService = {
       body: JSON.stringify(body),
     });
   },
+  getTechsLocations() {
+    return opsFetch<{
+      techs: Array<{
+        userId: string;
+        name: string;
+        email: string;
+        role: string;
+        clockInAt: number;
+        allocationType: string | null;
+        latitude: number;
+        longitude: number;
+        accuracy?: number;
+        heading?: number;
+        speed?: number;
+        recordedAt: number;
+      }>;
+    }>("/ops/techs-locations");
+  },
+  getTechRoute(id: string, params?: QueryParams) {
+    return opsFetch<{
+      points: Array<{
+        id: string;
+        userId: string;
+        sessionId: string;
+        latitude: number;
+        longitude: number;
+        accuracy?: number;
+        heading?: number;
+        speed?: number;
+        recordedAt: number;
+      }>;
+    }>(`/ops/techs/${id}/route`, params);
+  },
 
   // Tickets
   getTickets(params: QueryParams) {

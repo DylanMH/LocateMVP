@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 
 import { colors } from "../../../ui/colors";
+import { triggerLightHaptic } from "../../../utils/haptics";
 
 export type DetailTabKey = "INFO" | "CUSTOMER" | "ATTACHMENTS" | "NOTES" | "HISTORY";
 
@@ -13,9 +14,14 @@ function Tab({
   active: boolean;
   onPress: () => void;
 }) {
+  const handlePress = () => {
+    triggerLightHaptic();
+    onPress();
+  };
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       className="px-4 py-2 rounded-lg"
       style={{ backgroundColor: active ? colors.primary : colors.surface }}
       hitSlop={10}

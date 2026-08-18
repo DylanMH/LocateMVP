@@ -37,9 +37,14 @@ interface CustomersTabProps {
 function getResultOptionsForStatus(status: MarkingStatus): MarkingResult[] {
   switch (status) {
     case "MARKED":
-      return ["PAINT_AND_FLAG", "PAINT_ONLY"];
+      return ["PAINT_AND_FLAG", "PAINT_ONLY", "FLAG_ONLY"];
     case "NOT_MARKED":
-      return ["EXCAVATION_SITE_CLEAR", "UNLOCATABLE", "NO_ACCESS"];
+      return [
+        "EXCAVATION_SITE_CLEAR",
+        "UNLOCATABLE",
+        "NO_ACCESS",
+        "OVERHEAD_NO_FACILITIES",
+      ];
     case "NOT_YET_MARKED":
       return ["MEETING_WITH_CONTRACTOR"];
     default:
@@ -53,12 +58,16 @@ function formatMarkingResult(result: MarkingResult): string {
       return "Paint and Flag";
     case "PAINT_ONLY":
       return "Paint Only";
+    case "FLAG_ONLY":
+      return "Flag Only";
     case "EXCAVATION_SITE_CLEAR":
       return "Excavation Site Clear";
     case "UNLOCATABLE":
       return "Unlocatable";
     case "NO_ACCESS":
       return "No Access";
+    case "OVERHEAD_NO_FACILITIES":
+      return "Overhead / No Facilities";
     case "MEETING_WITH_CONTRACTOR":
       return "Meeting with Contractor";
     default:
@@ -132,7 +141,10 @@ function isCustomerMarkingComplete(
 }
 
 function sanitizeNumericInput(value: string) {
-  return value.replace(/\D/g, "");
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  // Strip leading zeroes so user typing "5" doesn't produce "05"
+  return String(parseInt(digits, 10));
 }
 
 export function CustomersTab({
@@ -223,30 +235,35 @@ export function CustomersTab({
 
       {payload.onsiteStartedAt && (
         <View
-          className="rounded-xl p-4 mb-4"
-          style={{ backgroundColor: colors.surface }}
+          className="rounded-xl p-3 mb-4 shadow-md"
+          style={{
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: remainingMinutes < 0 ? colors.danger : colors.primary + "30",
+            zIndex: 10,
+          }}
         >
-          <Text
-            className="text-xs font-semibold mb-2"
-            style={{ color: colors.muted }}
-          >
-            Time Allocation
-          </Text>
           <View className="flex-row items-center justify-between">
             <View>
-              <Text className="text-sm" style={{ color: colors.text }}>
+              <Text
+                className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+                style={{ color: colors.muted }}
+              >
+                Time Allocation
+              </Text>
+              <Text className="text-xs" style={{ color: colors.text }}>
                 Allocatable: {formatMinutesAsHours(allocatableMinutes)}
               </Text>
-              <Text className="text-sm mt-1" style={{ color: colors.text }}>
+              <Text className="text-xs mt-0.5" style={{ color: colors.text }}>
                 Allocated: {formatMinutesAsHours(allocatedMinutes)}
               </Text>
             </View>
             <View className="items-end">
-              <Text className="text-xs" style={{ color: colors.muted }}>
+              <Text className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>
                 Remaining
               </Text>
               <Text
-                className="text-2xl font-bold"
+                className="text-xl font-bold"
                 style={{
                   color: remainingMinutes < 0 ? colors.danger : colors.accent,
                 }}
@@ -254,7 +271,7 @@ export function CustomersTab({
                 {formatMinutesAsHours(Math.abs(remainingMinutes))}
               </Text>
               {remainingMinutes < 0 && (
-                <Text className="text-xs mt-1" style={{ color: colors.danger }}>
+                <Text className="text-[10px] font-bold mt-0.5" style={{ color: colors.danger }}>
                   Over-allocated
                 </Text>
               )}

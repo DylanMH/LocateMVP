@@ -19,6 +19,9 @@ data/
 # Build outputs
 dist/
 build/
+builds/
+*.apk
+*.aab
 .turbo/
 
 # Expo / React Native

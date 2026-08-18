@@ -60,6 +60,11 @@ const MAP: Record<string, string> = {
   RECALL: "bg-purple-100 text-purple-800",
   NO_RESPONSE: "bg-rose-100 text-rose-800",
 
+  // Marking statuses
+  MARKED: "bg-green-100 text-green-800",
+  NOT_MARKED: "bg-red-100 text-red-800",
+  NOT_YET_MARKED: "bg-yellow-100 text-yellow-800",
+
   "811": "bg-violet-100 text-violet-800",
   INTERNAL: "bg-slate-100 text-slate-800",
 };

@@ -17,6 +17,7 @@ import ClockEvent from "../../src/db/models/ClockEvent";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { getTodayStartTimestamp } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketCard } from "../../src/features/tickets/components/TicketCard";
+import { CompactTicketCard } from "../../src/features/tickets/components/CompactTicketCard";
 import { FilterChips } from "../../src/features/tickets/components/FilterChips";
 import { TicketsHeader } from "../../src/features/tickets/components/TicketsHeader";
 import { TicketMapView } from "../../src/features/tickets/components/TicketMapView";
@@ -344,21 +345,35 @@ export default function TicketsScreen() {
           data={sorted}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
-          ItemSeparatorComponent={() => <View className="h-3" />}
+          ItemSeparatorComponent={() => (
+            <View className={view === "COMPACT" ? "h-1.5" : "h-3"} />
+          )}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
-          renderItem={({ item }) => (
-            <TicketCard
-              ticket={item}
-              onPress={() =>
-                router.push({
-                  pathname: "/ticket-details/[id]",
-                  params: { id: item.id },
-                })
-              }
-            />
-          )}
+          renderItem={({ item }) =>
+            view === "COMPACT" ? (
+              <CompactTicketCard
+                ticket={item}
+                onPress={() =>
+                  router.push({
+                    pathname: "/ticket-details/[id]",
+                    params: { id: item.id },
+                  })
+                }
+              />
+            ) : (
+              <TicketCard
+                ticket={item}
+                onPress={() =>
+                  router.push({
+                    pathname: "/ticket-details/[id]",
+                    params: { id: item.id },
+                  })
+                }
+              />
+            )
+          }
           ListEmptyComponent={
             <View className="px-4 pt-8">
               {!clockedInSession ? (

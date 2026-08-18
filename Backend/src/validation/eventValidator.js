@@ -12,9 +12,11 @@ const validMarkingResults = new Set([
   '',
   'PAINT_AND_FLAG',
   'PAINT_ONLY',
+  'FLAG_ONLY',
   'EXCAVATION_SITE_CLEAR',
   'UNLOCATABLE',
   'NO_ACCESS',
+  'OVERHEAD_NO_FACILITIES',
   'MEETING_WITH_CONTRACTOR',
 ]);
 

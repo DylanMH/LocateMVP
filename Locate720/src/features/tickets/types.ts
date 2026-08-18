@@ -111,9 +111,11 @@ export type MarkingStatus = "MARKED" | "NOT_MARKED" | "NOT_YET_MARKED" | "";
 export type MarkingResult =
   | "PAINT_AND_FLAG"
   | "PAINT_ONLY"
+  | "FLAG_ONLY"
   | "EXCAVATION_SITE_CLEAR"
   | "UNLOCATABLE"
   | "NO_ACCESS"
+  | "OVERHEAD_NO_FACILITIES"
   | "MEETING_WITH_CONTRACTOR"
   | "";
 

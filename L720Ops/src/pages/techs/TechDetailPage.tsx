@@ -27,7 +27,7 @@ import type { TicketDetailResponse } from "../../types/ops";
 import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -71,6 +71,28 @@ function makeTicketIcon(color: string, label: string) {
     ">${label}</div>`,
     iconSize: [22, 22],
     iconAnchor: [11, 11],
+  });
+}
+
+function makeTechLocationIcon(name: string) {
+  const initials = name
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return L.divIcon({
+    className: "tech-live-div-icon",
+    html: `<div style="
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #10B981; border: 3px solid #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; color: #fff;
+      font-family: system-ui, sans-serif; line-height: 1;
+    ">${initials}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
   });
 }
 
@@ -218,6 +240,18 @@ export function TechDetailPage() {
   const tech = techQuery.data;
   const tickets = ticketsQuery.data?.tickets || [];
   const ticketsWithCoords = tickets.filter((t) => t.lat != null && t.lng != null);
+
+  // Tech GPS breadcrumbs / route query
+  const routeQuery = useQuery({
+    queryKey: ["ops", "tech-route", id],
+    queryFn: () => OpsService.getTechRoute(id!),
+    enabled: Boolean(id),
+    refetchInterval: 15000,
+  });
+
+  const routePoints = routeQuery.data?.points || [];
+  const latestLocation = routePoints.length > 0 ? routePoints[routePoints.length - 1] : null;
+  const routeCoordinates = routePoints.map((p) => [p.latitude, p.longitude] as [number, number]);
 
   // Flatten territory tree for lookups
   const flattenedTerritories = useMemo(
@@ -531,6 +565,31 @@ export function TechDetailPage() {
                   );
                 })}
 
+                {/* GPS Breadcrumb Route Trail */}
+                {routeCoordinates.length > 1 && (
+                  <Polyline
+                    positions={routeCoordinates}
+                    pathOptions={{ color: "#10B981", weight: 3, opacity: 0.8, dashArray: "6 6" }}
+                  />
+                )}
+
+                {/* Latest Tech GPS Location Marker (if clocked in / tracked) */}
+                {latestLocation && (
+                  <Marker
+                    position={[latestLocation.latitude, latestLocation.longitude]}
+                    icon={makeTechLocationIcon(tech?.name || "Tech")}
+                  >
+                    <Tooltip direction="top" offset={[0, -14]} permanent={false}>
+                      <div className="text-xs font-semibold">
+                        <div>{tech?.name} (Current Location)</div>
+                        <div className="text-gray-500 font-normal">
+                          Updated {new Date(latestLocation.recordedAt).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </Tooltip>
+                  </Marker>
+                )}
+
                 {/* Ticket markers */}
                 {ticketsWithCoords.map((ticket) => {
                   const color = STATUS_COLORS[ticket.locatorStatus] || "#6B7280";
@@ -824,6 +883,7 @@ export function TechDetailPage() {
                       <th className="py-2 pr-2">Customer</th>
                       <th className="py-2 pr-2">Utility</th>
                       <th className="py-2 pr-2">Status</th>
+                      <th className="py-2 pr-2">Reason / Result</th>
                       <th className="py-2 pr-2 text-right">Min</th>
                       <th className="py-2 pr-2 text-right">Ft</th>
                     </tr>
@@ -834,6 +894,9 @@ export function TechDetailPage() {
                         <td className="py-2 pr-2">{c.customerName || "—"}</td>
                         <td className="py-2 pr-2">{c.utilityType || "—"}</td>
                         <td className="py-2 pr-2"><StatusBadge value={c.status} /></td>
+                        <td className="py-2 pr-2 text-gray-700 text-xs font-medium">
+                          {c.result ? c.result.replace(/_/g, " ") : "—"}
+                        </td>
                         <td className="py-2 pr-2 text-right tabular-nums">{c.minutes}</td>
                         <td className="py-2 pr-2 text-right tabular-nums">{c.footage}</td>
                       </tr>

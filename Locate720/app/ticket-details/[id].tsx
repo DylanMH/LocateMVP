@@ -27,6 +27,7 @@ import {
   createTicketCustomerMarkingSetEvent,
   createTicketStatusSetEvent,
 } from "../../src/features/tickets/domain/outbox";
+import { triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from "../../src/utils/haptics";
 import {
   canTransitionStatus,
   isTicketClosed,
@@ -485,9 +486,14 @@ function ActionButton({
   active?: boolean;
   onPress: () => void;
 }) {
+  const handlePress = () => {
+    triggerMediumHaptic();
+    onPress();
+  };
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled}
       className="rounded-xl px-4 py-3 mr-3"
       style={{
@@ -524,6 +530,10 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
 
   const handleStatusChange = async (nextStatus: LocatorStatus) => {
     if (!ticket) return;
+    if (ticket.locatorStatus === nextStatus) {
+      logger.log(`[TicketDetail] Ticket is already in status ${nextStatus}, ignoring duplicate transition`);
+      return;
+    }
 
     try {
       if (nextStatus === "ENROUTE" || nextStatus === "ONSITE") {
@@ -932,7 +942,10 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                   All customers have been marked. You can now close this ticket.
                 </Text>
                 <Pressable
-                  onPress={() => handleStatusChange("CLOSED")}
+                  onPress={() => {
+                    triggerSuccessHaptic();
+                    handleStatusChange("CLOSED");
+                  }}
                   disabled={isReadOnly}
                   className="rounded-xl px-4 py-3"
                   style={{

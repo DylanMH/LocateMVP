@@ -541,6 +541,7 @@ function TicketDetailBody({
                 <th className="py-2 pr-2">Customer</th>
                 <th className="py-2 pr-2">Utility</th>
                 <th className="py-2 pr-2">Status</th>
+                <th className="py-2 pr-2">Reason / Result</th>
                 <th className="py-2 pr-2 text-right">Min</th>
                 <th className="py-2 pr-2 text-right">Ft</th>
               </tr>
@@ -552,6 +553,9 @@ function TicketDetailBody({
                   <td className="py-2 pr-2">{c.utilityType || "—"}</td>
                   <td className="py-2 pr-2">
                     <StatusBadge value={c.status} />
+                  </td>
+                  <td className="py-2 pr-2 text-gray-700 text-xs font-medium">
+                    {c.result ? c.result.replace(/_/g, " ") : "—"}
                   </td>
                   <td className="py-2 pr-2 text-right tabular-nums">
                     {c.minutes}

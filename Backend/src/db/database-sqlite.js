@@ -262,6 +262,23 @@ CREATE INDEX IF NOT EXISTS idx_utility_production_user ON utility_production_led
 CREATE UNIQUE INDEX IF NOT EXISTS idx_utility_production_request_customer
   ON utility_production_ledger(request_id, customer_id);
 
+CREATE TABLE IF NOT EXISTS tech_locations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  session_id TEXT,
+  latitude REAL NOT NULL,
+  longitude REAL NOT NULL,
+  accuracy REAL,
+  heading REAL,
+  speed REAL,
+  recorded_at INTEGER NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tech_locations_user_time ON tech_locations(user_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_tech_locations_session ON tech_locations(session_id);
+
 CREATE TABLE IF NOT EXISTS idempotency_records (
   request_id TEXT PRIMARY KEY,
   result_json TEXT NOT NULL,
