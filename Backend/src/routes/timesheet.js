@@ -82,6 +82,7 @@ const validClockEventTypes = new Set([
   'LUNCH_END',
   'PERSONAL_START',
   'PERSONAL_END',
+  'ALLOCATION_CHANGE',
 ]);
 
 function validateClockEvent(event) {
@@ -238,6 +239,13 @@ function getStatements() {
       WHERE user_id = ? AND ended_at IS NULL
         AND session_id != ?
     `),
+    updateSessionAllocation: db.prepare(`
+      UPDATE day_sessions
+      SET allocation_type = ?,
+          other_reason = COALESCE(?, other_reason),
+          updated_at = ?
+      WHERE id = ?
+    `),
   };
 
   return statements;
@@ -256,6 +264,7 @@ function persistClockEvent(event) {
         closeBreakSegment,
         closePriorActiveSessions,
         closeOpenBreaksForUser,
+        updateSessionAllocation,
       } = getStatements();
       const { requestId, deviceId, seq, payload } = txEvent;
       const {
@@ -300,6 +309,18 @@ function persistClockEvent(event) {
 
       if (eventType === 'CLOCK_OUT') {
         updateSessionClockOut.run(clockOutAt || occurredAt, ticketId || null, now, sessionId);
+      }
+
+      if (eventType === 'ALLOCATION_CHANGE') {
+        // Update allocation type on the existing session without
+        // re-triggering clock-in logic (no prior session closure, no
+        // clock_in_at change).
+        updateSessionAllocation.run(
+          allocationType || null,
+          otherReason || null,
+          now,
+          sessionId,
+        );
       }
 
       if (eventType === 'LUNCH_START' || eventType === 'PERSONAL_START') {

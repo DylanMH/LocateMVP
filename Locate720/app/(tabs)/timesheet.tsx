@@ -209,6 +209,7 @@ export default function Timesheet() {
 
     try {
       setIsProcessing(true);
+      const now = Date.now();
       await database.write(async () => {
         await session.update((s) => {
           s.allocationType = newType;
@@ -217,6 +218,21 @@ export default function Timesheet() {
           }
         });
       });
+
+      // Queue sync event so backend + ops portal update
+      const clockEvent = createClockEvent({
+        sessionId: session.id,
+        userId: user.id,
+        eventType: "ALLOCATION_CHANGE",
+        occurredAt: now,
+        date: session.date,
+        clockInAt: session.clockInAt,
+        status: "ACTIVE",
+        allocationType: newType,
+        otherReason: newType === "other" ? otherReason : undefined,
+      });
+      await SyncEngine.queueEvent(clockEvent);
+
       // Refresh session state.
       await loadTodaySession();
       console.log(`[Timesheet] Allocation changed to ${newType}`);
