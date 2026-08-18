@@ -5,6 +5,8 @@ import { database } from '../../../db/database';
 import Ticket from '../../../db/models/Ticket';
 import OutboxEvent from '../../../db/models/OutboxEvent';
 import TicketNote from '../../../db/models/TicketNote';
+import DaySession from '../../../db/models/DaySession';
+import ClockEvent from '../../../db/models/ClockEvent';
 import { API_BASE_URL, ENDPOINTS } from '../../../config/api';
 import { fetchWithTimeout } from '../../../utils/fetchWithTimeout';
 import { validateTicketsResponse, validateSyncEventsResponse, sanitizeUserId } from '../../../utils/validation';
@@ -26,7 +28,9 @@ const AUTH_USER_KEY = '@locate720:auth_user';
  */
 
 let lastPullAt = 0;
+let lastTimesheetPullAt = 0;
 const PULL_THROTTLE_MS = 60000; // 60 seconds
+const TIMESHEET_PULL_THROTTLE_MS = 30000; // 30 seconds
 const MAX_BATCH_SIZE = 100; // Max events per batch (prevents memory issues)
 const MAX_RETRY_COUNT = 10; // Max retries before marking FAILED
 const REQUEST_TIMEOUT_MS = 30000; // 30 second timeout
@@ -359,7 +363,7 @@ class SyncEngineImpl {
       // Network regained - flush P0 first, then pull
       if (isOnline && wasOffline) {
         logger.log('[SyncEngine] Network regained, flushing P0 then pulling...');
-        this.flushP0().then(() => this.pullTickets());
+        this.flushP0().then(() => this.pullTickets()).then(() => this.pullTimesheet());
       }
     });
   }
@@ -603,6 +607,17 @@ class SyncEngineImpl {
       logger.log('[SyncEngine] Backend processed clock events:', result.results);
       await this.applyFlushResults(readyEvents, result.results);
       logger.log('[SyncEngine] P1 clock events flushed successfully');
+
+      // If any clock event was refused with ALREADY_CLOCKED_IN, trigger a
+      // timesheet pull so the local session state converges with the
+      // server's authoritative active session (multi-device reconciliation).
+      const hasAlreadyClockedIn = (result.results || []).some(
+        (r: any) => r?.error === 'ALREADY_CLOCKED_IN',
+      );
+      if (hasAlreadyClockedIn) {
+        logger.log('[SyncEngine] ALREADY_CLOCKED_IN detected, pulling timesheet to reconcile');
+        this.pullTimesheet(true);
+      }
     } catch (error) {
       logger.error('[SyncEngine] Failed to flush P1 events:', error);
       
@@ -650,6 +665,7 @@ class SyncEngineImpl {
     await this.flushP0();
     await this.flushP1();
     await this.pullTickets(forcePull);
+    await this.pullTimesheet(forcePull);
   }
 
   /**
@@ -786,6 +802,156 @@ class SyncEngineImpl {
         await ticket.destroyPermanently();
       }
     });
+  }
+
+  /**
+   * Pull timesheet/session deltas from server.
+   *
+   * This is the server-authoritative counterpart to the P1 outbox flush.
+   * It reconciles local day_sessions and clock_events with Backend truth,
+   * which is critical for multi-device clock-in agreement:
+   *
+   *   - If another device clocked in, this pull discovers the ACTIVE session.
+   *   - If another device clocked out, this pull marks the local session CLOCKED_OUT.
+   *   - If the server refused a duplicate clock-in, the local session stays in sync.
+   *
+   * Sessions are upserted by server ID (like tickets). Clock events are
+   * upserted by server ID (which is the requestId from the original outbox event).
+   */
+  async pullTimesheet(force: boolean = false): Promise<void> {
+    if (!force) {
+      const timeSinceLastPull = Date.now() - lastTimesheetPullAt;
+      if (timeSinceLastPull < TIMESHEET_PULL_THROTTLE_MS) {
+        return;
+      }
+    }
+
+    if (!this.syncState.isOnline) {
+      logger.log('[SyncEngine] Offline, skipping timesheet pull');
+      return;
+    }
+
+    if (!this.currentUserId) {
+      logger.log('[SyncEngine] No current user, skipping timesheet pull');
+      return;
+    }
+
+    lastTimesheetPullAt = Date.now();
+
+    try {
+      const sanitizedUserId = sanitizeUserId(this.currentUserId);
+      const url = `${API_BASE_URL}${ENDPOINTS.timesheetSync}?userId=${sanitizedUserId}&lastSyncAt=${this.lastTimesheetSyncAt}`;
+      logger.log('[SyncEngine] Pulling timesheet deltas from backend...');
+
+      const response = await this.authenticatedRequest(url, {});
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      logger.log(
+        `[SyncEngine] Received ${data.sessions?.length || 0} sessions, ` +
+        `${data.clockEvents?.length || 0} clock events from backend`,
+      );
+
+      await this.applyTimesheetDeltas(data);
+
+      // Update the watermark for the next delta pull
+      if (data.serverTime) {
+        this.lastTimesheetSyncAt = data.serverTime;
+      }
+    } catch (error) {
+      logger.error('[SyncEngine] Timesheet pull failed:', error);
+    }
+  }
+
+  private lastTimesheetSyncAt: number = 0;
+
+  /**
+   * Apply server-authoritative timesheet deltas to local WatermelonDB.
+   *
+   * - Upserts day_sessions by server ID. If a local session exists and the
+   *   server says CLOCKED_OUT, the local session is updated to CLOCKED_OUT
+   *   (this is the multi-device reconciliation path).
+   * - Upserts clock_events by server ID (which equals the original requestId).
+   *   Events that originated on this device already exist locally with the
+   *   same ID, so this is a no-op for them. Events from other devices are
+   *   created locally.
+   */
+  private async applyTimesheetDeltas(data: {
+    sessions?: any[];
+    clockEvents?: any[];
+    activeSessionId?: string | null;
+  }): Promise<void> {
+    const sessionsCollection = database.collections.get<DaySession>('day_sessions');
+    const clockEventsCollection = database.collections.get<ClockEvent>('clock_events');
+    const serverSessions = data.sessions || [];
+    const serverClockEvents = data.clockEvents || [];
+
+    if (serverSessions.length === 0 && serverClockEvents.length === 0) {
+      return;
+    }
+
+    await database.write(async () => {
+      // Upsert sessions
+      for (const s of serverSessions) {
+        try {
+          const existing = await sessionsCollection.find(s.id);
+          // Update existing session — server is authoritative for status
+          await existing.update((session) => {
+            session.userId = s.user_id;
+            session.date = s.date;
+            session.clockInAt = s.clock_in_at || 0;
+            session.clockOutAt = s.clock_out_at || undefined;
+            session.clockOutTicketId = s.clock_out_ticket_id || undefined;
+            session.status = s.status;
+            session.clockInReason = s.clock_in_reason || undefined;
+            session.allocationType = s.allocation_type || undefined;
+            session.otherReason = s.other_reason || undefined;
+          });
+        } catch {
+          // Session doesn't exist locally — create it (from another device)
+          await sessionsCollection.create((session) => {
+            session._raw.id = s.id;
+            session.userId = s.user_id;
+            session.date = s.date;
+            session.clockInAt = s.clock_in_at || 0;
+            session.clockOutAt = s.clock_out_at || undefined;
+            session.clockOutTicketId = s.clock_out_ticket_id || undefined;
+            session.status = s.status;
+            session.clockInReason = s.clock_in_reason || undefined;
+            session.allocationType = s.allocation_type || undefined;
+            session.otherReason = s.other_reason || undefined;
+          });
+        }
+      }
+
+      // Upsert clock events
+      for (const e of serverClockEvents) {
+        try {
+          // Check if we already have this event locally (by server ID)
+          await clockEventsCollection.find(e.id);
+          // Already exists — skip (server is echoing back our own event)
+        } catch {
+          // Doesn't exist locally — create it (from another device or server-side)
+          await clockEventsCollection.create((evt) => {
+            evt._raw.id = e.id;
+            evt.sessionId = e.session_id;
+            evt.userId = e.user_id;
+            evt.eventType = e.event_type;
+            evt.occurredAt = e.occurred_at;
+            evt.reason = e.reason || undefined;
+            evt.ticketId = e.ticket_id || undefined;
+          });
+        }
+      }
+    });
+
+    logger.log(
+      `[SyncEngine] Timesheet reconciliation complete: ` +
+      `${serverSessions.length} sessions, ${serverClockEvents.length} events processed`,
+    );
   }
 
   /**

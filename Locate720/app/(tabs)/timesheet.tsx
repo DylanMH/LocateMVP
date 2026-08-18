@@ -12,6 +12,7 @@ import {
   checkActiveTickets,
   closeActiveSession,
   getActiveTicketsErrorMessage,
+  checkServerActiveSession,
 } from "../../src/features/timesheet/utils/validation";
 import { checkUserBreakStatus, getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketSelectorModal } from "../../src/features/timesheet/components/TicketSelectorModal";
@@ -83,6 +84,9 @@ export default function Timesheet() {
 
   useEffect(() => {
     loadTodaySession();
+    // Pull timesheet from server on screen mount so multi-device
+    // clock state converges (e.g. another device clocked in/out).
+    SyncEngine.pullTimesheet(true).then(() => loadTodaySession());
   }, [loadTodaySession]);
 
   // ── Clock In ──────────────────────────────────────────────
@@ -96,6 +100,26 @@ export default function Timesheet() {
 
     try {
       setIsProcessing(true);
+
+      // Multi-device guard: check if the server already has an ACTIVE
+      // session for this user (e.g. from another device). If so, refuse
+      // the local clock-in and pull the server's session so the UI
+      // converges. When offline, the check returns null and we proceed
+      // with the offline-first local clock-in; the server will refuse
+      // the duplicate when the outbox flushes.
+      const serverCheck = await checkServerActiveSession(user.id);
+      if (serverCheck.activeSessionId) {
+        Alert.alert(
+          "Already Clocked In",
+          "You are already clocked in on another device. The active session has been synced to this device.",
+          [{ text: "OK" }],
+        );
+        // Pull the server's session so local state converges
+        await SyncEngine.pullTimesheet(true);
+        await loadTodaySession();
+        return;
+      }
+
       const now = Date.now();
       const today = new Date().toISOString().split("T")[0];
 

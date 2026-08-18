@@ -11,6 +11,7 @@ import ClockEvent from '../../../db/models/ClockEvent';
 import { checkUserBreakStatus } from './breakStatus';
 import { createClockEvent } from '../../tickets/domain/outbox';
 import { SyncEngine } from '../../tickets/sync/SyncEngine';
+import { API_BASE_URL, ENDPOINTS } from '../../../config/api';
 import { logger } from '../../../utils/logger';
 
 export interface ActiveTicketsCheck {
@@ -206,4 +207,69 @@ export async function closeActiveSession(
     session: activeSession,
     endedBreakType,
   };
+}
+
+/**
+ * Server-side active session check.
+ *
+ * Queries the Backend timesheet sync endpoint to see if the user already
+ * has an ACTIVE session (e.g. from another device). This is the
+ * multi-device guard that prevents Device B from creating a duplicate
+ * local clock-in when Device A already clocked in.
+ *
+ * Returns the active session ID if one exists, or null if not. If the
+ * network is unavailable or the request fails, returns null (allowing
+ * the offline-first local clock-in to proceed; the server will refuse
+ * the duplicate when the outbox flushes).
+ */
+export async function checkServerActiveSession(userId: string): Promise<{
+  activeSessionId: string | null;
+  sessions: any[];
+  clockEvents: any[];
+}> {
+  try {
+    const token = await getAuthTokenForTimesheet();
+    if (!token) {
+      logger.log('[Validation] No auth token, skipping server session check');
+      return { activeSessionId: null, sessions: [], clockEvents: [] };
+    }
+
+    const url = `${API_BASE_URL}${ENDPOINTS.timesheetSync}?userId=${encodeURIComponent(userId)}&lastSyncAt=0`;
+    const response = await fetchWithTimeoutForTimesheet(url, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      logger.warn('[Validation] Server session check failed:', response.status);
+      return { activeSessionId: null, sessions: [], clockEvents: [] };
+    }
+
+    const data = await response.json();
+    return {
+      activeSessionId: data.activeSessionId || null,
+      sessions: data.sessions || [],
+      clockEvents: data.clockEvents || [],
+    };
+  } catch (error) {
+    logger.warn('[Validation] Server session check error (likely offline):', error);
+    return { activeSessionId: null, sessions: [], clockEvents: [] };
+  }
+}
+
+// Local helpers to avoid circular imports with SyncEngine
+async function getAuthTokenForTimesheet(): Promise<string | null> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    return await AsyncStorage.getItem('@locate720:auth_token');
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWithTimeoutForTimesheet(
+  url: string,
+  options: RequestInit,
+): Promise<Response> {
+  const { fetchWithTimeout } = await import('../../../utils/fetchWithTimeout');
+  return fetchWithTimeout(url, { ...options, timeout: 10000 });
 }

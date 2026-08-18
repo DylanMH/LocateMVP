@@ -10,6 +10,7 @@
     "seed": "node src/scripts/seedTickets.js",
     "reset": "node src/scripts/resetDatabase.js",
     "test:phase1": "node tests/phase1-sync.test.js",
+    "test:multi-device": "node tests/multi-device-clock.test.js",
     "test:status-machine": "node src/validation/tests/statusMachine.test.js"
   },
   "keywords": [

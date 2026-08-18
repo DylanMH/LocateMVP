@@ -25,5 +25,6 @@ export const ENDPOINTS = {
   syncPull: '/sync/pull',
   timesheetEvents: '/timesheet/events',
   timesheetSummary: '/timesheet/summary',
+  timesheetSync: '/timesheet/sync',
   syncNotes: '/sync/notes',
 };

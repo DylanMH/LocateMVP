@@ -526,11 +526,37 @@ router.post('/events', (req, res) => {
       }
 
       if (type === 'CLOCK_EVENT') {
-        const { sessionId, userId, eventType, occurredAt } = payload;
+        const { sessionId, userId, eventType, occurredAt, force } = payload;
 
         // Ensure the user exists in the backend DB before inserting FK-dependent rows.
         // Mobile may send events for users that only exist in WatermelonDB.
         ensureUserExists(userId);
+
+        // Multi-device guard: refuse a new CLOCK_IN if the user already
+        // has an ACTIVE session on another device. This prevents Device B
+        // from silently closing Device A's session. The client may set
+        // `force: true` in the payload to override (admin/force flow),
+        // which preserves the legacy closePriorActiveSessions behavior.
+        if (eventType === 'CLOCK_IN' && !force) {
+          const existingActive = db.prepare(`
+            SELECT id FROM day_sessions
+            WHERE user_id = ? AND status = 'ACTIVE' AND id != ?
+          `).get(userId, sessionId);
+
+          if (existingActive) {
+            const refuseResult = {
+              requestId,
+              status: 'ERROR',
+              error: 'ALREADY_CLOCKED_IN',
+              message: `User already has an active session (${existingActive.id.slice(0, 8)}) on another device`,
+              activeSessionId: existingActive.id,
+            };
+            markEventProcessed(requestId, refuseResult);
+            results.push(refuseResult);
+            console.log(`[Timesheet] Refused duplicate CLOCK_IN for user ${userId}: active session ${existingActive.id}`);
+            continue;
+          }
+        }
 
         persistClockEvent(event);
         console.log(`[Timesheet] Clock event: ${eventType} for user ${userId} at ${new Date(occurredAt).toLocaleString()}`);
@@ -697,6 +723,116 @@ router.get('/summary', (req, res) => {
     endDate: endDate || null,
     summary,
     sessions: hydratedSessions,
+  });
+});
+
+/**
+ * GET /api/timesheet/sync
+ * Delta-pull endpoint for mobile reconciliation.
+ *
+ * Returns day_sessions and clock_events for a user that changed since
+ * `lastSyncAt`. If `lastSyncAt` is omitted, returns today's sessions plus
+ * any active session (so a fresh device can discover an existing clock-in
+ * from another device).
+ *
+ * This is the server-authoritative counterpart to the mobile outbox P1
+ * flush. Mobile calls this on sync ticks and on app foreground to
+ * reconcile local day_sessions/clock_events with Backend truth.
+ */
+router.get('/sync', (req, res) => {
+  const { userId, lastSyncAt } = req.query;
+  const viewer = getUserFromRequest(req);
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId required' });
+  }
+
+  // Permission check (self or supervisor+)
+  if (viewer && !canViewTimesheet(viewer, userId)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const since = lastSyncAt ? Number(lastSyncAt) : 0;
+  const today = new Date().toISOString().split('T')[0];
+
+  // Fetch sessions updated since lastSyncAt. If no lastSyncAt, also
+  // include today's session and any ACTIVE session regardless of date
+  // (so a freshly-launched app discovers an active clock-in from
+  // another device).
+  let sessionQuery = `
+    SELECT * FROM day_sessions
+    WHERE user_id = ? AND updated_at > ?
+  `;
+  const sessionParams = [userId, since];
+
+  if (since === 0) {
+    sessionQuery += `
+      UNION
+      SELECT * FROM day_sessions
+      WHERE user_id = ? AND (date = ? OR status = 'ACTIVE')
+    `;
+    sessionParams.push(userId, today);
+  }
+
+  sessionQuery += ' ORDER BY date DESC, clock_in_at DESC';
+
+  const sessions = db.prepare(sessionQuery).all(...sessionParams);
+
+  // Deduplicate by id (UNION can produce duplicates)
+  const seenSessionIds = new Set();
+  const uniqueSessions = sessions.filter((s) => {
+    if (seenSessionIds.has(s.id)) return false;
+    seenSessionIds.add(s.id);
+    return true;
+  });
+
+  // Fetch clock events for those sessions
+  const sessionIds = uniqueSessions.map((s) => s.id);
+  let events = [];
+  if (sessionIds.length > 0) {
+    const placeholders = sessionIds.map(() => '?').join(',');
+    events = db.prepare(`
+      SELECT * FROM clock_events
+      WHERE session_id IN (${placeholders})
+      ORDER BY occurred_at ASC
+    `).all(...sessionIds);
+  }
+
+  // Fetch break segments for those sessions (mobile doesn't have this
+  // table locally, but the timeline data is useful for the detailed
+  // timesheet view).
+  let breakSegments = [];
+  if (sessionIds.length > 0) {
+    const placeholders = sessionIds.map(() => '?').join(',');
+    breakSegments = db.prepare(`
+      SELECT * FROM break_segments
+      WHERE session_id IN (${placeholders})
+      ORDER BY started_at ASC
+    `).all(...sessionIds);
+  }
+
+  // Fetch allocation segments for those sessions
+  let allocationSegments = [];
+  if (sessionIds.length > 0) {
+    const placeholders = sessionIds.map(() => '?').join(',');
+    allocationSegments = db.prepare(`
+      SELECT * FROM allocation_segments
+      WHERE session_id IN (${placeholders})
+      ORDER BY started_at ASC
+    `).all(...sessionIds);
+  }
+
+  // Find the current active session (if any) for quick reference
+  const activeSession = uniqueSessions.find((s) => s.status === 'ACTIVE') || null;
+
+  res.json({
+    userId,
+    serverTime: Date.now(),
+    activeSessionId: activeSession?.id || null,
+    sessions: uniqueSessions,
+    clockEvents: events,
+    breakSegments,
+    allocationSegments,
   });
 });
 
