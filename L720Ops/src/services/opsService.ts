@@ -49,6 +49,9 @@ export const OpsService = {
         clockInAt: number;
         clockOutAt: number | null;
         status: string;
+        clockInReason?: string | null;
+        allocationType?: string | null;
+        otherReason?: string | null;
         workedMs: number;
         lunchMs: number;
         personalMs: number;

@@ -12,13 +12,11 @@ import { colors } from "../../../ui/colors";
 import { SectionCard } from "./SectionCard";
 import type { Customer } from "../types";
 
+import { formatDate } from "../../../utils/date";
+
 function formatShortDate(ts?: number | null): string {
   if (!ts) return "—";
-  return new Date(ts).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDate(ts);
 }
 
 function formatCustomerMarkingSummary(marking?: { status?: string; result?: string; completed?: boolean }): string {

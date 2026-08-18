@@ -208,6 +208,18 @@ export function CustomersTab({
     if (data.status === "MARKED" && !data.footage) return;
 
     onChange(patchCustomerMarking(value, customerId, { completed: true }));
+
+    // Find next uncompleted customer and auto-scroll to it
+    const currentIndex = customers.findIndex((c) => c.id === customerId);
+    const nextUncompleted = customers
+      .slice(currentIndex + 1)
+      .find((c) => !value[c.id]?.completed);
+
+    if (nextUncompleted) {
+      setTimeout(() => {
+        scrollToSection(nextUncompleted.id);
+      }, 150);
+    }
   };
 
   const scrollToOffset = (y?: number) => {

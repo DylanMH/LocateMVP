@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import withObservables from "@nozbe/with-observables";
 import { Q } from "@nozbe/watermelondb";
@@ -667,15 +667,20 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     });
 
   return (
-    <View className="flex-1" style={{ backgroundColor: colors.bg }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      className="flex-1"
+      style={{ backgroundColor: colors.bg }}
+    >
       <Stack.Screen options={{ title: "Ticket Details" }} />
 
       <ScrollView
         ref={scrollViewRef}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: 16,
-          paddingBottom: 24,
+          paddingBottom: 40,
           gap: 12,
         }}
       >
@@ -995,7 +1000,7 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
           );
         })()}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
