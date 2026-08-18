@@ -224,6 +224,20 @@ function getStatements() {
           updated_at = ?
       WHERE id = ?
     `),
+    closePriorActiveSessions: db.prepare(`
+      UPDATE day_sessions
+      SET status = 'CLOCKED_OUT',
+          clock_out_at = COALESCE(clock_out_at, ?),
+          updated_at = ?
+      WHERE user_id = ? AND status = 'ACTIVE' AND id != ?
+    `),
+    closeOpenBreaksForUser: db.prepare(`
+      UPDATE break_segments
+      SET ended_at = COALESCE(ended_at, ?),
+          updated_at = ?
+      WHERE user_id = ? AND ended_at IS NULL
+        AND session_id != ?
+    `),
   };
 
   return statements;
@@ -240,6 +254,8 @@ function persistClockEvent(event) {
         findLatestOpenBreakSegment,
         insertBreakSegment,
         closeBreakSegment,
+        closePriorActiveSessions,
+        closeOpenBreaksForUser,
       } = getStatements();
       const { requestId, deviceId, seq, payload } = txEvent;
       const {
@@ -275,6 +291,10 @@ function persistClockEvent(event) {
       );
 
       if (eventType === 'CLOCK_IN') {
+        // Close any prior active sessions for this user (prevents duplicate active sessions)
+        closePriorActiveSessions.run(occurredAt, now, userId, sessionId);
+        // Close any open break segments on those prior sessions
+        closeOpenBreaksForUser.run(occurredAt, now, userId, sessionId);
         updateSessionClockIn.run(clockInAt || occurredAt, now, sessionId);
       }
 

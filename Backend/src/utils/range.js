@@ -75,7 +75,7 @@ export function resolveRange(req) {
     default:
       return {
         startMs: startOfDay(now),
-        endMs: endOfDay(now),
+        endMs: now,
         label: "Today",
         rangeKey: "day",
       };
