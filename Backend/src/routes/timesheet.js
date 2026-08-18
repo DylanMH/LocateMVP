@@ -225,6 +225,33 @@ function getStatements() {
           updated_at = ?
       WHERE id = ?
     `),
+    findOpenAllocationSegment: db.prepare(`
+      SELECT id, allocation_type FROM allocation_segments
+      WHERE session_id = ? AND ended_at IS NULL
+      ORDER BY started_at DESC
+      LIMIT 1
+    `),
+    insertAllocationSegment: db.prepare(`
+      INSERT INTO allocation_segments (
+        id, session_id, user_id, allocation_type, other_reason,
+        started_at, ended_at, start_event_request_id, end_event_request_id,
+        created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    closeAllocationSegment: db.prepare(`
+      UPDATE allocation_segments
+      SET ended_at = COALESCE(?, ended_at),
+          end_event_request_id = COALESCE(?, end_event_request_id),
+          updated_at = ?
+      WHERE id = ?
+    `),
+    closeAllOpenAllocationSegments: db.prepare(`
+      UPDATE allocation_segments
+      SET ended_at = COALESCE(ended_at, ?),
+          updated_at = ?
+      WHERE session_id = ? AND ended_at IS NULL
+    `),
     closePriorActiveSessions: db.prepare(`
       UPDATE day_sessions
       SET status = 'CLOCKED_OUT',
@@ -265,6 +292,10 @@ function persistClockEvent(event) {
         closePriorActiveSessions,
         closeOpenBreaksForUser,
         updateSessionAllocation,
+        findOpenAllocationSegment,
+        insertAllocationSegment,
+        closeAllocationSegment,
+        closeAllOpenAllocationSegments,
       } = getStatements();
       const { requestId, deviceId, seq, payload } = txEvent;
       const {
@@ -305,10 +336,26 @@ function persistClockEvent(event) {
         // Close any open break segments on those prior sessions
         closeOpenBreaksForUser.run(occurredAt, now, userId, sessionId);
         updateSessionClockIn.run(clockInAt || occurredAt, now, sessionId);
+        // Start the first allocation segment for this session
+        insertAllocationSegment.run(
+          `${requestId}:alloc`,
+          sessionId,
+          userId,
+          allocationType || clockInReason || 'locating',
+          otherReason || null,
+          clockInAt || occurredAt,
+          null,
+          requestId,
+          null,
+          now,
+          now,
+        );
       }
 
       if (eventType === 'CLOCK_OUT') {
         updateSessionClockOut.run(clockOutAt || occurredAt, ticketId || null, now, sessionId);
+        // Close any open allocation segment
+        closeAllOpenAllocationSegments.run(clockOutAt || occurredAt, now, sessionId);
       }
 
       if (eventType === 'ALLOCATION_CHANGE') {
@@ -320,6 +367,24 @@ function persistClockEvent(event) {
           otherReason || null,
           now,
           sessionId,
+        );
+        // Close the current open allocation segment and start a new one
+        const openSeg = findOpenAllocationSegment.get(sessionId);
+        if (openSeg) {
+          closeAllocationSegment.run(occurredAt, requestId, now, openSeg.id);
+        }
+        insertAllocationSegment.run(
+          `${requestId}:alloc`,
+          sessionId,
+          userId,
+          allocationType || 'locating',
+          otherReason || null,
+          occurredAt,
+          null,
+          requestId,
+          openSeg ? openSeg.end_event_request_id : null,
+          now,
+          now,
         );
       }
 

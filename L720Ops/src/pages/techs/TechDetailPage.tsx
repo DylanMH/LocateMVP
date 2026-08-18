@@ -832,7 +832,10 @@ export function TechDetailPage() {
                         {allocationLabel(tech.currentSession.allocationType)} · Active
                       </span>
                       <span className="text-xs text-gray-500 tabular-nums">
-                        {formatDuration(now - tech.currentSession.clockInAt)}
+                        {formatDuration(tech.currentSession.allocationElapsedMs)}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        (since {new Date(tech.currentSession.allocationStartedAt ?? tech.currentSession.clockInAt).toLocaleTimeString()})
                       </span>
                     </div>
                   )}
@@ -894,6 +897,35 @@ export function TechDetailPage() {
                             </div>
                           </div>
                         </div>
+                        {s.allocationBreakdown && s.allocationBreakdown.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                              Allocation Breakdown
+                            </div>
+                            {s.allocationBreakdown.map((alloc) => (
+                              <div
+                                key={alloc.type}
+                                className="flex items-center justify-between text-[11px]"
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <span
+                                    className="inline-block w-2 h-2 rounded-full"
+                                    style={{ backgroundColor: allocationColor(alloc.type) }}
+                                  />
+                                  <span className="text-gray-700 font-medium">
+                                    {allocationLabel(alloc.type)}
+                                  </span>
+                                  <span className="text-gray-400">
+                                    ({alloc.segments.length} {alloc.segments.length === 1 ? "segment" : "segments"})
+                                  </span>
+                                </span>
+                                <span className="tabular-nums font-semibold text-gray-900">
+                                  {formatDuration(alloc.ms)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {s.breakSegments && s.breakSegments.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
                             {s.breakSegments.map((b) => (
@@ -947,6 +979,28 @@ export function TechDetailPage() {
                         {formatDuration(timesheetQuery.data.totals.personalMs)}
                       </span>
                     </div>
+                    {timesheetQuery.data.totals.allocationBreakdown &&
+                      timesheetQuery.data.totals.allocationBreakdown.length > 0 && (
+                        <div className="pt-2 mt-1 border-t border-gray-100 space-y-1">
+                          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Total by Allocation
+                          </div>
+                          {timesheetQuery.data.totals.allocationBreakdown.map((alloc) => (
+                            <div key={alloc.type} className="flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <span
+                                  className="inline-block w-2 h-2 rounded-full"
+                                  style={{ backgroundColor: allocationColor(alloc.type) }}
+                                />
+                                {allocationLabel(alloc.type)}
+                              </span>
+                              <span className="font-semibold text-gray-900 tabular-nums">
+                                {formatDuration(alloc.ms)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                   </div>
                 )}
               </div>

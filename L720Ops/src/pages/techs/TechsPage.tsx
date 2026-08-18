@@ -17,6 +17,34 @@ import {
 import { CreateUserModal, EditUserModal } from "../../components/users";
 import type { TechRow, User, TerritoryNode } from "../../types";
 
+const ALLOCATION_LABELS: Record<string, string> = {
+  locating: "Locating",
+  training: "Training",
+  truck_support: "Truck Support",
+  meeting: "Meeting",
+  oncall: "On Call",
+  other: "Other",
+};
+
+const ALLOCATION_COLORS: Record<string, string> = {
+  locating: "#10B981",
+  training: "#3B82F6",
+  truck_support: "#F59E0B",
+  meeting: "#8B5CF6",
+  oncall: "#EC4899",
+  other: "#6B7280",
+};
+
+function allocationLabel(v: string | null | undefined): string {
+  if (!v) return "Locating";
+  return ALLOCATION_LABELS[v] || v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function allocationColor(v: string | null | undefined): string {
+  if (!v) return ALLOCATION_COLORS.locating;
+  return ALLOCATION_COLORS[v] || ALLOCATION_COLORS.other;
+}
+
 const STATUS_OPTIONS = ["CLOCKED_IN", "ON_LUNCH", "ON_PERSONAL", "CLOCKED_OUT"];
 
 function flattenTerritories(nodes: TerritoryNode[]): TerritoryNode[] {
@@ -261,15 +289,26 @@ export function TechsPage() {
             <div className="flex items-center gap-1.5">
               <StatusBadge value={t.clockStatus} />
               {t.currentSession?.allocationType && (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700">
-                  {t.currentSession.allocationType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold text-white"
+                  style={{ backgroundColor: allocationColor(t.currentSession.allocationType) }}
+                >
+                  {allocationLabel(t.currentSession.allocationType)}
                 </span>
               )}
             </div>
             {t.currentSession && (
-              <span className="text-xs text-gray-500 tabular-nums">
-                {formatDuration(t.currentSession.elapsedMs)}
-              </span>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs text-gray-500 tabular-nums">
+                  {formatDuration(t.currentSession.elapsedMs)} total
+                </span>
+                {t.currentSession.allocationElapsedMs != null &&
+                  t.currentSession.allocationElapsedMs !== t.currentSession.elapsedMs && (
+                    <span className="text-[10px] text-gray-400 tabular-nums">
+                      {formatDuration(t.currentSession.allocationElapsedMs)} on {allocationLabel(t.currentSession.allocationType)}
+                    </span>
+                  )}
+              </div>
             )}
           </div>
         ),

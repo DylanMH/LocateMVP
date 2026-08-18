@@ -186,6 +186,26 @@ CREATE TABLE IF NOT EXISTS break_segments (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS allocation_segments (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  allocation_type TEXT NOT NULL,
+  other_reason TEXT,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  start_event_request_id TEXT,
+  end_event_request_id TEXT,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  FOREIGN KEY (session_id) REFERENCES day_sessions(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_allocation_segments_session ON allocation_segments(session_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_segments_user ON allocation_segments(user_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_segments_open ON allocation_segments(ended_at) WHERE ended_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS utility_production_ledger (
   id TEXT PRIMARY KEY,
   request_id TEXT NOT NULL,

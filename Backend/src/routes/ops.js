@@ -168,6 +168,17 @@ function getLiveClockState(userId) {
     )
     .get(session.id);
 
+  // Current allocation segment (open) — for live elapsed time per allocation
+  const currentAllocSeg = db
+    .prepare(
+      `SELECT id, allocation_type, other_reason, started_at
+       FROM allocation_segments
+       WHERE session_id = ? AND ended_at IS NULL
+       ORDER BY started_at DESC
+       LIMIT 1`,
+    )
+    .get(session.id);
+
   // Resolve clock-out ticket info
   let clockOutTicket = null;
   if (session.clock_out_ticket_id) {
@@ -190,6 +201,10 @@ function getLiveClockState(userId) {
       clockInReason: session.clock_in_reason || null,
       allocationType: session.allocation_type || null,
       otherReason: session.other_reason || null,
+      allocationStartedAt: currentAllocSeg?.started_at ?? session.clock_in_at,
+      allocationElapsedMs: currentAllocSeg
+        ? Date.now() - currentAllocSeg.started_at
+        : Date.now() - session.clock_in_at,
       clockOutTicket,
       currentTicket,
     },
@@ -1041,6 +1056,11 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
           `SELECT * FROM break_segments WHERE session_id = ? ORDER BY started_at ASC`,
         )
         .all(s.id);
+      const allocSegs = db
+        .prepare(
+          `SELECT * FROM allocation_segments WHERE session_id = ? ORDER BY started_at ASC`,
+        )
+        .all(s.id);
       const now = Date.now();
       const workedMs =
         s.clock_in_at && s.clock_out_at
@@ -1055,6 +1075,26 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
         const dur = Math.max(0, end - b.started_at);
         if (b.break_type === "LUNCH") lunchMs += dur;
         else if (b.break_type === "PERSONAL") personalMs += dur;
+      }
+      // Per-allocation time breakdown
+      const allocationBreakdown = {};
+      for (const seg of allocSegs) {
+        const end = seg.ended_at ?? now;
+        const dur = Math.max(0, end - seg.started_at);
+        if (!allocationBreakdown[seg.allocation_type]) {
+          allocationBreakdown[seg.allocation_type] = {
+            type: seg.allocation_type,
+            ms: 0,
+            segments: [],
+          };
+        }
+        allocationBreakdown[seg.allocation_type].ms += dur;
+        allocationBreakdown[seg.allocation_type].segments.push({
+          id: seg.id,
+          startedAt: seg.started_at,
+          endedAt: seg.ended_at,
+          otherReason: seg.other_reason,
+        });
       }
       return {
         id: s.id,
@@ -1076,6 +1116,16 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
           endedAt: b.ended_at,
           reason: b.reason,
         })),
+        allocationSegments: allocSegs.map((seg) => ({
+          id: seg.id,
+          allocationType: seg.allocation_type,
+          otherReason: seg.other_reason,
+          startedAt: seg.started_at,
+          endedAt: seg.ended_at,
+        })),
+        allocationBreakdown: Object.values(allocationBreakdown).sort(
+          (a, b) => b.ms - a.ms,
+        ),
       };
     });
 
@@ -1085,9 +1135,16 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
         acc.lunchMs += s.lunchMs;
         acc.personalMs += s.personalMs;
         acc.productiveMs += s.productiveMs;
+        // Aggregate allocation breakdown across all sessions
+        for (const alloc of s.allocationBreakdown) {
+          if (!acc.allocationBreakdown[alloc.type]) {
+            acc.allocationBreakdown[alloc.type] = { type: alloc.type, ms: 0 };
+          }
+          acc.allocationBreakdown[alloc.type].ms += alloc.ms;
+        }
         return acc;
       },
-      { workedMs: 0, lunchMs: 0, personalMs: 0, productiveMs: 0 },
+      { workedMs: 0, lunchMs: 0, personalMs: 0, productiveMs: 0, allocationBreakdown: {} },
     );
 
     res.json({
@@ -1098,7 +1155,15 @@ router.get("/techs/:id/timesheet", authenticateToken, (req, res) => {
         label: range.label,
       },
       sessions: hydrated,
-      totals,
+      totals: {
+        workedMs: totals.workedMs,
+        lunchMs: totals.lunchMs,
+        personalMs: totals.personalMs,
+        productiveMs: totals.productiveMs,
+        allocationBreakdown: Object.values(totals.allocationBreakdown).sort(
+          (a, b) => b.ms - a.ms,
+        ),
+      },
     });
   } catch (error) {
     console.error("[OPS Techs] Error fetching timesheet:", error);

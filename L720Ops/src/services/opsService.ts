@@ -63,8 +63,31 @@ export const OpsService = {
           endedAt: number | null;
           reason: string | null;
         }>;
+        allocationSegments?: Array<{
+          id: string;
+          allocationType: string;
+          otherReason: string | null;
+          startedAt: number;
+          endedAt: number | null;
+        }>;
+        allocationBreakdown?: Array<{
+          type: string;
+          ms: number;
+          segments: Array<{
+            id: string;
+            startedAt: number;
+            endedAt: number | null;
+            otherReason: string | null;
+          }>;
+        }>;
       }>;
-      totals: { workedMs: number; lunchMs: number; personalMs: number; productiveMs: number };
+      totals: {
+        workedMs: number;
+        lunchMs: number;
+        personalMs: number;
+        productiveMs: number;
+        allocationBreakdown?: Array<{ type: string; ms: number }>;
+      };
     }>(`/ops/techs/${id}/timesheet`, range);
   },
   updateTech(id: string, body: { areaId?: string | null; supervisorId?: string | null }) {

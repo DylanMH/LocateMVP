@@ -30,6 +30,8 @@ export interface CurrentSession {
   clockInReason: string | null;
   allocationType: string | null;
   otherReason: string | null;
+  allocationStartedAt: number | null;
+  allocationElapsedMs: number;
   clockOutTicket: { id: string; ticketNumber: string } | null;
   currentTicket: CurrentTicket | null;
 }
