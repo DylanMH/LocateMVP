@@ -11,6 +11,7 @@ import { useAuth } from "../../src/features/auth/AuthContext";
 import { AllocationReconcileModal } from "../../src/features/tickets/components/AllocationReconcileModal";
 import {
   CustomersTab,
+  TimeAllocationCard,
   type CustomerMarkingByCustomerId,
 } from "../../src/features/tickets/components/CustomersTab";
 import type { TicketPayload, TicketStatus } from "../../src/features/tickets/types";
@@ -666,6 +667,22 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
       return marking && marking.completed === true;
     });
 
+  // Time allocation values for the floating card
+  const allocatableMinutes = useMemo(() => {
+    return getAllocatableMinutes(payload, ticket.locatorStatus);
+  }, [payload, ticket.locatorStatus]);
+
+  const allocatedMinutesValue = useMemo(() => {
+    return Object.values(customerMarking).reduce((sum, data) => {
+      const mins = parseInt(data.minutes || "0", 10);
+      return sum + (isNaN(mins) ? 0 : mins);
+    }, 0);
+  }, [customerMarking]);
+
+  const remainingMinutes = allocatableMinutes - allocatedMinutesValue;
+  const showFloatingTimeCard =
+    tab === "CUSTOMER" && Boolean(payload.onsiteStartedAt) && !isClosed;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -674,12 +691,22 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     >
       <Stack.Screen options={{ title: "Ticket Details" }} />
 
+      {/* Floating Time Allocation Card — stays visible while scrolling the Customer tab */}
+      {showFloatingTimeCard && (
+        <TimeAllocationCard
+          allocatableMinutes={allocatableMinutes}
+          allocatedMinutes={allocatedMinutesValue}
+          remainingMinutes={remainingMinutes}
+        />
+      )}
+
       <ScrollView
         ref={scrollViewRef}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         contentContainerStyle={{
           paddingHorizontal: 16,
-          paddingTop: 16,
+          paddingTop: showFloatingTimeCard ? 8 : 16,
           paddingBottom: 40,
           gap: 12,
         }}
