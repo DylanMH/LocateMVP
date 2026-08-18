@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS clock_events (
   request_id TEXT NOT NULL UNIQUE,
   session_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  event_type TEXT NOT NULL CHECK (event_type IN ('CLOCK_IN', 'CLOCK_OUT', 'LUNCH_START', 'LUNCH_END', 'PERSONAL_START', 'PERSONAL_END')),
+  event_type TEXT NOT NULL CHECK (event_type IN ('CLOCK_IN', 'CLOCK_OUT', 'LUNCH_START', 'LUNCH_END', 'PERSONAL_START', 'PERSONAL_END', 'ALLOCATION_CHANGE')),
   occurred_at INTEGER NOT NULL,
   reason TEXT,
   ticket_id TEXT,
@@ -348,6 +348,44 @@ ensureColumnExists("day_sessions", "other_reason", "ALTER TABLE day_sessions ADD
 
 // Outbound 811 events — external_ticket_id column for linking to 811 simulator.
 ensureColumnExists("outbox_811_events", "external_ticket_id", "ALTER TABLE outbox_811_events ADD COLUMN external_ticket_id TEXT");
+
+// clock_events CHECK constraint migration — add ALLOCATION_CHANGE event type.
+// SQLite can't ALTER a CHECK; rebuild the table in place.
+(function migrateClockEventsCheck() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='clock_events'").get();
+  if (!row?.sql || row.sql.includes('ALLOCATION_CHANGE')) return;
+  console.log('[Database] Migrating clock_events.event_type CHECK to include ALLOCATION_CHANGE');
+  db.pragma('foreign_keys = OFF');
+  const tx = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE clock_events_new (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        event_type TEXT NOT NULL CHECK (event_type IN ('CLOCK_IN', 'CLOCK_OUT', 'LUNCH_START', 'LUNCH_END', 'PERSONAL_START', 'PERSONAL_END', 'ALLOCATION_CHANGE')),
+        occurred_at INTEGER NOT NULL,
+        reason TEXT,
+        ticket_id TEXT,
+        device_id TEXT,
+        seq INTEGER,
+        date TEXT,
+        clock_in_at INTEGER,
+        clock_out_at INTEGER,
+        session_status TEXT CHECK (session_status IN ('ACTIVE', 'CLOCKED_OUT')),
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        FOREIGN KEY (session_id) REFERENCES day_sessions(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      INSERT INTO clock_events_new (id, request_id, session_id, user_id, event_type, occurred_at, reason, ticket_id, device_id, seq, date, clock_in_at, clock_out_at, session_status, created_at)
+        SELECT id, request_id, session_id, user_id, event_type, occurred_at, reason, ticket_id, device_id, seq, date, clock_in_at, clock_out_at, session_status, created_at FROM clock_events;
+      DROP TABLE clock_events;
+      ALTER TABLE clock_events_new RENAME TO clock_events;
+    `);
+  });
+  tx();
+  db.pragma('foreign_keys = ON');
+})();
 
 // Area bounding box migrations
 ensureColumnExists("areas", "bbox_north", "ALTER TABLE areas ADD COLUMN bbox_north REAL");
