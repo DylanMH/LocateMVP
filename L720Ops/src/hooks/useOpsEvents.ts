@@ -102,6 +102,7 @@ function routeInvalidation(qc: ReturnType<typeof useQueryClient>, type: string) 
   }
   if (type === "ticket.assigned" || type === "ticket.updated" || type === "ticket.created") {
     invalidate(["ops", "techs"]);
+    invalidate(["ops", "timesheet"]);
   }
   if (type === "tech.clock.changed" || type === "tech.updated") {
     invalidate(["ops", "techs"]);

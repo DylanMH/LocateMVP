@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS ticket_events (
 CREATE TABLE IF NOT EXISTS outbox_811_events (
   id TEXT PRIMARY KEY,
   ticket_id TEXT NOT NULL,
+  external_ticket_id TEXT,
   event_type TEXT NOT NULL,
   member_code TEXT NOT NULL,
   response_code TEXT,
@@ -344,6 +345,9 @@ ensureColumnExists(
 ensureColumnExists("day_sessions", "clock_in_reason", "ALTER TABLE day_sessions ADD COLUMN clock_in_reason TEXT");
 ensureColumnExists("day_sessions", "allocation_type", "ALTER TABLE day_sessions ADD COLUMN allocation_type TEXT");
 ensureColumnExists("day_sessions", "other_reason", "ALTER TABLE day_sessions ADD COLUMN other_reason TEXT");
+
+// Outbound 811 events — external_ticket_id column for linking to 811 simulator.
+ensureColumnExists("outbox_811_events", "external_ticket_id", "ALTER TABLE outbox_811_events ADD COLUMN external_ticket_id TEXT");
 
 // Area bounding box migrations
 ensureColumnExists("areas", "bbox_north", "ALTER TABLE areas ADD COLUMN bbox_north REAL");

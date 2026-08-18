@@ -270,14 +270,22 @@ function recordTicketEventHistory({
   payloadSnapshot,
 }) {
   const { insertTicketEvent } = getSyncStatements();
+  // Use a sentinel to distinguish "not provided" (use ticket's value)
+  // from "explicitly null" (use null). The ?? operator treats null as
+  // nullish, so we can't use it here.
+  const UNSET = Symbol("unset");
+  const _oldStatus = oldStatus !== undefined ? oldStatus : (ticket.status ?? null);
+  const _newStatus = newStatus !== undefined ? newStatus : (ticket.status ?? null);
+  const _oldLocator = oldLocatorStatus !== undefined ? oldLocatorStatus : (ticket.locator_status ?? null);
+  const _newLocator = newLocatorStatus !== undefined ? newLocatorStatus : (ticket.locator_status ?? null);
   insertTicketEvent.run(
     `tevt-${requestId}`,
     ticket.id,
     eventType,
-    oldStatus ?? ticket.status ?? null,
-    newStatus ?? ticket.status ?? null,
-    oldLocatorStatus ?? ticket.locator_status ?? null,
-    newLocatorStatus ?? ticket.locator_status ?? null,
+    _oldStatus,
+    _newStatus,
+    _oldLocator,
+    _newLocator,
     userId || null,
     notes || null,
     JSON.stringify(payloadSnapshot || {}),

@@ -167,6 +167,20 @@ function getScopeBounds(payloadJson?: string): {
   }
 }
 
+function getAllocatedMinutesFromPayload(payloadJson?: string): number {
+  try {
+    if (!payloadJson) return 0;
+    const payload = JSON.parse(payloadJson);
+    const markings = payload?.customerMarkings || payload?.customerMarking || {};
+    return Object.values(markings).reduce((sum: number, data: any) => {
+      const mins = parseInt(data?.minutes || "0", 10);
+      return sum + (isNaN(mins) ? 0 : mins);
+    }, 0);
+  } catch {
+    return 0;
+  }
+}
+
 function MapRefocus({ center }: { center: [number, number] | null }) {
   const map = useMap();
   const lastKey = useRef("");
@@ -415,6 +429,20 @@ export function TechDetailPage() {
           {formatDuration(t.timeAllocation?.totalMs ?? 0)}
         </span>
       ),
+    },
+    {
+      key: "allocated",
+      header: "Allocated",
+      align: "right",
+      render: (t) => {
+        const mins = getAllocatedMinutesFromPayload(t.payloadJson);
+        if (mins === 0) return <span className="text-gray-300">—</span>;
+        return (
+          <span className="tabular-nums font-medium text-gray-700">
+            {mins}m
+          </span>
+        );
+      },
     },
     {
       key: "updated",
