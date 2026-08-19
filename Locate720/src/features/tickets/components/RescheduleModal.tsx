@@ -7,7 +7,9 @@ import {
   TextInput,
   ScrollView,
   Alert,
+  Platform,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { colors } from "../../../ui/colors";
 import { triggerLightHaptic, triggerSuccessHaptic } from "../../../utils/haptics";
 import {
@@ -61,7 +63,10 @@ export function RescheduleModal({
   onRescheduled,
 }: RescheduleModalProps) {
   const [extensionType, setExtensionType] = useState<ExtensionType | null>(null);
-  const [customDueAt, setCustomDueAt] = useState<string>("");
+  const [customDate, setCustomDate] = useState<Date | null>(null);
+  const [customTime, setCustomTime] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [reasonCode, setReasonCode] = useState<ReasonCode | null>(null);
   const [otherReason, setOtherReason] = useState("");
   const [approvalName, setApprovalName] = useState(contractorName || "");
@@ -71,14 +76,21 @@ export function RescheduleModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const proposedDueAt = useMemo(() => {
-    if (extensionType === "CUSTOM" && customDueAt) {
-      const parsed = new Date(customDueAt).getTime();
-      if (!isNaN(parsed)) return parsed;
+    if (extensionType === "CUSTOM" && customDate) {
+      // Combine date and time — default to noon if no time selected
+      const combined = new Date(customDate);
+      if (customTime) {
+        combined.setHours(customTime.getHours(), customTime.getMinutes(), 0, 0);
+      } else {
+        combined.setHours(12, 0, 0, 0);
+      }
+      const ts = combined.getTime();
+      if (!isNaN(ts)) return ts;
     }
     if (extensionType === "24_HOURS") return currentDueAt + 24 * 60 * 60 * 1000;
     if (extensionType === "48_HOURS") return currentDueAt + 48 * 60 * 60 * 1000;
     return null;
-  }, [extensionType, customDueAt, currentDueAt]);
+  }, [extensionType, customDate, customTime, currentDueAt]);
 
   // Auto-generate notes when key fields change
   const generatedNotes = useMemo(() => {
@@ -96,7 +108,10 @@ export function RescheduleModal({
 
   const resetState = () => {
     setExtensionType(null);
-    setCustomDueAt("");
+    setCustomDate(null);
+    setCustomTime(null);
+    setShowDatePicker(false);
+    setShowTimePicker(false);
     setReasonCode(null);
     setOtherReason("");
     setApprovalName(contractorName || "");
@@ -235,16 +250,74 @@ export function RescheduleModal({
                 </Pressable>
               </View>
 
-              {/* Custom date input */}
+              {/* Custom date and time pickers */}
               {extensionType === "CUSTOM" && (
-                <TextInput
-                  className="mt-2 px-3 py-2 rounded-lg text-sm"
-                  style={{ backgroundColor: colors.bg, color: colors.text }}
-                  placeholder="YYYY-MM-DD HH:MM"
-                  placeholderTextColor={colors.muted}
-                  value={customDueAt}
-                  onChangeText={setCustomDueAt}
-                />
+                <View className="mt-2" style={{ gap: 8 }}>
+                  <View className="flex-row" style={{ gap: 8 }}>
+                    <Pressable
+                      onPress={() => { triggerLightHaptic(); setShowDatePicker(true); setShowTimePicker(false); }}
+                      className="flex-1 px-3 py-2.5 rounded-lg"
+                      style={{ backgroundColor: colors.bg }}
+                    >
+                      <Text className="text-xs" style={{ color: colors.muted }}>
+                        Date
+                      </Text>
+                      <Text className="text-sm font-medium" style={{ color: colors.text }}>
+                        {customDate ? customDate.toLocaleDateString() : "Select date"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => { triggerLightHaptic(); setShowTimePicker(true); setShowDatePicker(false); }}
+                      className="flex-1 px-3 py-2.5 rounded-lg"
+                      style={{ backgroundColor: colors.bg }}
+                    >
+                      <Text className="text-xs" style={{ color: colors.muted }}>
+                        Time
+                      </Text>
+                      <Text className="text-sm font-medium" style={{ color: colors.text }}>
+                        {customTime
+                          ? customTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                          : "Select time"}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={customDate || new Date()}
+                      mode="date"
+                      display={Platform.OS === "ios" ? "spinner" : "default"}
+                      minimumDate={new Date()}
+                      onChange={(event, selectedDate) => {
+                        setShowDatePicker(Platform.OS === "ios");
+                        if (selectedDate) setCustomDate(selectedDate);
+                      }}
+                    />
+                  )}
+
+                  {showTimePicker && (
+                    <DateTimePicker
+                      value={customTime || new Date()}
+                      mode="time"
+                      display={Platform.OS === "ios" ? "spinner" : "default"}
+                      onChange={(event, selectedTime) => {
+                        setShowTimePicker(Platform.OS === "ios");
+                        if (selectedTime) setCustomTime(selectedTime);
+                      }}
+                    />
+                  )}
+
+                  {customDate && (
+                    <Pressable
+                      onPress={() => { setCustomDate(null); setCustomTime(null); }}
+                      hitSlop={8}
+                    >
+                      <Text className="text-xs" style={{ color: colors.muted }}>
+                        Clear date selection
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
               )}
 
               {/* Proposed due date */}

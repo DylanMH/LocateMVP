@@ -271,6 +271,8 @@ export class TicketsService {
       source: string;
       notes: string | null;
       created_at: number;
+      performed_by_name: string | null;
+      performed_by_username: string | null;
     }>
   > {
     const response = await fetch(

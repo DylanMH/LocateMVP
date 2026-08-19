@@ -1341,6 +1341,12 @@ export function TechDetailPage() {
             contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
             contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
             contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
+            onRescheduled={() => {
+              qc.invalidateQueries({ queryKey: ["ops", "tickets"] });
+              qc.invalidateQueries({ queryKey: ["ops", "ticket-detail", selectedTicketId] });
+              qc.invalidateQueries({ queryKey: ["ops", "techs", "tickets", id] });
+              qc.invalidateQueries({ queryKey: ["ops", "reschedule-history", detail.id] });
+            }}
           />
         )}
       </Drawer>
@@ -1372,6 +1378,9 @@ function RescheduleHistoryPanel({ ticketId }: { ticketId: string }) {
           <div className="flex justify-between text-xs text-gray-500">
             <span className="font-medium text-gray-700">
               Rescheduled · {r.source?.replace(/_/g, " ") || "Internal"}
+              {(r.performed_by_name || r.performed_by_username) && (
+                <span className="text-gray-400"> · by {r.performed_by_name || r.performed_by_username}</span>
+              )}
             </span>
             <span>{new Date(r.created_at).toLocaleString()}</span>
           </div>

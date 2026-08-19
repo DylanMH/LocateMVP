@@ -1,4 +1,5 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { db } from '../server.js';
 import { canViewTicket, canEditTicket, ROLES, getTicketVisibilityFilter } from '../utils/permissions.js';
 import {
@@ -9,6 +10,31 @@ import { isEventProcessed, markEventProcessed, getProcessedEventResult } from '.
 import { queueOutbound811Event } from '../services/outbound811Service.js';
 import { queueContractorEmail } from '../services/emailService.js';
 import crypto from 'crypto';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'l720-ops-secret-key';
+
+/**
+ * Extract the authenticated user from a JWT Bearer token (used by portal)
+ * or fall back to the x-user-id header / viewerId query param (used by mobile).
+ */
+function getAuthenticatedUser(req) {
+  // Try JWT from Authorization header
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = db.prepare('SELECT id, username, name, role FROM users WHERE id = ?').get(decoded.id);
+      if (user) return user;
+    } catch { /* invalid token — fall through */ }
+  }
+  // Fall back to viewerId / x-user-id (mobile dev)
+  const userId = req.query.viewerId || req.headers['x-user-id'];
+  if (userId) {
+    return db.prepare('SELECT id, username, name, role FROM users WHERE id = ?').get(userId) || null;
+  }
+  return null;
+}
 
 const router = express.Router();
 
@@ -303,6 +329,11 @@ router.post('/:id/reschedule', (req, res) => {
     return res.status(404).json(result);
   }
 
+  // Identify who is performing the reschedule
+  const performedBy = getAuthenticatedUser(req);
+  const performedByUserId = performedBy?.id || null;
+  const performedByName = performedBy?.name || performedBy?.username || null;
+
   const previousDueAt = ticket.due_at;
   const originalDueAt = ticket.original_due_at ?? previousDueAt;
   const now = Date.now();
@@ -328,7 +359,7 @@ router.post('/:id/reschedule', (req, res) => {
       rescheduleId, id, previousDueAt, newDueAt, reason || null,
       reasonCode || null, extensionType || null,
       approvalName || null, approvalPhone || null,
-      approverUserId || null, null, excavatorResponse || null,
+      approverUserId || null, performedByUserId, excavatorResponse || null,
       source === 'L720_INTERNAL' ? 'N/A' : 'PENDING',
       source || 'L720_INTERNAL', notes || null, requestId, now,
     );
@@ -385,9 +416,11 @@ router.post('/:id/reschedule', (req, res) => {
       newDueAt,
       originalDueAt,
       rescheduleId,
+      performedByUserId,
+      performedByName,
     };
     markEventProcessed(requestId, result);
-    console.log(`[Tickets] Rescheduled ${id}: due ${previousDueAt} -> ${newDueAt}`);
+    console.log(`[Tickets] Rescheduled ${id}: due ${previousDueAt} -> ${newDueAt} by ${performedByName || performedByUserId || 'unknown'}`);
     res.json(result);
   } catch (error) {
     console.error('[Tickets] Reschedule failed:', error.message);
@@ -462,6 +495,10 @@ router.post('/reschedule-bulk', (req, res) => {
     return res.status(400).json(result);
   }
 
+  // Identify who is performing the bulk reschedule
+  const performedBy = getAuthenticatedUser(req);
+  const performedByUserId = performedBy?.id || null;
+
   const now = Date.now();
   const results = [];
 
@@ -489,7 +526,7 @@ router.post('/reschedule-bulk', (req, res) => {
         rescheduleId, ticket.id, previousDueAt, newDueAt, reason || null,
         reasonCode || null, extensionType || null,
         approvalName || null, approvalPhone || null,
-        approverUserId || null, null, excavatorResponse || null,
+        approverUserId || null, performedByUserId, excavatorResponse || null,
         source === 'L720_INTERNAL' ? 'N/A' : 'PENDING',
         source || 'L720_INTERNAL', notes || null, perRequestId, now,
       );
@@ -570,9 +607,14 @@ router.post('/reschedule-bulk', (req, res) => {
 router.get('/:id/reschedules', (req, res) => {
   const { id } = req.params;
   const history = db.prepare(`
-    SELECT * FROM ticket_reschedules
-    WHERE ticket_id = ?
-    ORDER BY created_at DESC
+    SELECT
+      tr.*,
+      u.name as performed_by_name,
+      u.username as performed_by_username
+    FROM ticket_reschedules tr
+    LEFT JOIN users u ON u.id = tr.performed_by_user_id
+    WHERE tr.ticket_id = ?
+    ORDER BY tr.created_at DESC
   `).all(id);
   res.json({ ticketId: id, reschedules: history });
 });
