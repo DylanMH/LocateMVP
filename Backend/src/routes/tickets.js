@@ -24,14 +24,14 @@ function getAuthenticatedUser(req) {
   if (token) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
-      const user = db.prepare('SELECT id, username, name, role FROM users WHERE id = ?').get(decoded.id);
+      const user = db.prepare('SELECT id, email, name, role FROM users WHERE id = ?').get(decoded.id);
       if (user) return user;
     } catch { /* invalid token — fall through */ }
   }
   // Fall back to viewerId / x-user-id (mobile dev)
   const userId = req.query.viewerId || req.headers['x-user-id'];
   if (userId) {
-    return db.prepare('SELECT id, username, name, role FROM users WHERE id = ?').get(userId) || null;
+    return db.prepare('SELECT id, email, name, role FROM users WHERE id = ?').get(userId) || null;
   }
   return null;
 }
@@ -610,7 +610,7 @@ router.get('/:id/reschedules', (req, res) => {
     SELECT
       tr.*,
       u.name as performed_by_name,
-      u.username as performed_by_username
+      u.email as performed_by_email
     FROM ticket_reschedules tr
     LEFT JOIN users u ON u.id = tr.performed_by_user_id
     WHERE tr.ticket_id = ?

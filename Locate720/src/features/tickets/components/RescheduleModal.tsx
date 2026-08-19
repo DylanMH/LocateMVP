@@ -9,8 +9,16 @@ import {
   Alert,
   Platform,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { colors } from "../../../ui/colors";
+
+// Lazy-load DateTimePicker — the native module requires a dev client rebuild.
+// Fall back to text input if the native module isn't available yet.
+let DateTimePicker: any = null;
+try {
+  DateTimePicker = require("@react-native-community/datetimepicker").default;
+} catch {
+  DateTimePicker = null;
+}
 import { triggerLightHaptic, triggerSuccessHaptic } from "../../../utils/haptics";
 import {
   rescheduleTickets,
@@ -253,69 +261,89 @@ export function RescheduleModal({
               {/* Custom date and time pickers */}
               {extensionType === "CUSTOM" && (
                 <View className="mt-2" style={{ gap: 8 }}>
-                  <View className="flex-row" style={{ gap: 8 }}>
-                    <Pressable
-                      onPress={() => { triggerLightHaptic(); setShowDatePicker(true); setShowTimePicker(false); }}
-                      className="flex-1 px-3 py-2.5 rounded-lg"
-                      style={{ backgroundColor: colors.bg }}
-                    >
-                      <Text className="text-xs" style={{ color: colors.muted }}>
-                        Date
-                      </Text>
-                      <Text className="text-sm font-medium" style={{ color: colors.text }}>
-                        {customDate ? customDate.toLocaleDateString() : "Select date"}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => { triggerLightHaptic(); setShowTimePicker(true); setShowDatePicker(false); }}
-                      className="flex-1 px-3 py-2.5 rounded-lg"
-                      style={{ backgroundColor: colors.bg }}
-                    >
-                      <Text className="text-xs" style={{ color: colors.muted }}>
-                        Time
-                      </Text>
-                      <Text className="text-sm font-medium" style={{ color: colors.text }}>
-                        {customTime
-                          ? customTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                          : "Select time"}
-                      </Text>
-                    </Pressable>
-                  </View>
+                  {DateTimePicker ? (
+                    <>
+                      <View className="flex-row" style={{ gap: 8 }}>
+                        <Pressable
+                          onPress={() => { triggerLightHaptic(); setShowDatePicker(true); setShowTimePicker(false); }}
+                          className="flex-1 px-3 py-2.5 rounded-lg"
+                          style={{ backgroundColor: colors.bg }}
+                        >
+                          <Text className="text-xs" style={{ color: colors.muted }}>
+                            Date
+                          </Text>
+                          <Text className="text-sm font-medium" style={{ color: colors.text }}>
+                            {customDate ? customDate.toLocaleDateString() : "Select date"}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => { triggerLightHaptic(); setShowTimePicker(true); setShowDatePicker(false); }}
+                          className="flex-1 px-3 py-2.5 rounded-lg"
+                          style={{ backgroundColor: colors.bg }}
+                        >
+                          <Text className="text-xs" style={{ color: colors.muted }}>
+                            Time
+                          </Text>
+                          <Text className="text-sm font-medium" style={{ color: colors.text }}>
+                            {customTime
+                              ? customTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                              : "Select time"}
+                          </Text>
+                        </Pressable>
+                      </View>
 
-                  {showDatePicker && (
-                    <DateTimePicker
-                      value={customDate || new Date()}
-                      mode="date"
-                      display={Platform.OS === "ios" ? "spinner" : "default"}
-                      minimumDate={new Date()}
-                      onChange={(event, selectedDate) => {
-                        setShowDatePicker(Platform.OS === "ios");
-                        if (selectedDate) setCustomDate(selectedDate);
+                      {showDatePicker && (
+                        <DateTimePicker
+                          value={customDate || new Date()}
+                          mode="date"
+                          display={Platform.OS === "ios" ? "spinner" : "default"}
+                          minimumDate={new Date()}
+                          onChange={(event: any, selectedDate?: Date) => {
+                            setShowDatePicker(Platform.OS === "ios");
+                            if (selectedDate) setCustomDate(selectedDate);
+                          }}
+                        />
+                      )}
+
+                      {showTimePicker && (
+                        <DateTimePicker
+                          value={customTime || new Date()}
+                          mode="time"
+                          display={Platform.OS === "ios" ? "spinner" : "default"}
+                          onChange={(event: any, selectedTime?: Date) => {
+                            setShowTimePicker(Platform.OS === "ios");
+                            if (selectedTime) setCustomTime(selectedTime);
+                          }}
+                        />
+                      )}
+
+                      {customDate && (
+                        <Pressable
+                          onPress={() => { setCustomDate(null); setCustomTime(null); }}
+                          hitSlop={8}
+                        >
+                          <Text className="text-xs" style={{ color: colors.muted }}>
+                            Clear date selection
+                          </Text>
+                        </Pressable>
+                      )}
+                    </>
+                  ) : (
+                    /* Fallback: text input when native module isn't available */
+                    <TextInput
+                      className="px-3 py-2 rounded-lg text-sm"
+                      style={{ backgroundColor: colors.bg, color: colors.text }}
+                      placeholder="YYYY-MM-DD HH:MM"
+                      placeholderTextColor={colors.muted}
+                      value={customDate ? `${customDate.getFullYear()}-${String(customDate.getMonth() + 1).padStart(2, "0")}-${String(customDate.getDate()).padStart(2, "0")} ${String(customTime?.getHours() ?? 12).padStart(2, "0")}:${String(customTime?.getMinutes() ?? 0).padStart(2, "0")}` : ""}
+                      onChangeText={(text) => {
+                        const parsed = new Date(text);
+                        if (!isNaN(parsed.getTime())) {
+                          setCustomDate(parsed);
+                          setCustomTime(parsed);
+                        }
                       }}
                     />
-                  )}
-
-                  {showTimePicker && (
-                    <DateTimePicker
-                      value={customTime || new Date()}
-                      mode="time"
-                      display={Platform.OS === "ios" ? "spinner" : "default"}
-                      onChange={(event, selectedTime) => {
-                        setShowTimePicker(Platform.OS === "ios");
-                        if (selectedTime) setCustomTime(selectedTime);
-                      }}
-                    />
-                  )}
-
-                  {customDate && (
-                    <Pressable
-                      onPress={() => { setCustomDate(null); setCustomTime(null); }}
-                      hitSlop={8}
-                    >
-                      <Text className="text-xs" style={{ color: colors.muted }}>
-                        Clear date selection
-                      </Text>
-                    </Pressable>
                   )}
                 </View>
               )}

@@ -272,7 +272,7 @@ export class TicketsService {
       notes: string | null;
       created_at: number;
       performed_by_name: string | null;
-      performed_by_username: string | null;
+      performed_by_email: string | null;
     }>
   > {
     const response = await fetch(

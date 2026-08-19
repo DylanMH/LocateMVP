@@ -1431,8 +1431,8 @@ function RescheduleHistoryPanel({ ticketId }: { ticketId: string }) {
           <div className="flex justify-between text-xs text-gray-500">
             <span className="font-medium text-gray-700">
               Rescheduled · {r.source?.replace(/_/g, " ") || "Internal"}
-              {(r.performed_by_name || r.performed_by_username) && (
-                <span className="text-gray-400"> · by {r.performed_by_name || r.performed_by_username}</span>
+              {(r.performed_by_name || r.performed_by_email) && (
+                <span className="text-gray-400"> · by {r.performed_by_name || r.performed_by_email}</span>
               )}
             </span>
             <span>{new Date(r.created_at).toLocaleString()}</span>
