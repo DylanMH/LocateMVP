@@ -17,14 +17,14 @@ const AUTH_REFRESH_TOKEN_KEY = '@locate720:auth_refresh_token';
 const AUTH_USER_KEY = '@locate720:auth_user';
 
 /**
- * SyncEngine - Stub implementation of sync/outbox pattern
- * Structured for real backend integration later
- * 
+ * SyncEngine - Sync/outbox engine for offline-first mobile state
+ *
  * Key responsibilities:
- * - Queue outbox events (status changes, etc.)
- * - Flush outbox to server (stub)
- * - Pull ticket deltas from server (stub)
- * - Handle conflict resolution
+ * - Queue outbox events (status changes, clock events)
+ * - Flush outbox to server (P0 ticket events, P1 clock events)
+ * - Pull ticket deltas from server (applyTicketDeltas)
+ * - Pull timesheet deltas from server (pullTimesheet)
+ * - Handle conflict resolution (version-based merge)
  */
 
 let lastPullAt = 0;
@@ -670,7 +670,7 @@ class SyncEngineImpl {
 
   /**
    * Pull ticket updates from server
-   * Fetches all tickets assigned to current user (Bob for now)
+   * Fetches all tickets assigned to current user
    */
   async pullTickets(force: boolean = false): Promise<void> {
     if (!force) {

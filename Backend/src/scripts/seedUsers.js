@@ -1,4 +1,4 @@
-import { initDatabase } from '../db/database.js';
+import { initDatabase } from '../db/database-sqlite.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const db = initDatabase();
