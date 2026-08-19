@@ -14,7 +14,6 @@ import { DashboardPage } from "./pages/dashboard/DashboardPage";
 import { TechsPage } from "./pages/techs/TechsPage";
 import { TechDetailPage } from "./pages/techs/TechDetailPage";
 import { MapTicketsPage } from "./pages/maptickets/MapTicketsPage";
-import { TicketsPage } from "./pages/tickets/TicketsPage";
 import { SimulatorPage } from "./pages/simulator/SimulatorPage";
 import { TerritoriesPage } from "./pages/territories/TerritoriesPage";
 
@@ -49,7 +48,6 @@ function App() {
                       <Route path="/techs" element={<TechsPage />} />
                       <Route path="/techs/:id" element={<TechDetailPage />} />
                       <Route path="/map" element={<MapTicketsPage />} />
-                      <Route path="/tickets" element={<TicketsPage />} />
                       <Route path="/territories" element={<TerritoriesPage />} />
                       <Route path="/simulator" element={<SimulatorPage />} />
                     </Routes>

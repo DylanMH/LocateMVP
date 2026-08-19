@@ -6,6 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { OpsService } from "../../services/opsService";
 import { TerritoryService } from "../../services/territoryService";
+import { TicketsService } from "../../services/ticketsService";
 import {
   DataTable,
   type DataTableColumn,
@@ -14,6 +15,7 @@ import {
   formatDuration,
 } from "../../components/ui";
 import { AssignTechMenu } from "../../components/features/AssignTechMenu";
+import { RescheduleModal } from "../../components/RescheduleModal";
 import type { TicketDetailResponse, TicketListRow } from "../../types/ops";
 import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
@@ -165,6 +167,7 @@ export function MapTicketsPage() {
   const [viewMode, setViewMode] = useState<"map" | "table">("map");
   const [territoryLevel, setTerritoryLevel] = useState("");
   const [selectedTerritoryId, setSelectedTerritoryId] = useState<string | null>(null);
+  const [showReschedule, setShowReschedule] = useState(false);
 
   const filters = {
     search: params.get("search") || "",
@@ -431,11 +434,49 @@ export function MapTicketsPage() {
           ),
       },
       {
+        key: "due",
+        header: "Due",
+        render: (t) =>
+          t.dueAt ? (
+            <div className="flex items-center gap-2">
+              <span
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: getDueUrgencyColor(t.dueAt) }}
+              />
+              <span className="text-xs text-gray-600">
+                {new Date(t.dueAt).toLocaleDateString()}
+              </span>
+              <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${getDueUrgencyTailwind(t.dueAt)}`}>
+                {DUE_URGENCY_LABELS[getDueUrgencyBucket(t.dueAt)]}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-gray-400">—</span>
+          ),
+      },
+      {
         key: "updated",
         header: "Updated",
         align: "right",
         render: (t) => (
           <span className="text-xs text-gray-500">{new Date(t.updatedAt).toLocaleString()}</span>
+        ),
+      },
+      {
+        key: "actions",
+        header: "Actions",
+        align: "right",
+        render: (t) => (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedId(t.id);
+              setShowReschedule(true);
+            }}
+            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+          >
+            Reschedule
+          </button>
         ),
       },
     ],
@@ -469,7 +510,7 @@ export function MapTicketsPage() {
       <div className="bg-white border-b border-gray-200 px-6 py-3 space-y-3">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Map View</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Tickets</h1>
             <p className="text-sm text-gray-600">
               {listQuery.data ? `${listQuery.data.pagination.total.toLocaleString()} tickets` : "Loading…"}
               {selectedTerritory && ` · ${selectedTerritory.name}`}
@@ -867,6 +908,11 @@ export function MapTicketsPage() {
               loading={listQuery.isLoading}
               onRowClick={(t) => setSelectedId(t.id)}
               empty={{ title: "No tickets match your filters" }}
+              rowStyle={(t) =>
+                t.dueAt
+                  ? { borderLeft: `4px solid ${getDueUrgencyColor(t.dueAt)}` }
+                  : undefined
+              }
             />
             {listQuery.data && listQuery.data.pagination.totalPages > 1 && (
               <div className="flex items-center justify-between text-sm text-gray-600 mt-4">
@@ -901,6 +947,16 @@ export function MapTicketsPage() {
         onClose={() => setSelectedId(null)}
         title={detail ? detail.ticketNumber : "Ticket"}
         subtitle={detail?.address}
+        actions={
+          detail && (
+            <button
+              onClick={() => setShowReschedule(true)}
+              className="inline-flex items-center gap-2 bg-white border border-gray-200 text-sm px-3 py-2 rounded-md hover:bg-gray-50"
+            >
+              Reschedule
+            </button>
+          )
+        }
       >
         {!detail ? (
           <div className="text-sm text-gray-500">Loading…</div>
@@ -911,6 +967,20 @@ export function MapTicketsPage() {
           />
         )}
       </Drawer>
+
+      {detail && (
+        <RescheduleModal
+          isOpen={showReschedule}
+          onClose={() => setShowReschedule(false)}
+          ticketId={detail.id}
+          ticketNumber={detail.ticketNumber}
+          currentDueAt={detail.dueAt}
+          address={detail.address}
+          contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
+          contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
+          contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
+        />
+      )}
     </div>
   );
 }
@@ -1198,6 +1268,13 @@ function TicketDetailBody({
       </div>
 
       <div>
+        <div className="text-sm font-semibold text-gray-900 mb-2">
+          Reschedule History
+        </div>
+        <RescheduleHistoryPanel ticketId={detail.id} />
+      </div>
+
+      <div>
         <div className="text-sm font-semibold text-gray-900 mb-2">History ({detail.events.length})</div>
         <ol className="divide-y divide-gray-100">
           {detail.events.slice().reverse().map((e) => (
@@ -1225,5 +1302,75 @@ function TimeBox({ label, ms }: { label: string; ms: number }) {
       <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
       <div className="text-sm font-semibold text-gray-900 tabular-nums mt-1">{formatDuration(ms)}</div>
     </div>
+  );
+}
+
+function RescheduleHistoryPanel({ ticketId }: { ticketId: string }) {
+  const query = useQuery({
+    queryKey: ["ops", "reschedule-history", ticketId],
+    queryFn: () => TicketsService.getRescheduleHistory(ticketId),
+    enabled: Boolean(ticketId),
+  });
+
+  if (query.isLoading) {
+    return <div className="text-xs text-gray-500">Loading...</div>;
+  }
+  if (query.isError || !query.data) {
+    return <div className="text-xs text-gray-500">Failed to load reschedule history.</div>;
+  }
+  if (query.data.length === 0) {
+    return <div className="text-xs text-gray-500">No reschedules recorded.</div>;
+  }
+
+  return (
+    <ol className="divide-y divide-gray-100">
+      {query.data.map((r) => (
+        <li key={r.id} className="py-3 text-sm space-y-1">
+          <div className="flex justify-between text-xs text-gray-500">
+            <span className="font-medium text-gray-700">
+              Rescheduled · {r.source?.replace(/_/g, " ") || "Internal"}
+            </span>
+            <span>{new Date(r.created_at).toLocaleString()}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-gray-500">Previous Due: </span>
+              <span className="text-gray-900">{new Date(r.previous_due_at).toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">New Due: </span>
+              <span className="text-gray-900">{new Date(r.new_due_at).toLocaleString()}</span>
+            </div>
+            {r.reason_code && (
+              <div>
+                <span className="text-gray-500">Reason: </span>
+                <span className="text-gray-900">{r.reason_code.replace(/_/g, " ").toLowerCase()}</span>
+              </div>
+            )}
+            {r.approval_name && (
+              <div>
+                <span className="text-gray-500">Approved By: </span>
+                <span className="text-gray-900">{r.approval_name}</span>
+              </div>
+            )}
+            {r.excavator_response && (
+              <div>
+                <span className="text-gray-500">Excavator Response: </span>
+                <span className="text-gray-900">{r.excavator_response.replace(/_/g, " ").toLowerCase()}</span>
+              </div>
+            )}
+            {r.eight_one_one_revision_state && r.eight_one_one_revision_state !== "N/A" && (
+              <div>
+                <span className="text-gray-500">811 Revision: </span>
+                <span className="text-gray-900">{r.eight_one_one_revision_state}</span>
+              </div>
+            )}
+          </div>
+          {r.notes && (
+            <div className="text-xs text-gray-700 whitespace-pre-wrap pt-1">{r.notes}</div>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }
