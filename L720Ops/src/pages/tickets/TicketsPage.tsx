@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { OpsService } from "../../services/opsService";
 import { getDueUrgencyBucket, getDueUrgencyTailwind, getDueUrgencyColor, DUE_URGENCY_LABELS } from "../../utils/dueUrgency";
+import { RescheduleModal } from "../../components/RescheduleModal";
 import {
   DataTable,
   type DataTableColumn,
@@ -26,6 +27,7 @@ export function TicketsPage() {
   const [params, setParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showReschedule, setShowReschedule] = useState(false);
 
   const filters = {
     search: params.get("search") || "",
@@ -372,6 +374,16 @@ export function TicketsPage() {
         onClose={() => setSelectedId(null)}
         title={detail ? detail.ticketNumber : "Ticket"}
         subtitle={detail?.address}
+        actions={
+          detail && (
+            <button
+              onClick={() => setShowReschedule(true)}
+              className="inline-flex items-center gap-2 bg-white border border-gray-200 text-sm px-3 py-2 rounded-md hover:bg-gray-50"
+            >
+              Reschedule
+            </button>
+          )
+        }
       >
         {!detail ? (
           <div className="text-sm text-gray-500">Loading…</div>
@@ -384,6 +396,17 @@ export function TicketsPage() {
           />
         )}
       </Drawer>
+
+      {detail && (
+        <RescheduleModal
+          isOpen={showReschedule}
+          onClose={() => setShowReschedule(false)}
+          ticketId={detail.id}
+          ticketNumber={detail.ticketNumber}
+          currentDueAt={detail.dueAt}
+          address={detail.address}
+        />
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ interface Props {
   onClose: () => void;
   title: ReactNode;
   subtitle?: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   widthClass?: string;
@@ -23,6 +24,7 @@ export function Drawer({
   onClose,
   title,
   subtitle,
+  actions,
   children,
   footer,
   widthClass = "max-w-2xl",
@@ -72,6 +74,12 @@ export function Drawer({
                   <XMarkIcon className="h-5 w-5" />
                 </button>
               </div>
+
+              {actions && (
+                <div className="flex items-center gap-2 px-6 py-2 border-b border-gray-100 bg-gray-50">
+                  {actions}
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
 
