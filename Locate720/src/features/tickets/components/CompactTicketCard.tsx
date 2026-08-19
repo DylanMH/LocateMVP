@@ -53,15 +53,13 @@ const CompactTicketCardComponent = ({
           : colors.surface,
       }}
     >
-      {/* Left color bar — half red / half new-due-color when late-but-rescheduled */}
+      {/* Left color bar — half original-color / half new-due-color when rescheduled */}
       <View
         style={{
           width: isActiveStatus ? 6 : 4,
           borderTopLeftRadius: 12,
           borderBottomLeftRadius: 12,
-          ...(halfColors
-            ? { backgroundColor: halfColors.topColor }
-            : { backgroundColor: accentColor, flex: 1 }),
+          backgroundColor: halfColors ? halfColors.topColor : accentColor,
         }}
       >
         {halfColors && (

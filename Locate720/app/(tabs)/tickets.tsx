@@ -587,15 +587,14 @@ function RescheduleTab({
                     width: 4,
                     borderTopLeftRadius: 16,
                     borderBottomLeftRadius: 16,
+                    backgroundColor: halfColors ? halfColors.topColor : dueColor,
                   }}
                 >
-                  {halfColors ? (
+                  {halfColors && (
                     <View style={{ flex: 1 }}>
                       <View style={{ flex: 1, backgroundColor: halfColors.topColor }} />
                       <View style={{ flex: 1, backgroundColor: halfColors.bottomColor }} />
                     </View>
-                  ) : (
-                    <View style={{ flex: 1, backgroundColor: dueColor }} />
                   )}
                 </View>
                 <View className="flex-1 p-4">

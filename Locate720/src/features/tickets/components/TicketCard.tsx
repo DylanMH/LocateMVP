@@ -83,21 +83,20 @@ const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () 
           : colors.surface,
       }}
     >
-      {/* Left color bar — half red / half new-due-color when late-but-rescheduled */}
+      {/* Left color bar — half original-color / half new-due-color when rescheduled */}
       <View
         style={{
           width: isActiveStatus ? 6 : 4,
           borderTopLeftRadius: 16,
           borderBottomLeftRadius: 16,
+          backgroundColor: halfColors ? halfColors.topColor : accentColor,
         }}
       >
-        {halfColors ? (
+        {halfColors && (
           <View style={{ flex: 1 }}>
             <View style={{ flex: 1, backgroundColor: halfColors.topColor }} />
             <View style={{ flex: 1, backgroundColor: halfColors.bottomColor }} />
           </View>
-        ) : (
-          <View style={{ flex: 1, backgroundColor: accentColor }} />
         )}
       </View>
       <View className="flex-1 p-4">
