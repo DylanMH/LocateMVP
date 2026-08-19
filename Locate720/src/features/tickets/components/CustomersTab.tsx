@@ -32,6 +32,7 @@ interface CustomersTabProps {
   payload: TicketPayload;
   scrollViewRef?: React.RefObject<ScrollView | null>;
   isReadOnly?: boolean;
+  currentTechName?: string;
 }
 
 interface TimeAllocationCardProps {
@@ -219,6 +220,7 @@ export function CustomersTab({
   payload,
   scrollViewRef,
   isReadOnly = false,
+  currentTechName,
 }: CustomersTabProps) {
   const sectionOffsets = useRef<Record<string, number>>({});
   const inputOffsets = useRef<Record<string, number>>({});
@@ -272,7 +274,10 @@ export function CustomersTab({
     if (!data?.status || !data?.result || !data?.minutes) return;
     if (data.status === "MARKED" && !data.footage) return;
 
-    onChange(patchCustomerMarking(value, customerId, { completed: true }));
+    onChange(patchCustomerMarking(value, customerId, {
+      completed: true,
+      closedByTechName: currentTechName || undefined,
+    }));
 
     // Find next uncompleted customer and auto-scroll to it
     const currentIndex = customers.findIndex((c) => c.id === customerId);
@@ -341,7 +346,7 @@ export function CustomersTab({
             isReadOnly ||
             isClosed ||
             !isOnsite ||
-            (data.completed && remainingMinutes <= 0);
+            data.completed === true;
 
           return (
             <View
@@ -365,11 +370,18 @@ export function CustomersTab({
                   {customer.name}
                 </Text>
                 {data.completed && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={24}
-                    color={colors.success}
-                  />
+                  <View className="flex-row items-center" style={{ gap: 4 }}>
+                    {data.closedByTechName && (
+                      <Text className="text-[10px]" style={{ color: colors.muted }}>
+                        by {data.closedByTechName}
+                      </Text>
+                    )}
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={24}
+                      color={colors.success}
+                    />
+                  </View>
                 )}
               </View>
 

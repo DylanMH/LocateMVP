@@ -222,6 +222,13 @@ function useCustomerMarkingState(ticket?: Ticket) {
 
     const timer = setTimeout(async () => {
       try {
+        // Guard against updating a ticket that has been deleted locally
+        // (e.g. reassigned to another tech and reconciled during sync).
+        if (ticket._raw._status === "deleted") {
+          logger.log("[TicketDetail] Ticket was deleted locally, skipping marking save");
+          return;
+        }
+
         const normalizedCustomerMarking =
           normalizeCustomerMarking(customerMarking);
         const existingPayload = parseTicketPayload(ticket.payloadJson);
@@ -534,6 +541,12 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
 
   const handleStatusChange = async (nextStatus: LocatorStatus) => {
     if (!ticket) return;
+    // Guard against updating a ticket that has been deleted locally
+    // (e.g. reassigned to another tech and reconciled during sync).
+    if (ticket._raw._status === "deleted") {
+      logger.log("[TicketDetail] Ticket was deleted locally, skipping status change");
+      return;
+    }
     if (ticket.locatorStatus === nextStatus) {
       logger.log(`[TicketDetail] Ticket is already in status ${nextStatus}, ignoring duplicate transition`);
       return;
@@ -988,6 +1001,7 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
               payload={payload}
               scrollViewRef={scrollViewRef}
               isReadOnly={isReadOnly}
+              currentTechName={user?.name}
             />
 
             {allCustomersCompleted && !isClosed && (

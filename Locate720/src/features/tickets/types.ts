@@ -125,6 +125,7 @@ export interface CustomerMarkingData {
     minutes?: string;
     footage?: string;
     completed?: boolean;
+    closedByTechName?: string;
 }
 
 export type CustomerMarkingByCustomerId = Record<string, CustomerMarkingData>;

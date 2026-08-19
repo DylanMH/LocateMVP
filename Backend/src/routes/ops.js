@@ -1610,14 +1610,47 @@ function assignTicketInternal(ticketId, techId, actorUserId) {
   }
 
   const now = Date.now();
+
+  // When reassigning to a DIFFERENT tech, reset the locator status to ASSIGNED
+  // if the previous tech had started field work (ENROUTE/ONSITE/PAUSED).
+  // This ensures the new tech starts fresh. Closed utility markings in
+  // payload_json are preserved so the new tech can see what was already done.
+  const isReassigningToDifferentTech =
+    resolvedTechId !== ticket.assigned_tech_id && resolvedTechId !== null;
+  const needsStatusReset =
+    isReassigningToDifferentTech &&
+    ["ENROUTE", "ONSITE", "PAUSED"].includes(ticket.locator_status);
+
+  let updatedPayloadJson = ticket.payload_json;
+  if (needsStatusReset) {
+    // Clear timeline fields from payload so the new tech starts fresh.
+    // Preserve customerMarking data (especially completed utilities).
+    try {
+      const payload = JSON.parse(ticket.payload_json || "{}");
+      delete payload.enrouteStartedAt;
+      delete payload.enrouteEndedAt;
+      delete payload.onsiteStartedAt;
+      delete payload.onsiteEndedAt;
+      delete payload.pauseEvents;
+      updatedPayloadJson = JSON.stringify(payload);
+    } catch { /* keep original payload if parse fails */ }
+  }
+
   db.prepare(
     `UPDATE tickets
      SET assigned_tech_id = ?,
-         locator_status = CASE WHEN locator_status = 'PENDING' THEN 'ASSIGNED' ELSE locator_status END,
+         locator_status = ?,
+         payload_json = ?,
          updated_at = ?,
          version = version + 1
      WHERE id = ?`,
-  ).run(resolvedTechId, now, ticketId);
+  ).run(
+    resolvedTechId,
+    needsStatusReset ? "ASSIGNED" : (ticket.locator_status === "PENDING" ? "ASSIGNED" : ticket.locator_status),
+    updatedPayloadJson,
+    now,
+    ticketId,
+  );
 
   db.prepare(
     `INSERT INTO ticket_events (id, ticket_id, event_type, user_id, notes, payload_json, created_at)
