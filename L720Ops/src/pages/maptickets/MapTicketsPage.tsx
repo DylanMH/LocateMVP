@@ -17,7 +17,7 @@ import { AssignTechMenu } from "../../components/features/AssignTechMenu";
 import type { TicketDetailResponse, TicketListRow } from "../../types/ops";
 import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
-import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS, DUE_URGENCY_COLORS } from "../../utils/dueUrgency";
+import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS, DUE_URGENCY_COLORS, getDueUrgencyColor } from "../../utils/dueUrgency";
 import { ArrowDownTrayIcon, MapIcon, TableCellsIcon } from "@heroicons/react/24/outline";
 
 delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
@@ -764,7 +764,7 @@ export function MapTicketsPage() {
 
                   {/* Ticket markers — divIcon with colored circle + type label */}
                   {ticketsWithCoords.map((ticket) => {
-                    const color = STATUS_COLORS[ticket.locatorStatus] || "#6B7280";
+                    const color = ticket.dueAt ? getDueUrgencyColor(ticket.dueAt) : DUE_URGENCY_COLORS.none;
                     const label = TYPE_LABELS[ticket.ticketType] || "?";
                     return (
                       <Marker
@@ -829,21 +829,7 @@ export function MapTicketsPage() {
 
                   {/* Legend */}
                   <div className="mt-6 pt-4 border-t border-gray-100">
-                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Status Colors</h4>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {Object.entries(STATUS_COLORS).map(([status, color]) => (
-                        <div key={status} className="flex items-center gap-1.5">
-                          <span
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: color }}
-                          />
-                          <span className="text-xs text-gray-600">{status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Due Urgency</h4>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Due Urgency Colors</h4>
                     <div className="grid grid-cols-2 gap-1.5">
                       {Object.entries(DUE_URGENCY_COLORS).map(([bucket, color]) => (
                         <div key={bucket} className="flex items-center gap-1.5">
@@ -972,7 +958,7 @@ function TerritoryInfoPanel({
                   <div className="flex items-center gap-2">
                     <span
                       className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: STATUS_COLORS[t.locatorStatus] || "#6B7280" }}
+                      style={{ backgroundColor: t.dueAt ? getDueUrgencyColor(t.dueAt) : DUE_URGENCY_COLORS.none }}
                     />
                     <span className="text-sm font-medium text-gray-900">{t.ticketNumber}</span>
                     <span className="text-xs text-gray-400 ml-auto">{TYPE_LABELS[t.ticketType] || "?"}</span>

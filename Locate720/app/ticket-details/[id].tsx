@@ -939,7 +939,13 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                         Contact Email
                       </Text>
                       <Pressable
-                        onPress={() => Linking.openURL(`mailto:${contactEmail}`)}
+                        onPress={() => {
+                          const subject = encodeURIComponent(`Ticket ${ticket.ticketNumber} - ${ticket.address}`);
+                          const body = encodeURIComponent(
+                            `Ticket: ${ticket.ticketNumber}\nAddress: ${ticket.address}\nWork Type: ${workType || "N/A"}\n\n`,
+                          );
+                          Linking.openURL(`mailto:${contactEmail}?subject=${subject}&body=${body}`);
+                        }}
                         hitSlop={8}
                       >
                         <Text

@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { OpsService } from "../../services/opsService";
-import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS } from "../../utils/dueUrgency";
+import { getDueUrgencyBucket, getDueUrgencyTailwind, getDueUrgencyColor, DUE_URGENCY_LABELS } from "../../utils/dueUrgency";
 import {
   DataTable,
   type DataTableColumn,
@@ -183,6 +183,27 @@ export function TicketsPage() {
         render: (t) => <StatusBadge value={t.source} />,
       },
       {
+        key: "due",
+        header: "Due",
+        render: (t) =>
+          t.dueAt ? (
+            <div className="flex items-center gap-2">
+              <span
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: getDueUrgencyColor(t.dueAt) }}
+              />
+              <span className="text-xs text-gray-600">
+                {new Date(t.dueAt).toLocaleDateString()}
+              </span>
+              <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${getDueUrgencyTailwind(t.dueAt)}`}>
+                {DUE_URGENCY_LABELS[getDueUrgencyBucket(t.dueAt)]}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-gray-400">—</span>
+          ),
+      },
+      {
         key: "updated",
         header: "Updated",
         align: "right",
@@ -314,6 +335,11 @@ export function TicketsPage() {
         loading={listQuery.isLoading}
         onRowClick={(t) => setSelectedId(t.id)}
         empty={{ title: "No tickets match your filters" }}
+        rowStyle={(t) =>
+          t.dueAt
+            ? { borderLeft: `4px solid ${getDueUrgencyColor(t.dueAt)}` }
+            : undefined
+        }
       />
 
       {listQuery.data && listQuery.data.pagination.totalPages > 1 && (

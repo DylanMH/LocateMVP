@@ -19,6 +19,8 @@ interface Props<T> {
   empty?: { title: string; description?: ReactNode };
   onRowClick?: (row: T) => void;
   className?: string;
+  rowClassName?: (row: T) => string | undefined;
+  rowStyle?: (row: T) => React.CSSProperties | undefined;
 }
 
 export function DataTable<T>({
@@ -29,6 +31,8 @@ export function DataTable<T>({
   empty,
   onRowClick,
   className,
+  rowClassName,
+  rowStyle,
 }: Props<T>) {
   return (
     <div className={clsx("overflow-x-auto bg-white rounded-lg shadow-sm border border-gray-100", className)}>
@@ -67,7 +71,9 @@ export function DataTable<T>({
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 className={clsx(
                   onRowClick && "cursor-pointer hover:bg-gray-50 transition-colors",
+                  rowClassName?.(row),
                 )}
+                style={rowStyle?.(row)}
               >
                 {columns.map((col) => (
                   <td

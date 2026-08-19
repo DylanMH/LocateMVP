@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import { TicketsService } from "../services/ticketsService";
 
 interface RescheduleModalProps {
@@ -8,6 +7,9 @@ interface RescheduleModalProps {
   ticketId: string;
   ticketNumber: string;
   currentDueAt: number;
+  contractorName?: string;
+  contractorEmail?: string;
+  address?: string;
   onRescheduled?: () => void;
 }
 
@@ -23,6 +25,9 @@ export function RescheduleModal({
   ticketId,
   ticketNumber,
   currentDueAt,
+  contractorName,
+  contractorEmail,
+  address,
   onRescheduled,
 }: RescheduleModalProps) {
   const [newDueAt, setNewDueAt] = useState<number | null>(null);
@@ -30,6 +35,8 @@ export function RescheduleModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const handlePreset = (offsetMs: number) => {
     setNewDueAt(currentDueAt + offsetMs);
@@ -78,19 +85,48 @@ export function RescheduleModal({
   };
 
   return (
-    <Dialog open={isOpen} onClose={handleClose} className="relative z-50">
-      <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-      <div className="fixed inset-0 flex items-center justify-center p-4">
-        <DialogPanel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-          <DialogTitle className="text-lg font-semibold text-gray-900">
-            Reschedule Ticket {ticketNumber}
-          </DialogTitle>
+    <div className="fixed inset-0 bg-black/30 overflow-y-auto h-full w-full z-[60]">
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Reschedule Ticket {ticketNumber}
+            </h3>
+            <button
+              onClick={handleClose}
+              className="text-gray-400 hover:text-gray-500"
+            >
+              <span className="sr-only">Close</span>
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
 
-          <div className="mt-4 space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700">
-                Current Due: {new Date(currentDueAt).toLocaleString()}
-              </label>
+          <div className="space-y-4">
+            {/* Ticket context info */}
+            <div className="rounded-lg bg-gray-50 p-3 space-y-1">
+              {address && (
+                <div className="text-sm text-gray-700">{address}</div>
+              )}
+              <div className="text-sm">
+                <span className="text-gray-500">Current Due: </span>
+                <span className="font-medium text-gray-900">
+                  {new Date(currentDueAt).toLocaleString()}
+                </span>
+              </div>
+              {contractorName && (
+                <div className="text-sm">
+                  <span className="text-gray-500">Contractor: </span>
+                  <span className="font-medium text-gray-900">{contractorName}</span>
+                </div>
+              )}
+              {contractorEmail && (
+                <div className="text-sm">
+                  <span className="text-gray-500">Email: </span>
+                  <span className="font-medium text-gray-900">{contractorEmail}</span>
+                </div>
+              )}
             </div>
 
             <div>
@@ -172,8 +208,8 @@ export function RescheduleModal({
               </button>
             </div>
           </div>
-        </DialogPanel>
+        </div>
       </div>
-    </Dialog>
+    </div>
   );
 }
