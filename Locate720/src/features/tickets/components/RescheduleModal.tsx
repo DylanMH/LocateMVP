@@ -7,18 +7,8 @@ import {
   TextInput,
   ScrollView,
   Alert,
-  Platform,
 } from "react-native";
 import { colors } from "../../../ui/colors";
-
-// Lazy-load DateTimePicker — the native module requires a dev client rebuild.
-// Fall back to text input if the native module isn't available yet.
-let DateTimePicker: any = null;
-try {
-  DateTimePicker = require("@react-native-community/datetimepicker").default;
-} catch {
-  DateTimePicker = null;
-}
 import { triggerLightHaptic, triggerSuccessHaptic } from "../../../utils/haptics";
 import {
   rescheduleTickets,
@@ -28,6 +18,14 @@ import {
   type RescheduleSource,
 } from "../services/rescheduleService";
 import { formatDueDateTime } from "../../../utils/date";
+
+// Picker option arrays — pure JS, no native module required
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const thisYear = new Date().getFullYear();
+const YEARS = [thisYear, thisYear + 1];
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
 interface RescheduleModalProps {
   visible: boolean;
@@ -71,10 +69,13 @@ export function RescheduleModal({
   onRescheduled,
 }: RescheduleModalProps) {
   const [extensionType, setExtensionType] = useState<ExtensionType | null>(null);
-  const [customDate, setCustomDate] = useState<Date | null>(null);
-  const [customTime, setCustomTime] = useState<Date | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  // Custom date/time as simple numeric fields for a pure-JS picker
+  const today = new Date();
+  const [customYear, setCustomYear] = useState<number>(today.getFullYear());
+  const [customMonth, setCustomMonth] = useState<number>(today.getMonth()); // 0-based
+  const [customDay, setCustomDay] = useState<number>(today.getDate());
+  const [customHour, setCustomHour] = useState<number>(12);
+  const [customMinute, setCustomMinute] = useState<number>(0);
   const [reasonCode, setReasonCode] = useState<ReasonCode | null>(null);
   const [otherReason, setOtherReason] = useState("");
   const [approvalName, setApprovalName] = useState(contractorName || "");
@@ -83,22 +84,21 @@ export function RescheduleModal({
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Build the proposed due timestamp from the picker fields
+  const customDateValid = useMemo(() => {
+    if (extensionType !== "CUSTOM") return false;
+    const d = new Date(customYear, customMonth, customDay, customHour, customMinute, 0, 0);
+    return !isNaN(d.getTime());
+  }, [extensionType, customYear, customMonth, customDay, customHour, customMinute]);
+
   const proposedDueAt = useMemo(() => {
-    if (extensionType === "CUSTOM" && customDate) {
-      // Combine date and time — default to noon if no time selected
-      const combined = new Date(customDate);
-      if (customTime) {
-        combined.setHours(customTime.getHours(), customTime.getMinutes(), 0, 0);
-      } else {
-        combined.setHours(12, 0, 0, 0);
-      }
-      const ts = combined.getTime();
-      if (!isNaN(ts)) return ts;
+    if (extensionType === "CUSTOM" && customDateValid) {
+      return new Date(customYear, customMonth, customDay, customHour, customMinute, 0, 0).getTime();
     }
     if (extensionType === "24_HOURS") return currentDueAt + 24 * 60 * 60 * 1000;
     if (extensionType === "48_HOURS") return currentDueAt + 48 * 60 * 60 * 1000;
     return null;
-  }, [extensionType, customDate, customTime, currentDueAt]);
+  }, [extensionType, customDateValid, customYear, customMonth, customDay, customHour, customMinute, currentDueAt]);
 
   // Auto-generate notes when key fields change
   const generatedNotes = useMemo(() => {
@@ -116,10 +116,12 @@ export function RescheduleModal({
 
   const resetState = () => {
     setExtensionType(null);
-    setCustomDate(null);
-    setCustomTime(null);
-    setShowDatePicker(false);
-    setShowTimePicker(false);
+    const now = new Date();
+    setCustomYear(now.getFullYear());
+    setCustomMonth(now.getMonth());
+    setCustomDay(now.getDate());
+    setCustomHour(12);
+    setCustomMinute(0);
     setReasonCode(null);
     setOtherReason("");
     setApprovalName(contractorName || "");
@@ -258,93 +260,168 @@ export function RescheduleModal({
                 </Pressable>
               </View>
 
-              {/* Custom date and time pickers */}
+              {/* Custom date and time pickers — pure JS, no native module */}
               {extensionType === "CUSTOM" && (
                 <View className="mt-2" style={{ gap: 8 }}>
-                  {DateTimePicker ? (
-                    <>
-                      <View className="flex-row" style={{ gap: 8 }}>
-                        <Pressable
-                          onPress={() => { triggerLightHaptic(); setShowDatePicker(true); setShowTimePicker(false); }}
-                          className="flex-1 px-3 py-2.5 rounded-lg"
-                          style={{ backgroundColor: colors.bg }}
+                  {/* Date section */}
+                  <View>
+                    <Text className="text-xs font-semibold mb-1.5" style={{ color: colors.muted }}>
+                      Date
+                    </Text>
+                    <View className="flex-row" style={{ gap: 6 }}>
+                      {/* Month */}
+                      <View className="flex-1">
+                        <Text className="text-[10px] mb-1" style={{ color: colors.muted }}>Month</Text>
+                        <ScrollView
+                          style={{ maxHeight: 120, backgroundColor: colors.bg, borderRadius: 8 }}
+                          showsVerticalScrollIndicator={false}
                         >
-                          <Text className="text-xs" style={{ color: colors.muted }}>
-                            Date
-                          </Text>
-                          <Text className="text-sm font-medium" style={{ color: colors.text }}>
-                            {customDate ? customDate.toLocaleDateString() : "Select date"}
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => { triggerLightHaptic(); setShowTimePicker(true); setShowDatePicker(false); }}
-                          className="flex-1 px-3 py-2.5 rounded-lg"
-                          style={{ backgroundColor: colors.bg }}
-                        >
-                          <Text className="text-xs" style={{ color: colors.muted }}>
-                            Time
-                          </Text>
-                          <Text className="text-sm font-medium" style={{ color: colors.text }}>
-                            {customTime
-                              ? customTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                              : "Select time"}
-                          </Text>
-                        </Pressable>
+                          {MONTH_NAMES.map((m, idx) => (
+                            <Pressable
+                              key={idx}
+                              onPress={() => { triggerLightHaptic(); setCustomMonth(idx); }}
+                              className="py-1.5 px-2"
+                              style={{
+                                backgroundColor: idx === customMonth ? colors.primary : "transparent",
+                                borderRadius: 4,
+                              }}
+                            >
+                              <Text
+                                className="text-xs text-center"
+                                style={{ color: idx === customMonth ? "#fff" : colors.text }}
+                              >
+                                {m}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
                       </View>
-
-                      {showDatePicker && (
-                        <DateTimePicker
-                          value={customDate || new Date()}
-                          mode="date"
-                          display={Platform.OS === "ios" ? "spinner" : "default"}
-                          minimumDate={new Date()}
-                          onChange={(event: any, selectedDate?: Date) => {
-                            setShowDatePicker(Platform.OS === "ios");
-                            if (selectedDate) setCustomDate(selectedDate);
-                          }}
-                        />
-                      )}
-
-                      {showTimePicker && (
-                        <DateTimePicker
-                          value={customTime || new Date()}
-                          mode="time"
-                          display={Platform.OS === "ios" ? "spinner" : "default"}
-                          onChange={(event: any, selectedTime?: Date) => {
-                            setShowTimePicker(Platform.OS === "ios");
-                            if (selectedTime) setCustomTime(selectedTime);
-                          }}
-                        />
-                      )}
-
-                      {customDate && (
-                        <Pressable
-                          onPress={() => { setCustomDate(null); setCustomTime(null); }}
-                          hitSlop={8}
+                      {/* Day */}
+                      <View style={{ width: 50 }}>
+                        <Text className="text-[10px] mb-1" style={{ color: colors.muted }}>Day</Text>
+                        <ScrollView
+                          style={{ maxHeight: 120, backgroundColor: colors.bg, borderRadius: 8 }}
+                          showsVerticalScrollIndicator={false}
                         >
-                          <Text className="text-xs" style={{ color: colors.muted }}>
-                            Clear date selection
-                          </Text>
-                        </Pressable>
-                      )}
-                    </>
-                  ) : (
-                    /* Fallback: text input when native module isn't available */
-                    <TextInput
-                      className="px-3 py-2 rounded-lg text-sm"
-                      style={{ backgroundColor: colors.bg, color: colors.text }}
-                      placeholder="YYYY-MM-DD HH:MM"
-                      placeholderTextColor={colors.muted}
-                      value={customDate ? `${customDate.getFullYear()}-${String(customDate.getMonth() + 1).padStart(2, "0")}-${String(customDate.getDate()).padStart(2, "0")} ${String(customTime?.getHours() ?? 12).padStart(2, "0")}:${String(customTime?.getMinutes() ?? 0).padStart(2, "0")}` : ""}
-                      onChangeText={(text) => {
-                        const parsed = new Date(text);
-                        if (!isNaN(parsed.getTime())) {
-                          setCustomDate(parsed);
-                          setCustomTime(parsed);
-                        }
-                      }}
-                    />
-                  )}
+                          {DAYS.map((d) => (
+                            <Pressable
+                              key={d}
+                              onPress={() => { triggerLightHaptic(); setCustomDay(d); }}
+                              className="py-1.5 px-2"
+                              style={{
+                                backgroundColor: d === customDay ? colors.primary : "transparent",
+                                borderRadius: 4,
+                              }}
+                            >
+                              <Text
+                                className="text-xs text-center"
+                                style={{ color: d === customDay ? "#fff" : colors.text }}
+                              >
+                                {d}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
+                      {/* Year */}
+                      <View style={{ width: 60 }}>
+                        <Text className="text-[10px] mb-1" style={{ color: colors.muted }}>Year</Text>
+                        <ScrollView
+                          style={{ maxHeight: 120, backgroundColor: colors.bg, borderRadius: 8 }}
+                          showsVerticalScrollIndicator={false}
+                        >
+                          {YEARS.map((y) => (
+                            <Pressable
+                              key={y}
+                              onPress={() => { triggerLightHaptic(); setCustomYear(y); }}
+                              className="py-1.5 px-2"
+                              style={{
+                                backgroundColor: y === customYear ? colors.primary : "transparent",
+                                borderRadius: 4,
+                              }}
+                            >
+                              <Text
+                                className="text-xs text-center"
+                                style={{ color: y === customYear ? "#fff" : colors.text }}
+                              >
+                                {y}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Time section */}
+                  <View>
+                    <Text className="text-xs font-semibold mb-1.5" style={{ color: colors.muted }}>
+                      Time
+                    </Text>
+                    <View className="flex-row items-center" style={{ gap: 6 }}>
+                      {/* Hour */}
+                      <View style={{ width: 50 }}>
+                        <Text className="text-[10px] mb-1" style={{ color: colors.muted }}>Hour</Text>
+                        <ScrollView
+                          style={{ maxHeight: 120, backgroundColor: colors.bg, borderRadius: 8 }}
+                          showsVerticalScrollIndicator={false}
+                        >
+                          {HOURS.map((h) => (
+                            <Pressable
+                              key={h}
+                              onPress={() => { triggerLightHaptic(); setCustomHour(h); }}
+                              className="py-1.5 px-2"
+                              style={{
+                                backgroundColor: h === customHour ? colors.primary : "transparent",
+                                borderRadius: 4,
+                              }}
+                            >
+                              <Text
+                                className="text-xs text-center"
+                                style={{ color: h === customHour ? "#fff" : colors.text }}
+                              >
+                                {String(h).padStart(2, "0")}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
+                      <Text className="text-lg font-bold" style={{ color: colors.text }}>:</Text>
+                      {/* Minute */}
+                      <View style={{ width: 50 }}>
+                        <Text className="text-[10px] mb-1" style={{ color: colors.muted }}>Min</Text>
+                        <ScrollView
+                          style={{ maxHeight: 120, backgroundColor: colors.bg, borderRadius: 8 }}
+                          showsVerticalScrollIndicator={false}
+                        >
+                          {MINUTES.map((m) => (
+                            <Pressable
+                              key={m}
+                              onPress={() => { triggerLightHaptic(); setCustomMinute(m); }}
+                              className="py-1.5 px-2"
+                              style={{
+                                backgroundColor: m === customMinute ? colors.primary : "transparent",
+                                borderRadius: 4,
+                              }}
+                            >
+                              <Text
+                                className="text-xs text-center"
+                                style={{ color: m === customMinute ? "#fff" : colors.text }}
+                              >
+                                {String(m).padStart(2, "0")}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
+                      <View className="flex-1 ml-1">
+                        <Text className="text-[10px]" style={{ color: colors.muted }}>Selected</Text>
+                        <Text className="text-sm font-medium" style={{ color: colors.text }}>
+                          {String(customHour).padStart(2, "0")}:{String(customMinute).padStart(2, "0")}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
                 </View>
               )}
 
