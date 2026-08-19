@@ -1049,26 +1049,25 @@ export function MapTicketsPage() {
         {!detail ? (
           <div className="text-sm text-gray-500">Loading…</div>
         ) : (
-          <TicketDetailBody
-            detail={detail}
-            onAssign={(techId) => assignMutation.mutate({ ticketId: detail.id, techId })}
-          />
+          <>
+            <TicketDetailBody
+              detail={detail}
+              onAssign={(techId) => assignMutation.mutate({ ticketId: detail.id, techId })}
+            />
+            <RescheduleModal
+              isOpen={showReschedule}
+              onClose={() => setShowReschedule(false)}
+              ticketId={detail.id}
+              ticketNumber={detail.ticketNumber}
+              currentDueAt={detail.dueAt}
+              address={detail.address}
+              contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
+              contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
+              contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
+            />
+          </>
         )}
       </Drawer>
-
-      {detail && (
-        <RescheduleModal
-          isOpen={showReschedule}
-          onClose={() => setShowReschedule(false)}
-          ticketId={detail.id}
-          ticketNumber={detail.ticketNumber}
-          currentDueAt={detail.dueAt}
-          address={detail.address}
-          contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
-          contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
-          contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
-        />
-      )}
     </div>
   );
 }

@@ -1330,21 +1330,20 @@ export function TechDetailPage() {
             </div>
           </div>
         )}
+        {detail && (
+          <RescheduleModal
+            isOpen={showReschedule}
+            onClose={() => setShowReschedule(false)}
+            ticketId={detail.id}
+            ticketNumber={detail.ticketNumber}
+            currentDueAt={detail.dueAt}
+            address={detail.address}
+            contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
+            contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
+            contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
+          />
+        )}
       </Drawer>
-
-      {detail && (
-        <RescheduleModal
-          isOpen={showReschedule}
-          onClose={() => setShowReschedule(false)}
-          ticketId={detail.id}
-          ticketNumber={detail.ticketNumber}
-          currentDueAt={detail.dueAt}
-          address={detail.address}
-          contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
-          contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
-          contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
-        />
-      )}
     </div>
   );
 }
