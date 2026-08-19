@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { OpsService } from "../../services/opsService";
+import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS } from "../../utils/dueUrgency";
 import {
   DataTable,
   type DataTableColumn,
@@ -397,7 +398,14 @@ function TicketDetailBody({
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Due</div>
-          <div>{detail.dueAt ? new Date(detail.dueAt).toLocaleString() : "—"}</div>
+          <div className="flex items-center gap-2">
+            <span>{detail.dueAt ? new Date(detail.dueAt).toLocaleString() : "—"}</span>
+            {detail.dueAt && (
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${getDueUrgencyTailwind(detail.dueAt)}`}>
+                {DUE_URGENCY_LABELS[getDueUrgencyBucket(detail.dueAt)]}
+              </span>
+            )}
+          </div>
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Closed</div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { TicketChainRow, TicketDetail } from "../types/ticket";
 import { formatTicketType, ticketTypeBadgeClass } from "../types/ticket";
 import { TicketsService } from "../services/ticketsService";
+import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS } from "../utils/dueUrgency";
 
 interface TicketDetailModalProps {
   ticket: TicketDetail | null;
@@ -382,8 +383,13 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-sm text-gray-500">Due Date:</dt>
-                      <dd className="text-sm font-medium text-gray-900">
+                      <dd className="flex items-center gap-2 text-sm font-medium text-gray-900">
                         {formatDateTime(ticket.dueAt)}
+                        {ticket.dueAt && (
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${getDueUrgencyTailwind(ticket.dueAt)}`}>
+                            {DUE_URGENCY_LABELS[getDueUrgencyBucket(ticket.dueAt)]}
+                          </span>
+                        )}
                       </dd>
                     </div>
                   </dl>

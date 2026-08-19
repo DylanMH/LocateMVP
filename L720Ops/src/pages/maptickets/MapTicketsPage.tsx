@@ -17,6 +17,7 @@ import { AssignTechMenu } from "../../components/features/AssignTechMenu";
 import type { TicketDetailResponse, TicketListRow } from "../../types/ops";
 import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
+import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS, DUE_URGENCY_COLORS } from "../../utils/dueUrgency";
 import { ArrowDownTrayIcon, MapIcon, TableCellsIcon } from "@heroicons/react/24/outline";
 
 delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
@@ -842,6 +843,20 @@ export function MapTicketsPage() {
                     </div>
                   </div>
                   <div className="mt-3">
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Due Urgency</h4>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {Object.entries(DUE_URGENCY_COLORS).map(([bucket, color]) => (
+                        <div key={bucket} className="flex items-center gap-1.5">
+                          <span
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span className="text-xs text-gray-600">{DUE_URGENCY_LABELS[bucket as keyof typeof DUE_URGENCY_LABELS]}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-3">
                     <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Type Labels</h4>
                     <div className="grid grid-cols-3 gap-1.5">
                       {Object.entries(TYPE_LABELS).map(([type, label]) => (
@@ -1015,7 +1030,14 @@ function TicketDetailBody({
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Due</div>
-          <div>{detail.dueAt ? new Date(detail.dueAt).toLocaleString() : "—"}</div>
+          <div className="flex items-center gap-2">
+            <span>{detail.dueAt ? new Date(detail.dueAt).toLocaleString() : "—"}</span>
+            {detail.dueAt && (
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${getDueUrgencyTailwind(detail.dueAt)}`}>
+                {DUE_URGENCY_LABELS[getDueUrgencyBucket(detail.dueAt)]}
+              </span>
+            )}
+          </div>
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Closed</div>
