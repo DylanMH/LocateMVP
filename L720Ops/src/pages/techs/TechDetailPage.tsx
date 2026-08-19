@@ -41,15 +41,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-const STATUS_COLORS: Record<string, string> = {
-  ASSIGNED: "#3B82F6",
-  ENROUTE: "#F59E0B",
-  ONSITE: "#10B981",
-  PAUSED: "#8B5CF6",
-  CLOSED: "#6B7280",
-  UNABLE: "#EF4444",
-};
-
 const TYPE_LABELS: Record<string, string> = {
   NORMAL: "N",
   EMERGENCY: "E",
