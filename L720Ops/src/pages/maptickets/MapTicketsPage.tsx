@@ -174,6 +174,7 @@ export function MapTicketsPage() {
     locatorStatus: params.get("locatorStatus") || "",
     ticketType: params.get("ticketType") || "",
     unassigned: params.get("unassigned") === "true",
+    dueUrgency: params.get("dueUrgency") || "",
     page: parseInt(params.get("page") || "1", 10),
   };
 
@@ -500,6 +501,57 @@ export function MapTicketsPage() {
     return counts;
   }, [tickets]);
 
+  // Due urgency counts from the currently loaded tickets.
+  // tomorrow_am and tomorrow_pm are combined into a single "tomorrow" count
+  // for the summary chips, but the filter supports the full granularity.
+  const dueUrgencyCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      overdue: 0,
+      today: 0,
+      tomorrow: 0, // tomorrow_am + tomorrow_pm combined
+      soon: 0,     // day after tomorrow
+      future: 0,   // 2+ days
+      none: 0,
+    };
+    for (const t of tickets) {
+      const bucket = getDueUrgencyBucket(t.dueAt);
+      if (bucket === "tomorrow_am" || bucket === "tomorrow_pm") {
+        counts.tomorrow++;
+      } else if (bucket === "urgent") {
+        // Emergency/no-response counts as today for the summary
+        counts.today++;
+      } else if (counts[bucket] !== undefined) {
+        counts[bucket]++;
+      }
+    }
+    return counts;
+  }, [tickets]);
+
+  // Due urgency filter chips configuration
+  const DUE_URGENCY_CHIPS = [
+    { key: "overdue", label: "Late", color: DUE_URGENCY_COLORS.overdue },
+    { key: "today", label: "Today", color: DUE_URGENCY_COLORS.today },
+    { key: "tomorrow", label: "Tomorrow", color: DUE_URGENCY_COLORS.tomorrow_am },
+    { key: "soon", label: "Day After", color: DUE_URGENCY_COLORS.soon },
+    { key: "future", label: "2+ Days", color: DUE_URGENCY_COLORS.future },
+  ];
+
+  // Apply client-side due urgency filter (the backend doesn't know about
+  // urgency buckets since they depend on the current time and calendar days).
+  const dueUrgencyFilteredTickets = useMemo(() => {
+    if (!filters.dueUrgency) return tickets;
+    return tickets.filter((t) => {
+      const bucket = getDueUrgencyBucket(t.dueAt);
+      if (filters.dueUrgency === "tomorrow") {
+        return bucket === "tomorrow_am" || bucket === "tomorrow_pm";
+      }
+      if (filters.dueUrgency === "today") {
+        return bucket === "today" || bucket === "urgent";
+      }
+      return bucket === filters.dueUrgency;
+    });
+  }, [tickets, filters.dueUrgency]);
+
   const selectedTerritory = selectedTerritoryId
     ? flattenedTerritories.find((t) => t.id === selectedTerritoryId) || null
     : null;
@@ -678,6 +730,42 @@ export function MapTicketsPage() {
               </div>
             );
           })}
+        </div>
+
+        {/* Due urgency summary chips — clickable to filter */}
+        <div className="flex flex-wrap gap-2">
+          {DUE_URGENCY_CHIPS.map((chip) => {
+            const count = dueUrgencyCounts[chip.key] || 0;
+            const isActive = filters.dueUrgency === chip.key;
+            return (
+              <button
+                key={chip.key}
+                onClick={() => setFilter("dueUrgency", isActive ? "" : chip.key)}
+                className={`flex items-center gap-2 rounded-md px-3 py-1.5 border transition-colors ${
+                  isActive
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-200 bg-gray-50 hover:bg-gray-100"
+                }`}
+              >
+                <span
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: chip.color }}
+                />
+                <div className="flex flex-col leading-tight text-left">
+                  <span className="text-xs text-gray-500">{chip.label}</span>
+                  <span className="text-sm font-semibold text-gray-900 tabular-nums">{count}</span>
+                </div>
+              </button>
+            );
+          })}
+          {filters.dueUrgency && (
+            <button
+              onClick={() => setFilter("dueUrgency", "")}
+              className="text-xs text-gray-500 hover:text-gray-700 self-center"
+            >
+              Clear due filter
+            </button>
+          )}
         </div>
       </div>
 
@@ -903,7 +991,7 @@ export function MapTicketsPage() {
           <div className="flex-1 overflow-auto p-6">
             <DataTable
               columns={columns}
-              rows={tickets}
+              rows={dueUrgencyFilteredTickets}
               rowKey={(t) => t.id}
               loading={listQuery.isLoading}
               onRowClick={(t) => setSelectedId(t.id)}
