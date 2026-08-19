@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { OpsService } from "../../services/opsService";
+import { TicketsService } from "../../services/ticketsService";
 import { getDueUrgencyBucket, getDueUrgencyTailwind, getDueUrgencyColor, DUE_URGENCY_LABELS } from "../../utils/dueUrgency";
 import { RescheduleModal } from "../../components/RescheduleModal";
 import {
