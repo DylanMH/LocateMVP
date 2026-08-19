@@ -27,8 +27,14 @@ const CompactTicketCardComponent = ({
   ticket: Ticket;
   onPress: () => void;
 }) => {
-  const borderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
+  const dueBorderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
   const { customers, workType } = getTicketDisplayData(ticket.payloadJson);
+
+  // Active-status highlighting: use status color for border + subtle tint
+  const isActiveStatus = shouldShowLocatorStatusBadge(ticket.locatorStatus);
+  const accentColor = isActiveStatus
+    ? getLocatorStatusColor(ticket.locatorStatus)
+    : dueBorderColor;
 
   const handlePress = () => {
     triggerLightHaptic();
@@ -40,9 +46,11 @@ const CompactTicketCardComponent = ({
       onPress={handlePress}
       className="mx-4 rounded-xl px-3 py-2.5"
       style={{
-        backgroundColor: colors.surface,
-        borderLeftWidth: 4,
-        borderLeftColor: borderColor,
+        backgroundColor: isActiveStatus
+          ? `${getLocatorStatusColor(ticket.locatorStatus)}10`
+          : colors.surface,
+        borderLeftWidth: isActiveStatus ? 6 : 4,
+        borderLeftColor: accentColor,
       }}
     >
       <View className="flex-row items-center justify-between">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import withObservables from "@nozbe/with-observables";
 import { Q } from "@nozbe/watermelondb";
 
@@ -524,6 +525,7 @@ interface TicketDetailProps {
 function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   const { user } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<DetailTabKey>("INFO");
   const [showReconcileModal, setShowReconcileModal] = useState(false);
   const tick = useOnsiteTick(ticket);
@@ -708,7 +710,7 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: showFloatingTimeCard ? 8 : 16,
-          paddingBottom: 40,
+          paddingBottom: 40 + insets.bottom,
           gap: 12,
         }}
       >
@@ -936,12 +938,17 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                       >
                         Contact Email
                       </Text>
-                      <Text
-                        className="text-sm mt-1"
-                        style={{ color: colors.text }}
+                      <Pressable
+                        onPress={() => Linking.openURL(`mailto:${contactEmail}`)}
+                        hitSlop={8}
                       >
-                        {contactEmail}
-                      </Text>
+                        <Text
+                          className="text-sm mt-1"
+                          style={{ color: colors.accent, textDecorationLine: "underline" }}
+                        >
+                          {contactEmail}
+                        </Text>
+                      </Pressable>
                     </View>
                   ) : null}
                 </View>

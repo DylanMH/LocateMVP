@@ -47,9 +47,17 @@ async function handleAddressPress(address: string) {
 }
 
 const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () => void }) => {
-  const borderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
+  const dueBorderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
   const { workType, contractor, contractorPhone, customers } =
     getTicketDisplayData(ticket.payloadJson);
+
+  // Active-status highlighting: when the ticket is ENROUTE, ONSITE, or
+  // PAUSED, use the status color for the left border and add a subtle
+  // background tint so the active ticket stands out from the list.
+  const isActiveStatus = shouldShowLocatorStatusBadge(ticket.locatorStatus);
+  const accentColor = isActiveStatus
+    ? getLocatorStatusColor(ticket.locatorStatus)
+    : dueBorderColor;
 
   const handlePhoneTap = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
@@ -68,9 +76,11 @@ const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () 
       onPress={onPress}
       className="mx-4 rounded-2xl p-4"
       style={{
-        backgroundColor: colors.surface,
-        borderLeftWidth: 4,
-        borderLeftColor: borderColor,
+        backgroundColor: isActiveStatus
+          ? `${getLocatorStatusColor(ticket.locatorStatus)}10`
+          : colors.surface,
+        borderLeftWidth: isActiveStatus ? 6 : 4,
+        borderLeftColor: accentColor,
       }}
     >
       <View className="flex-row items-start justify-between mb-2">
