@@ -196,15 +196,18 @@ async function sendStatusUpdateTo811(externalTicketId, payload) {
  * @param {Object} payload - Reschedule payload { previousDueAt, newDueAt, originalDueAt, reason }
  */
 async function sendDueRevisionTo811(externalTicketId, payload) {
+  const parsed = (() => { try { return JSON.parse(payload.notes || '{}'); } catch { return {}; } })();
   const response = await fetch(`${SIMULATOR_URL}/api/811/tickets/${externalTicketId}/revise-due`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      newDueAt: payload.newDueAt,
-      reason: payload.reason,
+      newDueAt: parsed.newDueAt || payload.newDueAt,
+      reason: parsed.reason || payload.reason,
       requestedBy: 'l720-backend',
+      remark: parsed.remark || false,
+      source: parsed.source || '811_UPDATE',
     }),
   });
 

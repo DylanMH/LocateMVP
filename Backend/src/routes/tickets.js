@@ -271,11 +271,17 @@ router.get('/stats/summary', (req, res) => {
  * - Queues an outbound 811 event (TICKET_DUE_REVISED)
  * - Idempotent via request_id
  *
- * Body: { newDueAt, reason?, requestId, approverUserId?, notes? }
+ * Body: { newDueAt, requestId, reason?, reasonCode?, extensionType?,
+ *          approvalName?, approvalPhone?, approverUserId?,
+ *          excavatorResponse?, notes?, source? }
  */
 router.post('/:id/reschedule', (req, res) => {
   const { id } = req.params;
-  const { newDueAt, reason, requestId, approverUserId, notes } = req.body;
+  const {
+    newDueAt, reason, requestId, approverUserId, notes,
+    reasonCode, extensionType, approvalName, approvalPhone,
+    excavatorResponse, source,
+  } = req.body;
 
   if (!newDueAt || typeof newDueAt !== 'number') {
     return res.status(400).json({ error: 'newDueAt (number) required' });
@@ -313,16 +319,22 @@ router.post('/:id/reschedule', (req, res) => {
     // Append to reschedule history
     db.prepare(`
       INSERT INTO ticket_reschedules (
-        id, ticket_id, previous_due_at, new_due_at, reason,
-        approver_user_id, performed_by_user_id, notes, request_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, ticket_id, previous_due_at, new_due_at, reason, reason_code,
+        extension_type, approval_name, approval_phone,
+        approver_user_id, performed_by_user_id, excavator_response,
+        eight_one_one_revision_state, source, notes, request_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       rescheduleId, id, previousDueAt, newDueAt, reason || null,
-      approverUserId || null, null, notes || null, requestId, now,
+      reasonCode || null, extensionType || null,
+      approvalName || null, approvalPhone || null,
+      approverUserId || null, null, excavatorResponse || null,
+      source === 'L720_INTERNAL' ? 'N/A' : 'PENDING',
+      source || 'L720_INTERNAL', notes || null, requestId, now,
     );
 
-    // Queue outbound 811 event for the simulator to revise due
-    if (ticket.external_ticket_id) {
+    // Queue outbound 811 event only for 811-sourced reschedules
+    if (ticket.external_ticket_id && source !== 'L720_INTERNAL') {
       queueOutbound811Event(db, {
         ticketId: id,
         externalTicketId: ticket.external_ticket_id,
@@ -333,12 +345,15 @@ router.post('/:id/reschedule', (req, res) => {
             newDueAt,
             originalDueAt,
             reason,
+            reasonCode,
+            source: source || '811_UPDATE',
+            remark: source === '811_UPDATE_REMARK',
           }),
         },
       });
     }
 
-    // Queue contractor email notification
+    // Queue contractor email notification with the notes/message
     let contractorEmail = null;
     try {
       const payload = JSON.parse(ticket.payload_json || '{}');
@@ -348,11 +363,14 @@ router.post('/:id/reschedule', (req, res) => {
     if (contractorEmail) {
       const previousDate = new Date(previousDueAt).toLocaleString();
       const newDate = new Date(newDueAt).toLocaleString();
+      const emailBody = notes
+        ? notes
+        : `Ticket ${ticket.ticket_number} is being rescheduled due to ${reason || 'operational needs'} to ${newDate}. The technician will complete the locate as soon as possible.\n\nPrevious due: ${previousDate}\nNew due: ${newDate}`;
       queueContractorEmail(db, {
         ticketId: id,
         contractorEmail,
         subject: `Ticket ${ticket.ticket_number} Due Date Rescheduled`,
-        body: `The due date for ticket ${ticket.ticket_number} has been rescheduled.\n\nPrevious due: ${previousDate}\nNew due: ${newDate}\nReason: ${reason || 'N/A'}\n\nThis is an automated notification from Locate720.`,
+        body: emailBody,
       });
     }
   });
@@ -383,11 +401,17 @@ router.post('/:id/reschedule', (req, res) => {
  * POST /api/tickets/reschedule-bulk
  * Reschedule multiple tickets from the same contractor.
  *
- * Body: { ticketIds: string[], newDueAt, reason?, requestId, approverUserId? }
+ * Body: { ticketIds: string[], newDueAt, requestId, reason?, reasonCode?,
+ *          extensionType?, approvalName?, approvalPhone?, approverUserId?,
+ *          excavatorResponse?, notes?, source? }
  * Rejects if tickets belong to different contractors.
  */
 router.post('/reschedule-bulk', (req, res) => {
-  const { ticketIds, newDueAt, reason, requestId, approverUserId } = req.body;
+  const {
+    ticketIds, newDueAt, reason, requestId, approverUserId,
+    reasonCode, extensionType, approvalName, approvalPhone,
+    excavatorResponse, notes, source,
+  } = req.body;
 
   if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
     return res.status(400).json({ error: 'ticketIds (non-empty array) required' });
@@ -456,15 +480,21 @@ router.post('/reschedule-bulk', (req, res) => {
 
       db.prepare(`
         INSERT INTO ticket_reschedules (
-          id, ticket_id, previous_due_at, new_due_at, reason,
-          approver_user_id, notes, request_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, ticket_id, previous_due_at, new_due_at, reason, reason_code,
+          extension_type, approval_name, approval_phone,
+          approver_user_id, performed_by_user_id, excavator_response,
+          eight_one_one_revision_state, source, notes, request_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         rescheduleId, ticket.id, previousDueAt, newDueAt, reason || null,
-        approverUserId || null, null, perRequestId, now,
+        reasonCode || null, extensionType || null,
+        approvalName || null, approvalPhone || null,
+        approverUserId || null, null, excavatorResponse || null,
+        source === 'L720_INTERNAL' ? 'N/A' : 'PENDING',
+        source || 'L720_INTERNAL', notes || null, perRequestId, now,
       );
 
-      if (ticket.external_ticket_id) {
+      if (ticket.external_ticket_id && source !== 'L720_INTERNAL') {
         queueOutbound811Event(db, {
           ticketId: ticket.id,
           externalTicketId: ticket.external_ticket_id,
@@ -475,8 +505,32 @@ router.post('/reschedule-bulk', (req, res) => {
               newDueAt,
               originalDueAt,
               reason,
+              reasonCode,
+              source: source || '811_UPDATE',
+              remark: source === '811_UPDATE_REMARK',
             }),
           },
+        });
+      }
+
+      // Queue contractor email for bulk reschedules too
+      let contractorEmail = null;
+      try {
+        const payload = JSON.parse(ticket.payload_json || '{}');
+        contractorEmail = payload.contactEmail || payload.contact_email || null;
+      } catch { /* ignore */ }
+
+      if (contractorEmail) {
+        const previousDate = new Date(previousDueAt).toLocaleString();
+        const newDate = new Date(newDueAt).toLocaleString();
+        const emailBody = notes
+          ? notes
+          : `Ticket ${ticket.ticket_number} is being rescheduled due to ${reason || 'operational needs'} to ${newDate}. The technician will complete the locate as soon as possible.\n\nPrevious due: ${previousDate}\nNew due: ${newDate}`;
+        queueContractorEmail(db, {
+          ticketId: ticket.id,
+          contractorEmail,
+          subject: `Ticket ${ticket.ticket_number} Due Date Rescheduled`,
+          body: emailBody,
         });
       }
 

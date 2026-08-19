@@ -625,6 +625,7 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
         currentDueAt={ticket.dueAt}
         contractorName={payload.contractor}
         contractorEmail={payload.contactEmail}
+        contractorPhone={payload.contractorPhone}
         address={ticket.address}
       />
     </div>

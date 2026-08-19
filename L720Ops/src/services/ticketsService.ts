@@ -179,8 +179,17 @@ export class TicketsService {
   static async rescheduleTicket(
     ticketId: string,
     newDueAt: number,
-    reason: string,
     requestId: string,
+    options?: {
+      reason?: string;
+      reasonCode?: string;
+      extensionType?: string;
+      approvalName?: string;
+      approvalPhone?: string;
+      excavatorResponse?: string;
+      notes?: string;
+      source?: string;
+    },
   ): Promise<{
     status: string;
     ticketId: string;
@@ -192,7 +201,11 @@ export class TicketsService {
     const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}/reschedule`, {
       method: "POST",
       headers: this.getAuthHeaders(),
-      body: JSON.stringify({ newDueAt, reason, requestId }),
+      body: JSON.stringify({
+        newDueAt,
+        requestId,
+        ...options,
+      }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: "Reschedule failed" }));
@@ -204,8 +217,17 @@ export class TicketsService {
   static async rescheduleBulk(
     ticketIds: string[],
     newDueAt: number,
-    reason: string,
     requestId: string,
+    options?: {
+      reason?: string;
+      reasonCode?: string;
+      extensionType?: string;
+      approvalName?: string;
+      approvalPhone?: string;
+      excavatorResponse?: string;
+      notes?: string;
+      source?: string;
+    },
   ): Promise<{
     status: string;
     rescheduledCount: number;
@@ -219,7 +241,12 @@ export class TicketsService {
     const response = await fetch(`${API_BASE_URL}/tickets/reschedule-bulk`, {
       method: "POST",
       headers: this.getAuthHeaders(),
-      body: JSON.stringify({ ticketIds, newDueAt, reason, requestId }),
+      body: JSON.stringify({
+        ticketIds,
+        newDueAt,
+        requestId,
+        ...options,
+      }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: "Bulk reschedule failed" }));
@@ -235,6 +262,13 @@ export class TicketsService {
       previous_due_at: number;
       new_due_at: number;
       reason: string | null;
+      reason_code: string | null;
+      extension_type: string | null;
+      approval_name: string | null;
+      approval_phone: string | null;
+      excavator_response: string | null;
+      source: string;
+      notes: string | null;
       created_at: number;
     }>
   > {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import {
   FlatList,
   RefreshControl,
@@ -6,6 +6,7 @@ import {
   View,
   AppState,
   Alert,
+  Pressable,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
@@ -21,8 +22,12 @@ import { CompactTicketCard } from "../../src/features/tickets/components/Compact
 import { FilterChips } from "../../src/features/tickets/components/FilterChips";
 import { TicketsHeader } from "../../src/features/tickets/components/TicketsHeader";
 import { TicketMapView } from "../../src/features/tickets/components/TicketMapView";
+import { RescheduleModal } from "../../src/features/tickets/components/RescheduleModal";
 import { SyncEngine } from "../../src/features/tickets/sync/SyncEngine";
 import { sortTickets } from "../../src/features/tickets/utils/ticketSorting";
+import { isTicketClosed } from "../../src/features/tickets/domain/statusMachine";
+import { getTicketDisplayData, parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
+import { formatDueDateTime } from "../../src/utils/date";
 import { colors } from "../../src/ui/colors";
 import type { SegmentedToggleOption } from "../../src/features/tickets/components/SegmentedToggle";
 
@@ -46,6 +51,8 @@ export default function TicketsScreen() {
   const [isOnBreak, setIsOnBreak] = useState(false);
   const [breakType, setBreakType] = useState<"lunch" | "personal" | null>(null);
   const [clockOutTicketId, setClockOutTicketId] = useState<string | null>(null);
+  const [rescheduleSelected, setRescheduleSelected] = useState<Set<string>>(new Set());
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const currentUserId = user?.id || "";
 
   // Set current user on SyncEngine when auth user changes
@@ -306,40 +313,18 @@ export default function TicketsScreen() {
           }
         />
       ) : view === "RESCHEDULE" ? (
-        <View className="flex-1 px-4 pt-3">
-          <View
-            className="rounded-3xl p-5"
-            style={{ backgroundColor: colors.surface }}
-          >
-            <Text
-              className="text-xs uppercase tracking-widest"
-              style={{ color: colors.accent }}
-            >
-              Reschedule
-            </Text>
-            <Text
-              className="text-2xl font-bold mt-2"
-              style={{ color: colors.text }}
-            >
-              Schedule tools are coming next
-            </Text>
-            <Text
-              className="text-sm mt-3"
-              style={{ color: colors.muted }}
-            >
-              This panel will later support due-window changes, reschedule
-              requests, and ticket timing coordination without leaving the
-              tickets workspace.
-            </Text>
-            <Text
-              className="text-sm mt-4"
-              style={{ color: colors.text }}
-            >
-              For now, use the list and map tabs to review active work while we
-              wire the scheduling flow.
-            </Text>
-          </View>
-        </View>
+        <RescheduleTab
+          tickets={sorted.filter((t) => !isTicketClosed(t.locatorStatus))}
+          selected={rescheduleSelected}
+          onToggleSelect={(id) => {
+            const next = new Set(rescheduleSelected);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            setRescheduleSelected(next);
+          }}
+          onClearSelection={() => setRescheduleSelected(new Set())}
+          onReschedule={() => setShowRescheduleModal(true)}
+        />
       ) : (
         <FlatList
           data={sorted}
@@ -454,6 +439,171 @@ export default function TicketsScreen() {
               )}
             </View>
           }
+        />
+      )}
+      {showRescheduleModal && (
+        <RescheduleModal
+          visible={showRescheduleModal}
+          onClose={() => setShowRescheduleModal(false)}
+          ticketIds={Array.from(rescheduleSelected)}
+          ticketNumbers={sorted
+            .filter((t) => rescheduleSelected.has(t.id))
+            .map((t) => t.ticketNumber)}
+          currentDueAt={(() => {
+            const selected = sorted.filter((t) => rescheduleSelected.has(t.id));
+            if (selected.length === 0) return Date.now();
+            return Math.min(...selected.map((t) => t.dueAt || Date.now()));
+          })()}
+          contractorName={(() => {
+            const selected = sorted.filter((t) => rescheduleSelected.has(t.id));
+            if (selected.length === 0) return undefined;
+            const payload = parseTicketPayload(selected[0].payloadJson);
+            return payload.contractor;
+          })()}
+          contractorPhone={(() => {
+            const selected = sorted.filter((t) => rescheduleSelected.has(t.id));
+            if (selected.length === 0) return undefined;
+            const payload = parseTicketPayload(selected[0].payloadJson);
+            return payload.contractorPhone;
+          })()}
+          onRescheduled={() => {
+            setRescheduleSelected(new Set());
+            SyncEngine.syncNow(true);
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+// --- Reschedule Tab Component ---
+
+function RescheduleTab({
+  tickets,
+  selected,
+  onToggleSelect,
+  onClearSelection,
+  onReschedule,
+}: {
+  tickets: Ticket[];
+  selected: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onClearSelection: () => void;
+  onReschedule: () => void;
+}) {
+  // Validate contractor grouping — can only reschedule tickets from same contractor
+  const selectedTickets = tickets.filter((t) => selected.has(t.id));
+  const selectedContractors = new Set(
+    selectedTickets.map((t) => {
+      const payload = parseTicketPayload(t.payloadJson);
+      return payload.contractor || "Unknown";
+    }),
+  );
+  const canReschedule = selected.size > 0 && selectedContractors.size <= 1;
+
+  return (
+    <View className="flex-1 px-4 pt-3">
+      {/* Selection summary bar */}
+      {selected.size > 0 && (
+        <View
+          className="flex-row items-center justify-between rounded-xl px-4 py-3 mb-3"
+          style={{ backgroundColor: colors.surface }}
+        >
+          <Text className="text-sm" style={{ color: colors.text }}>
+            {selected.size} selected
+            {selectedContractors.size > 1 ? " — different contractors" : ""}
+          </Text>
+          <View className="flex-row" style={{ gap: 12 }}>
+            <Pressable onPress={onClearSelection} hitSlop={8}>
+              <Text className="text-sm" style={{ color: colors.muted }}>
+                Clear
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={onReschedule}
+              disabled={!canReschedule}
+              hitSlop={8}
+            >
+              <Text
+                className="text-sm font-bold"
+                style={{ color: canReschedule ? colors.accent : colors.muted }}
+              >
+                Reschedule
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {tickets.length === 0 ? (
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-base font-semibold mb-2" style={{ color: colors.text }}>
+            No eligible tickets
+          </Text>
+          <Text className="text-sm text-center" style={{ color: colors.muted }}>
+            Open tickets will appear here for rescheduling.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={tickets}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          ItemSeparatorComponent={() => <View className="h-2" />}
+          renderItem={({ item }) => {
+            const isSelected = selected.has(item.id);
+            const payload = parseTicketPayload(item.payloadJson);
+            const { contractor, workType } = getTicketDisplayData(item.payloadJson);
+            return (
+              <Pressable
+                onPress={() => onToggleSelect(item.id)}
+                className="rounded-2xl p-4"
+                style={{
+                  backgroundColor: colors.surface,
+                  borderLeftWidth: isSelected ? 4 : 0,
+                  borderLeftColor: colors.accent,
+                }}
+              >
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-1">
+                    <Text className="text-sm font-bold" style={{ color: colors.text }}>
+                      {item.ticketNumber}
+                    </Text>
+                    <Text
+                      className="text-xs mt-0.5"
+                      style={{ color: colors.muted }}
+                      numberOfLines={1}
+                    >
+                      {item.address}
+                    </Text>
+                    <View className="flex-row mt-1" style={{ gap: 8 }}>
+                      <Text className="text-xs" style={{ color: colors.muted }}>
+                        Due: {formatDueDateTime(item.dueAt)}
+                      </Text>
+                      {contractor && (
+                        <Text className="text-xs" style={{ color: colors.muted }}>
+                          · {contractor}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  <View
+                    className="w-6 h-6 rounded-full border-2 items-center justify-center"
+                    style={{
+                      borderColor: isSelected ? colors.accent : colors.muted,
+                      backgroundColor: isSelected ? colors.accent : "transparent",
+                    }}
+                  >
+                    {isSelected && (
+                      <Text className="text-xs font-bold" style={{ color: "#fff" }}>
+                        ✓
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </Pressable>
+            );
+          }}
         />
       )}
     </View>

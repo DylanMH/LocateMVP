@@ -405,6 +405,8 @@ export async function ticketsRoutes(app: FastifyInstance) {
       newDueAt: z.number().int().positive(),
       reason: z.string().optional(),
       requestedBy: z.string().optional(),
+      remark: z.boolean().optional(),
+      source: z.string().optional(),
     });
     const body = bodySchema.parse(req.body ?? {});
 
@@ -418,6 +420,9 @@ export async function ticketsRoutes(app: FastifyInstance) {
       // Set original_due_at on first revision; preserve it on subsequent revisions
       const originalDueAt = ticket.original_due_at ?? previousDueAt;
 
+      // Determine revision type: UPDATE or UPDATE_REMARK
+      const revisionType = body.remark ? "UPDATE_REMARK" : "UPDATE";
+
       db.prepare(`
         UPDATE tickets_811
         SET due_at = ?,
@@ -429,10 +434,11 @@ export async function ticketsRoutes(app: FastifyInstance) {
 
       db.prepare(`
         INSERT INTO ticket_event_log_811 (id, ticket_id, type, occurred_at, payload_json)
-        VALUES (?, ?, 'DUE_REVISED', ?, ?)
+        VALUES (?, ?, ?, ?, ?)
       `).run(
         crypto.randomUUID(),
         ticketId,
+        revisionType === "UPDATE_REMARK" ? "UPDATE_REMARK" : "DUE_REVISED",
         now,
         JSON.stringify({
           previousDueAt,
@@ -440,10 +446,12 @@ export async function ticketsRoutes(app: FastifyInstance) {
           originalDueAt,
           reason: body.reason,
           requestedBy: body.requestedBy,
+          revisionType,
+          source: body.source || "811_UPDATE",
         }),
       );
 
-      console.log(`[811Sim] Ticket ${ticketId} due revised: ${previousDueAt} -> ${body.newDueAt}`);
+      console.log(`[811Sim] Ticket ${ticketId} ${revisionType}: due ${previousDueAt} -> ${body.newDueAt}`);
 
       // Notify L720 backend to re-ingest the updated ticket
       await notifyL720BackendOf811Change({ since: now - 1000 });
@@ -456,6 +464,7 @@ export async function ticketsRoutes(app: FastifyInstance) {
         newDueAt: body.newDueAt,
         originalDueAt,
         version: updated.version,
+        revisionType,
       });
     } catch (error) {
       console.error('[811Sim] Error revising due date:', error);

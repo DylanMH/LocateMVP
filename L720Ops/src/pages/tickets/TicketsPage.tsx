@@ -405,6 +405,9 @@ export function TicketsPage() {
           ticketNumber={detail.ticketNumber}
           currentDueAt={detail.dueAt}
           address={detail.address}
+          contractorName={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractor; } catch { return undefined; } })()}
+          contractorEmail={(() => { try { return JSON.parse(detail.payloadJson || "{}").contactEmail; } catch { return undefined; } })()}
+          contractorPhone={(() => { try { return JSON.parse(detail.payloadJson || "{}").contractorPhone; } catch { return undefined; } })()}
         />
       )}
     </div>
@@ -667,6 +670,13 @@ function TicketDetailBody({
 
       <div>
         <div className="text-sm font-semibold text-gray-900 mb-2">
+          Reschedule History
+        </div>
+        <RescheduleHistoryPanel ticketId={detail.id} />
+      </div>
+
+      <div>
+        <div className="text-sm font-semibold text-gray-900 mb-2">
           History ({detail.events.length})
         </div>
         <ol className="divide-y divide-gray-100">
@@ -699,5 +709,75 @@ function TimeBox({ label, ms }: { label: string; ms: number }) {
         {formatDuration(ms)}
       </div>
     </div>
+  );
+}
+
+function RescheduleHistoryPanel({ ticketId }: { ticketId: string }) {
+  const query = useQuery({
+    queryKey: ["ops", "reschedule-history", ticketId],
+    queryFn: () => TicketsService.getRescheduleHistory(ticketId),
+    enabled: Boolean(ticketId),
+  });
+
+  if (query.isLoading) {
+    return <div className="text-xs text-gray-500">Loading...</div>;
+  }
+  if (query.isError || !query.data) {
+    return <div className="text-xs text-gray-500">Failed to load reschedule history.</div>;
+  }
+  if (query.data.length === 0) {
+    return <div className="text-xs text-gray-500">No reschedules recorded.</div>;
+  }
+
+  return (
+    <ol className="divide-y divide-gray-100">
+      {query.data.map((r) => (
+        <li key={r.id} className="py-3 text-sm space-y-1">
+          <div className="flex justify-between text-xs text-gray-500">
+            <span className="font-medium text-gray-700">
+              Rescheduled · {r.source?.replace(/_/g, " ") || "Internal"}
+            </span>
+            <span>{new Date(r.created_at).toLocaleString()}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-gray-500">Previous Due: </span>
+              <span className="text-gray-900">{new Date(r.previous_due_at).toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">New Due: </span>
+              <span className="text-gray-900">{new Date(r.new_due_at).toLocaleString()}</span>
+            </div>
+            {r.reason_code && (
+              <div>
+                <span className="text-gray-500">Reason: </span>
+                <span className="text-gray-900">{r.reason_code.replace(/_/g, " ").toLowerCase()}</span>
+              </div>
+            )}
+            {r.approval_name && (
+              <div>
+                <span className="text-gray-500">Approved By: </span>
+                <span className="text-gray-900">{r.approval_name}</span>
+              </div>
+            )}
+            {r.excavator_response && (
+              <div>
+                <span className="text-gray-500">Excavator Response: </span>
+                <span className="text-gray-900">{r.excavator_response.replace(/_/g, " ").toLowerCase()}</span>
+              </div>
+            )}
+            {r.eight_one_one_revision_state && r.eight_one_one_revision_state !== "N/A" && (
+              <div>
+                <span className="text-gray-500">811 Revision: </span>
+                <span className="text-gray-900">{r.eight_one_one_revision_state}</span>
+              </div>
+            )}
+          </div>
+          {r.notes && (
+            <div className="text-xs text-gray-700 whitespace-pre-wrap pt-1">{r.notes}</div>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }

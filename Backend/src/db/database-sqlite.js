@@ -489,10 +489,17 @@ db.exec(`
     previous_due_at INTEGER NOT NULL,
     new_due_at INTEGER NOT NULL,
     reason TEXT,
+    reason_code TEXT,
+    extension_type TEXT,
+    approval_name TEXT,
+    approval_phone TEXT,
     approver_user_id TEXT,
     performed_by_user_id TEXT,
     excavator_response TEXT,
     eight_one_one_revision_state TEXT,
+    source TEXT NOT NULL DEFAULT 'L720_INTERNAL',
+    external_revision_id TEXT,
+    email_status TEXT NOT NULL DEFAULT 'PENDING',
     notes TEXT,
     request_id TEXT UNIQUE,
     created_at INTEGER NOT NULL,
@@ -501,6 +508,15 @@ db.exec(`
     FOREIGN KEY (performed_by_user_id) REFERENCES users(id)
   );
 `);
+
+// Additive migrations for existing databases (columns added via ALTER TABLE).
+ensureColumnExists("ticket_reschedules", "reason_code", "ALTER TABLE ticket_reschedules ADD COLUMN reason_code TEXT");
+ensureColumnExists("ticket_reschedules", "extension_type", "ALTER TABLE ticket_reschedules ADD COLUMN extension_type TEXT");
+ensureColumnExists("ticket_reschedules", "approval_name", "ALTER TABLE ticket_reschedules ADD COLUMN approval_name TEXT");
+ensureColumnExists("ticket_reschedules", "approval_phone", "ALTER TABLE ticket_reschedules ADD COLUMN approval_phone TEXT");
+ensureColumnExists("ticket_reschedules", "source", "ALTER TABLE ticket_reschedules ADD COLUMN source TEXT NOT NULL DEFAULT 'L720_INTERNAL'");
+ensureColumnExists("ticket_reschedules", "external_revision_id", "ALTER TABLE ticket_reschedules ADD COLUMN external_revision_id TEXT");
+ensureColumnExists("ticket_reschedules", "email_status", "ALTER TABLE ticket_reschedules ADD COLUMN email_status TEXT NOT NULL DEFAULT 'PENDING'");
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_reschedules_ticket ON ticket_reschedules(ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_reschedules_created ON ticket_reschedules(created_at)`);
