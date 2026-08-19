@@ -15,6 +15,9 @@ import {
   getUserDirectTerritories,
   getTechIdsUnderUser,
 } from "../services/territoryService.js";
+import { computeDueUrgency, DUE_URGENCY } from "../utils/dueUrgency.js";
+import { requirePermission } from "../utils/permissions.js";
+import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -22,7 +25,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
 // ---------- helpers ----------
 
 // Locator status machine (mirrors mobile statusMachine.ts).
-// MANAGER can bypass for admin overrides.
+// DISTRICT_MANAGER can bypass for admin overrides.
 const ALLOWED_LOCATOR_TRANSITIONS = {
   PENDING: ["ASSIGNED"],   // Tech assigned → ready for field work
   ASSIGNED: ["ENROUTE"],
@@ -483,6 +486,7 @@ function mapTicketRow(ticket) {
       : null,
     areaId: tech ? tech.area_id : null,
     dueAt: ticket.due_at,
+    dueUrgency: ticket.due_at ? computeDueUrgency(ticket.due_at) : undefined,
     originalDueAt: ticket.original_due_at ?? ticket.due_at,
     rescheduleCount,
     createdAt: ticket.created_at,
@@ -548,7 +552,7 @@ router.post("/auth/login", async (req, res) => {
   if (!passwordValid) return res.status(401).json({ error: "Invalid credentials" });
 
   // Only supervisors and above can access the ops portal.
-  const OPS_ALLOWED_ROLES = ["SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER", "MANAGER"];
+  const OPS_ALLOWED_ROLES = ["SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER"];
   if (!OPS_ALLOWED_ROLES.includes(user.role)) {
     return res.status(403).json({ error: "Technicians do not have access to the Ops Portal" });
   }
@@ -990,7 +994,7 @@ router.get("/techs/:id/tickets", authenticateToken, (req, res) => {
     let whereSql;
     let params;
 
-    if (user.role === "MANAGER") {
+    if (user.role === "DISTRICT_MANAGER") {
       whereSql = "1=1";
       params = [];
     } else if (user.role === "DISTRICT_MANAGER" && dir.DISTRICT.length) {
@@ -1216,7 +1220,7 @@ router.put("/techs/:id", authenticateToken, (req, res) => {
  * Role-based filtering:
  *   - SUPERVISOR: sees techs in their supervisor territories
  *   - AREA_MANAGER: sees techs under all supervisors in their areas
- *   - DISTRICT_MANAGER / MANAGER: sees all techs
+ *   - DISTRICT_MANAGER: sees all techs
  */
 router.get("/techs-locations", authenticateToken, (req, res) => {
   try {
@@ -1355,7 +1359,7 @@ router.get("/tickets", authenticateToken, (req, res) => {
     let query = "SELECT * FROM tickets WHERE 1=1";
     const params = [];
 
-    // Territory-based visibility: non-MANAGER users only see tickets in their territory.
+    // Territory-based visibility: non-DISTRICT_MANAGER users only see tickets in their territory.
     const territoryFilter = buildTicketVisibilityFilter(db, req.user);
     query += ` AND ${territoryFilter.sql}`;
     params.push(...territoryFilter.params);
@@ -1769,8 +1773,8 @@ router.put("/tickets/:id/status", authenticateToken, (req, res) => {
       return res.status(403).json({ error: "Access denied — ticket outside your territory" });
     }
 
-    // Enforce locator status machine. MANAGER can bypass for admin overrides.
-    if (locatorStatus && req.user.role !== "MANAGER") {
+    // Enforce locator status machine. DISTRICT_MANAGER can bypass for admin overrides.
+    if (locatorStatus && req.user.role !== "DISTRICT_MANAGER") {
       const valid = isValidLocatorTransition(ticket.locator_status, locatorStatus);
       if (!valid) {
         return res.status(400).json({
@@ -1963,7 +1967,7 @@ router.get("/customers/summary", authenticateToken, (req, res) => {
 // ---------- user management (admin) ----------
 
 function requireRole(minRole) {
-  const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER', 'MANAGER'];
+  const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER'];
   return (req, res, next) => {
     const userRole = req.user?.role;
     if (!userRole) return res.status(401).json({ error: 'Unauthorized' });
@@ -1993,7 +1997,7 @@ router.get("/users", authenticateToken, requireRole('SUPERVISOR'), (req, res) =>
       query += ` AND (area_id IN (SELECT id FROM areas WHERE manager_id = ?) OR supervisor_id IN (SELECT id FROM users WHERE supervisor_id = ?) OR id = ?)`;
       params.push(viewerId, viewerId, viewerId);
     }
-    // MANAGER can see all users (no filter)
+    // DISTRICT_MANAGER can see all users (no filter)
 
     if (role) {
       query += ` AND role = ?`;
@@ -2078,7 +2082,7 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
     }
 
     // Validate role hierarchy (now includes DISTRICT_MANAGER)
-    const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER', 'MANAGER'];
+    const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER'];
     if (!hierarchy.includes(role)) {
       return res.status(400).json({ error: "Invalid role" });
     }
@@ -2092,12 +2096,12 @@ router.post("/users", authenticateToken, requireRole('SUPERVISOR'), async (req, 
         return res.status(403).json({ error: "Can only assign users to yourself as supervisor" });
       }
     } else if (viewerRole === 'AREA_MANAGER') {
-      if (['MANAGER', 'DISTRICT_MANAGER', 'AREA_MANAGER'].includes(role)) {
-        return res.status(403).json({ error: "Area managers cannot create area/district/system managers" });
+      if (['DISTRICT_MANAGER', 'AREA_MANAGER'].includes(role)) {
+        return res.status(403).json({ error: "Area managers cannot create area/district managers" });
       }
     } else if (viewerRole === 'DISTRICT_MANAGER') {
-      if (['MANAGER', 'DISTRICT_MANAGER'].includes(role)) {
-        return res.status(403).json({ error: "Only system managers can create district/system managers" });
+      if (['DISTRICT_MANAGER'].includes(role)) {
+        return res.status(403).json({ error: "Only system administrators can create district managers" });
       }
     }
 
@@ -2228,8 +2232,8 @@ router.patch("/users/:id", authenticateToken, requireRole('SUPERVISOR'), async (
         return res.status(403).json({ error: "Can only assign tech/trainee/trainer roles" });
       }
     } else if (viewerRole === 'AREA_MANAGER') {
-      if (role === 'MANAGER') {
-        return res.status(403).json({ error: "Cannot promote to manager" });
+      if (role === 'DISTRICT_MANAGER') {
+        return res.status(403).json({ error: "Cannot promote to district manager" });
       }
     }
 
@@ -2288,7 +2292,7 @@ router.post("/users/:id/reset-password", authenticateToken, requireRole('SUPERVI
     if (!user) return res.status(404).json({ error: "User not found" });
 
     // Authorization: cannot reset a superior's password
-    const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'MANAGER'];
+    const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER'];
     if (hierarchy.indexOf(user.role) > hierarchy.indexOf(viewerRole)) {
       return res.status(403).json({ error: "Cannot reset password for a superior role" });
     }
@@ -2317,7 +2321,7 @@ router.delete("/users/:id", authenticateToken, requireRole('SUPERVISOR'), (req, 
     const { id } = req.params;
     const viewerRole = req.user.role;
     const viewerId = req.user.id;
-    const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER', 'MANAGER'];
+    const hierarchy = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER'];
 
     const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -2387,7 +2391,7 @@ router.patch("/tickets/:id/assign", authenticateToken, requireRole('SUPERVISOR')
         return res.status(403).json({ error: "Can only assign to techs in your areas" });
       }
     }
-    // MANAGER can assign to anyone
+    // DISTRICT_MANAGER can assign to anyone
 
     const result = assignTicketInternal(id, assignedTechId, viewerId);
     if (!result.ok) {
@@ -2423,7 +2427,7 @@ router.patch("/tickets/:id/unassign", authenticateToken, requireRole('SUPERVISOR
         return res.status(403).json({ error: "Can only unassign tickets from your techs" });
       }
     }
-    // AREA_MANAGER and MANAGER can unassign any
+    // AREA_MANAGER and DISTRICT_MANAGER can unassign any
 
     // Set assigned_tech_id to NULL and update version
     const now = Date.now();
@@ -2452,9 +2456,9 @@ router.patch("/tickets/:id/unassign", authenticateToken, requireRole('SUPERVISOR
 // ---------- areas management ----------
 
 // Helper: get area ids the user has access to
-// MANAGER sees all; others see only areas in user_areas table assigned to them
+// DISTRICT_MANAGER sees all; others see only areas in user_areas table assigned to them
 function getAccessibleAreaIds(userId, userRole) {
-  if (userRole === 'MANAGER') {
+  if (userRole === 'DISTRICT_MANAGER') {
     return db.prepare("SELECT id FROM areas WHERE active = 1").all().map(a => a.id);
   }
   return db.prepare(`
@@ -2471,7 +2475,7 @@ router.get("/areas", authenticateToken, (req, res) => {
     const { all } = req.query; // ?all=1 returns all areas (for managers)
 
     let areas;
-    if (viewerRole === 'MANAGER' || all === '1') {
+    if (viewerRole === 'DISTRICT_MANAGER' || all === '1') {
       areas = db.prepare(`
         SELECT a.*, u.name as manager_name,
                (SELECT COUNT(*) FROM users u2 WHERE u2.area_id = a.id AND u2.is_active = 1 AND u2.role IN ('TRAINEE','TRAINER','TECH')) as tech_count
@@ -2532,7 +2536,7 @@ router.get("/areas/:id/details", authenticateToken, (req, res) => {
       WHERE ua.area_id = ? AND u.is_active = 1
       ORDER BY
         CASE u.role
-          WHEN 'MANAGER' THEN 1
+          WHEN 'DISTRICT_MANAGER' THEN 1
           WHEN 'AREA_MANAGER' THEN 2
           WHEN 'SUPERVISOR' THEN 3
           WHEN 'TRAINER' THEN 4
@@ -2693,9 +2697,9 @@ router.patch("/areas/:id", authenticateToken, requireRole('AREA_MANAGER'), (req,
     const area = db.prepare("SELECT * FROM areas WHERE id = ?").get(id);
     if (!area) return res.status(404).json({ error: "Area not found" });
 
-    // Only managers can change area manager
-    if (managerId !== undefined && viewerRole !== 'MANAGER') {
-      return res.status(403).json({ error: "Only managers can change area managers" });
+    // Only district managers can change area manager
+    if (managerId !== undefined && viewerRole !== 'DISTRICT_MANAGER') {
+      return res.status(403).json({ error: "Only district managers can change area managers" });
     }
 
     const updates = [];
@@ -2718,6 +2722,457 @@ router.patch("/areas/:id", authenticateToken, requireRole('AREA_MANAGER'), (req,
   } catch (error) {
     console.error("[OPS Areas] Error updating area:", error);
     res.status(500).json({ error: "Failed to update area" });
+  }
+});
+
+// ---------- me (scoped overview / techs / teams) ----------
+
+/**
+ * GET /api/ops/me/overview
+ * Returns a scoped overview for the authenticated user's territory hierarchy.
+ */
+router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const techIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    const now = Date.now();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTodayMs = startOfToday.getTime();
+
+    if (techIds.length === 0) {
+      return res.json(toOpsOverview({
+        techs: { totalTechs: 0, clockedIn: 0, enroute: 0, onsite: 0, paused: 0, onLunch: 0, onPersonal: 0 },
+        tickets: { open: 0, overdue: 0, dueSoon: 0, completedToday: 0, totalFootageToday: 0, highPriority: 0 },
+        needsAttention: [],
+        activeTechs: [],
+        teamSummary: { totalWorkedMinutes: 0, totalCompletedTickets: 0, totalFootage: 0, openBacklog: 0 },
+      }));
+    }
+
+    const ph = techIds.map(() => "?").join(",");
+
+    // Tech counts by clock state
+    let clockedIn = 0, enroute = 0, onsite = 0, paused = 0, onLunch = 0, onPersonal = 0;
+    const activeTechSummaries = [];
+    for (const tid of techIds) {
+      const state = getLiveClockState(tid);
+      if (state.clockStatus === "CLOCKED_IN") clockedIn += 1;
+      else if (state.clockStatus === "ON_LUNCH") onLunch += 1;
+      else if (state.clockStatus === "ON_PERSONAL") onPersonal += 1;
+
+      const currentTicket = getTechCurrentTicket(tid);
+      if (currentTicket?.locatorStatus === "ENROUTE") enroute += 1;
+      else if (currentTicket?.locatorStatus === "ONSITE") onsite += 1;
+      else if (currentTicket?.locatorStatus === "PAUSED") paused += 1;
+
+      // Build TechOpsSummary for clocked-in techs
+      if (state.clockStatus === "CLOCKED_IN" || state.clockStatus === "ON_LUNCH" || state.clockStatus === "ON_PERSONAL") {
+        const userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(tid);
+        const prod = computeTechProductivity(tid, startOfTodayMs, now);
+        const activeTicketRow = currentTicket
+          ? db.prepare("SELECT id, ticket_number, address, locator_status, due_at FROM tickets WHERE id = ?").get(currentTicket.id)
+          : null;
+        const assignedCounts = getTechAssignedCounts(tid, now);
+        activeTechSummaries.push(toTechOpsSummary(userRow, state, prod, activeTicketRow, assignedCounts));
+      }
+    }
+
+    // Ticket counts
+    const ticketCounts = db.prepare(`
+      SELECT
+        SUM(CASE WHEN locator_status NOT IN ('CLOSED','UNABLE') THEN 1 ELSE 0 END) as open_count,
+        SUM(CASE WHEN closed_at IS NOT NULL AND closed_at >= ? AND closed_at <= ? THEN 1 ELSE 0 END) as completed_today
+      FROM tickets
+      WHERE assigned_tech_id IN (${ph})
+    `).get(startOfTodayMs, now, ...techIds);
+
+    // Compute overdue / dueSoon using due urgency
+    const openTickets = db.prepare(`
+      SELECT id, due_at FROM tickets
+      WHERE assigned_tech_id IN (${ph})
+        AND locator_status NOT IN ('CLOSED','UNABLE')
+        AND due_at IS NOT NULL
+    `).all(...techIds);
+
+    let overdue = 0;
+    let dueSoon = 0;
+    const needsAttention = [];
+    for (const t of openTickets) {
+      const urgency = computeDueUrgency(t.due_at, now);
+      if (urgency === DUE_URGENCY.OVERDUE) {
+        overdue += 1;
+        const ticketRow = db.prepare("SELECT id, ticket_number, address FROM tickets WHERE id = ?").get(t.id);
+        needsAttention.push({
+          type: 'OVERDUE',
+          id: t.id,
+          label: ticketRow?.ticket_number || t.id,
+          detail: ticketRow?.address || 'Overdue ticket',
+        });
+      } else if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS || urgency === DUE_URGENCY.DUE_TODAY) {
+        dueSoon += 1;
+      }
+    }
+
+    // Stalled tickets (ONSITE for >4hrs)
+    const stalledTickets = db.prepare(`
+      SELECT id, ticket_number, payload_json FROM tickets
+      WHERE assigned_tech_id IN (${ph})
+        AND locator_status = 'ONSITE'
+    `).all(...techIds);
+    for (const t of stalledTickets) {
+      const payload = parseJson(t.payload_json);
+      if (payload.onsiteStartedAt && (now - payload.onsiteStartedAt) > 4 * 60 * 60 * 1000) {
+        needsAttention.push({
+          type: 'STALLED',
+          id: t.id,
+          label: t.ticket_number,
+          detail: 'Onsite for over 4 hours',
+        });
+      }
+    }
+
+    // High priority tickets (open with due urgency OVERDUE or DUE_WITHIN_2_HOURS)
+    const highPriority = overdue;
+
+    // Footage today
+    const footageRow = db.prepare(`
+      SELECT COALESCE(SUM(footage_delta), 0) as footage
+      FROM utility_production_ledger
+      WHERE user_id IN (${ph}) AND occurred_at >= ? AND occurred_at <= ?
+    `).get(...techIds, startOfTodayMs, now);
+
+    // Team summary
+    let totalWorkedMs = 0;
+    let totalCompleted = 0;
+    let totalFootage = 0;
+    for (const tid of techIds) {
+      const prod = computeTechProductivity(tid, startOfTodayMs, now);
+      totalWorkedMs += prod.workedMs || 0;
+      totalCompleted += prod.ticketsClosedInRange || 0;
+      totalFootage += prod.footage || 0;
+    }
+
+    const openBacklog = (ticketCounts.open_count || 0);
+
+    res.json(toOpsOverview({
+      techs: {
+        totalTechs: techIds.length,
+        clockedIn,
+        enroute,
+        onsite,
+        paused,
+        onLunch,
+        onPersonal,
+      },
+      tickets: {
+        open: ticketCounts.open_count || 0,
+        overdue,
+        dueSoon,
+        completedToday: ticketCounts.completed_today || 0,
+        totalFootageToday: footageRow.footage || 0,
+        highPriority,
+      },
+      needsAttention,
+      activeTechs: activeTechSummaries,
+      teamSummary: {
+        totalWorkedMinutes: Math.round(totalWorkedMs / 60000),
+        totalCompletedTickets: totalCompleted,
+        totalFootage,
+        openBacklog,
+      },
+    }));
+  } catch (error) {
+    console.error("[OPS Me] Error fetching overview:", error);
+    res.status(500).json({ error: "Failed to fetch overview" });
+  }
+});
+
+/**
+ * Helper: get assigned ticket counts (open, overdue, dueSoon) for a tech.
+ */
+function getTechAssignedCounts(techId, now) {
+  const rows = db.prepare(`
+    SELECT due_at FROM tickets
+    WHERE assigned_tech_id = ? AND locator_status NOT IN ('CLOSED','UNABLE')
+  `).all(techId);
+
+  let open = rows.length;
+  let overdue = 0;
+  let dueSoon = 0;
+  for (const r of rows) {
+    if (r.due_at) {
+      const urgency = computeDueUrgency(r.due_at, now);
+      if (urgency === DUE_URGENCY.OVERDUE) overdue += 1;
+      else if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS || urgency === DUE_URGENCY.DUE_TODAY) dueSoon += 1;
+    }
+  }
+  return { open, overdue, dueSoon };
+}
+
+/**
+ * GET /api/ops/me/techs
+ * Returns TechOpsSummary[] for all techs under the caller's hierarchy.
+ * Supports ?status= and pagination ?limit=&offset=.
+ */
+router.get("/me/techs", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const { status, limit = 50, offset = 0 } = req.query;
+    const now = Date.now();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTodayMs = startOfToday.getTime();
+
+    const techIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    if (techIds.length === 0) {
+      return res.json({ techs: [] });
+    }
+
+    const summaries = [];
+    for (const tid of techIds) {
+      const userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(tid);
+      if (!userRow) continue;
+
+      const clockState = getLiveClockState(tid);
+
+      // Filter by status if requested
+      if (status && status !== 'all') {
+        if (status === 'clocked_in' && clockState.clockStatus !== 'CLOCKED_IN') continue;
+        else if (status === 'onsite' && clockState.clockStatus !== 'CLOCKED_IN') continue;
+        else if (status === 'enroute' && clockState.clockStatus !== 'CLOCKED_IN') continue;
+        else if (status === 'paused' && clockState.clockStatus !== 'CLOCKED_IN') continue;
+      }
+
+      const prod = computeTechProductivity(tid, startOfTodayMs, now);
+      const currentTicket = getTechCurrentTicket(tid);
+      const activeTicketRow = currentTicket
+        ? db.prepare("SELECT id, ticket_number, address, locator_status, due_at FROM tickets WHERE id = ?").get(currentTicket.id)
+        : null;
+      const assignedCounts = getTechAssignedCounts(tid, now);
+
+      // For status filtering by locator status
+      if (status === 'onsite' && currentTicket?.locatorStatus !== 'ONSITE') continue;
+      if (status === 'enroute' && currentTicket?.locatorStatus !== 'ENROUTE') continue;
+      if (status === 'paused' && currentTicket?.locatorStatus !== 'PAUSED') continue;
+
+      summaries.push(toTechOpsSummary(userRow, clockState, prod, activeTicketRow, assignedCounts));
+    }
+
+    // Pagination
+    const lim = parseInt(limit, 10) || 50;
+    const off = parseInt(offset, 10) || 0;
+    const paginated = summaries.slice(off, off + lim);
+
+    res.json({
+      techs: paginated,
+      pagination: {
+        total: summaries.length,
+        limit: lim,
+        offset: off,
+      },
+    });
+  } catch (error) {
+    console.error("[OPS Me] Error fetching techs:", error);
+    res.status(500).json({ error: "Failed to fetch techs" });
+  }
+});
+
+/**
+ * GET /api/ops/me/teams
+ * Returns the territory hierarchy tree for the caller.
+ */
+router.get("/me/teams", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const dir = getUserDirectTerritories(db, req.user.id);
+    const role = req.user.role;
+
+    // Determine which top-level territories to start from
+    let topTerritoryIds = [];
+    let topType = null;
+
+    if (role === 'DISTRICT_MANAGER' && dir.DISTRICT.length) {
+      topTerritoryIds = dir.DISTRICT;
+      topType = 'DISTRICT';
+    } else if (dir.AREA.length) {
+      topTerritoryIds = dir.AREA;
+      topType = 'AREA';
+    } else if (dir.SUPERVISOR_TERRITORY.length) {
+      topTerritoryIds = dir.SUPERVISOR_TERRITORY;
+      topType = 'SUPERVISOR_TERRITORY';
+    } else if (dir.TECH_TERRITORY.length) {
+      topTerritoryIds = dir.TECH_TERRITORY;
+      topType = 'TECH_TERRITORY';
+    }
+
+    if (topTerritoryIds.length === 0) {
+      return res.json({ teams: [] });
+    }
+
+    // Build tree recursively
+    function buildNode(territoryId) {
+      const t = db.prepare(`
+        SELECT id, code, name, type FROM territories WHERE id = ?
+      `).get(territoryId);
+      if (!t) return null;
+
+      const children = db.prepare(`
+        SELECT id FROM territories WHERE parent_territory_id = ? AND active = 1 ORDER BY name
+      `).all(territoryId);
+
+      // Count techs assigned to this territory or its descendants
+      let techCount = 0;
+      if (t.type === 'TECH_TERRITORY') {
+        techCount = db.prepare(`
+          SELECT COUNT(DISTINCT u.id) as c
+          FROM users u
+          JOIN user_territory_assignments uta ON uta.user_id = u.id
+          WHERE uta.territory_id = ?
+            AND (uta.end_date IS NULL OR uta.end_date > ?)
+            AND u.role IN ('TECH','TRAINEE','TRAINER')
+            AND u.is_active = 1
+        `).get(territoryId, Date.now()).c;
+      } else {
+        // Count techs in descendant tech territories
+        const techIds = getTechIdsForTerritorySubtree(db, territoryId);
+        techCount = techIds.length;
+      }
+
+      // Find supervisor name for supervisor territories
+      let supervisorName = undefined;
+      if (t.type === 'SUPERVISOR_TERRITORY') {
+        const sup = db.prepare(`
+          SELECT u.name FROM users u
+          JOIN user_territory_assignments uta ON uta.user_id = u.id
+          WHERE uta.territory_id = ?
+            AND uta.assignment_type IN ('OWNER','MANAGER')
+            AND (uta.end_date IS NULL OR uta.end_date > ?)
+            AND u.is_active = 1
+            AND u.role = 'SUPERVISOR'
+          LIMIT 1
+        `).get(territoryId, Date.now());
+        supervisorName = sup?.name;
+      }
+
+      return {
+        id: t.id,
+        code: t.code,
+        name: t.name,
+        type: t.type,
+        children: children.map(c => buildNode(c.id)).filter(Boolean),
+        techCount,
+        supervisorName,
+      };
+    }
+
+    const teams = topTerritoryIds.map(tid => buildNode(tid)).filter(Boolean);
+    res.json({ teams });
+  } catch (error) {
+    console.error("[OPS Me] Error fetching teams:", error);
+    res.status(500).json({ error: "Failed to fetch teams" });
+  }
+});
+
+/**
+ * Helper: get all tech user IDs in the subtree under a territory.
+ */
+function getTechIdsForTerritorySubtree(db, territoryId) {
+  // Collect all descendant TECH_TERRITORY ids
+  const techTerritoryIds = [];
+  function collectDescendants(tid) {
+    const children = db.prepare(`
+      SELECT id, type FROM territories WHERE parent_territory_id = ? AND active = 1
+    `).all(tid);
+    for (const c of children) {
+      if (c.type === 'TECH_TERRITORY') techTerritoryIds.push(c.id);
+      else collectDescendants(c.id);
+    }
+  }
+  collectDescendants(territoryId);
+
+  if (techTerritoryIds.length === 0) return [];
+  const ph = techTerritoryIds.map(() => "?").join(",");
+  return db.prepare(`
+    SELECT DISTINCT u.id
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id IN (${ph})
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.role IN ('TECH','TRAINEE','TRAINER')
+      AND u.is_active = 1
+  `).all(...techTerritoryIds, Date.now()).map(r => r.id);
+}
+
+// ---------- map ----------
+
+/**
+ * GET /api/ops/map
+ * Returns ticket markers with coordinates, scoped to the caller's visibility.
+ * Supports ?techId=, ?dueUrgency=, ?active=true filters.
+ */
+router.get("/map", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const { techId, dueUrgency, active } = req.query;
+    const now = Date.now();
+
+    // Scope tickets by visibility filter
+    const territoryFilter = buildTicketVisibilityFilter(db, req.user);
+
+    let query = `
+      SELECT id, ticket_number, address, lat, lng, locator_status,
+             assigned_tech_id, due_at, ticket_type, status
+      FROM tickets
+      WHERE lat IS NOT NULL AND lng IS NOT NULL
+        AND ${territoryFilter.sql}
+    `;
+    const params = [...territoryFilter.params];
+
+    if (techId) {
+      query += " AND assigned_tech_id = ?";
+      params.push(techId);
+    }
+
+    if (active === 'true') {
+      query += " AND locator_status IN ('ENROUTE','ONSITE','PAUSED')";
+    }
+
+    query += " ORDER BY updated_at DESC LIMIT 5000";
+
+    const tickets = db.prepare(query).all(...params);
+
+    // Build tech lookup for all techs in scope
+    const techIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    const techLookup = {};
+    if (techIds.length > 0) {
+      const tph = techIds.map(() => "?").join(",");
+      const techRows = db.prepare(`
+        SELECT id, name FROM users WHERE id IN (${tph}) AND is_active = 1
+      `).all(...techIds);
+      for (const t of techRows) {
+        techLookup[t.id] = { id: t.id, name: t.name };
+      }
+    }
+
+    // Map to DTOs and filter
+    let markers = tickets
+      .map(t => toOpsMapMarker(t, techLookup))
+      .filter(Boolean);
+
+    // Filter by dueUrgency if requested
+    if (dueUrgency) {
+      markers = markers.filter(m => m.dueUrgency === dueUrgency);
+    }
+
+    // Compute centroid
+    let center = { lat: 32.7767, lng: -96.7970 }; // Default: Dallas, TX
+    if (markers.length > 0) {
+      const sumLat = markers.reduce((sum, m) => sum + m.lat, 0);
+      const sumLng = markers.reduce((sum, m) => sum + m.lng, 0);
+      center = { lat: sumLat / markers.length, lng: sumLng / markers.length };
+    }
+
+    res.json({ markers, center });
+  } catch (error) {
+    console.error("[OPS Map] Error fetching map markers:", error);
+    res.status(500).json({ error: "Failed to fetch map markers" });
   }
 });
 

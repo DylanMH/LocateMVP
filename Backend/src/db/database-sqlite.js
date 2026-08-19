@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT,
-  role TEXT NOT NULL CHECK (role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'MANAGER')),
+  role TEXT NOT NULL CHECK (role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER')),
   title TEXT,
   phone TEXT,
   area_id TEXT,
@@ -444,6 +444,45 @@ ensureColumnExists("areas", "color", "ALTER TABLE areas ADD COLUMN color TEXT DE
       );
       INSERT INTO users_new (id, name, email, password_hash, role, title, phone, area_id, supervisor_id, is_active, password_must_change, last_login_at, created_at, updated_at)
         SELECT id, name, email, password_hash, role, title, phone, area_id, supervisor_id, is_active, password_must_change, last_login_at, created_at, updated_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+    `);
+  });
+  tx();
+  db.pragma('foreign_keys = ON');
+})();
+
+// Users role CHECK migration — remove MANAGER (DISTRICT_MANAGER is now top role).
+// SQLite can't ALTER a CHECK; rebuild the table in place.
+(function migrateUsersRoleCheckRemoveManager() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (!row?.sql || !row.sql.includes("'MANAGER'")) return;
+  console.log('[Database] Migrating users.role CHECK to remove MANAGER');
+  db.pragma('foreign_keys = OFF');
+  const tx = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE users_new (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT,
+        role TEXT NOT NULL CHECK (role IN ('TRAINEE','TRAINER','TECH','SUPERVISOR','AREA_MANAGER','DISTRICT_MANAGER')),
+        title TEXT,
+        phone TEXT,
+        area_id TEXT,
+        supervisor_id TEXT,
+        is_active INTEGER DEFAULT 1,
+        password_must_change INTEGER DEFAULT 0,
+        last_login_at INTEGER,
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        FOREIGN KEY (supervisor_id) REFERENCES users(id)
+      );
+      INSERT INTO users_new (id, name, email, password_hash, role, title, phone, area_id, supervisor_id, is_active, password_must_change, last_login_at, created_at, updated_at)
+        SELECT id, name, email, password_hash,
+          CASE WHEN role = 'MANAGER' THEN 'DISTRICT_MANAGER' ELSE role END,
+          title, phone, area_id, supervisor_id, is_active, password_must_change, last_login_at, created_at, updated_at
+        FROM users;
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
     `);

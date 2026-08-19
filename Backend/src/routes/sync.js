@@ -319,8 +319,8 @@ router.post("/events", (req, res) => {
       const { type, requestId, payload } = event;
 
       // Validate that the event's userId matches the authenticated user
-      // (except for MANAGER who can act on behalf of techs)
-      if (payload?.userId && authUser.role !== "MANAGER" && authUser.role !== "SUPERVISOR") {
+      // (except for DISTRICT_MANAGER who can act on behalf of techs)
+      if (payload?.userId && authUser.role !== "DISTRICT_MANAGER" && authUser.role !== "SUPERVISOR") {
         if (payload.userId !== authUser.id) {
           const errorResult = {
             requestId,

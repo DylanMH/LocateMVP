@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { View, Text, ActivityIndicator } from "react-native";
 import { AuthProvider, useAuth } from "../src/features/auth/AuthContext";
+import { getRoleShell } from "../src/features/auth/useRoleShell";
 import { colors } from "../src/ui/colors";
 import { database } from "../src/db/database";
 import DaySession from "../src/db/models/DaySession";
@@ -57,20 +58,40 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
     const inAuthGroup = segments[0] === "login";
     const inTabsGroup = segments[0] === "(tabs)";
+    const inSupervisorGroup = segments[0] === "(supervisor)";
+    const inManagerGroup = segments[0] === "(manager)";
     const inTicketDetails = segments[0] === "ticket-details";
+
+    const shell = getRoleShell(user?.role);
+    const homeRoute =
+      shell === "tech"
+        ? "/(tabs)/tickets"
+        : shell === "supervisor"
+          ? "/(supervisor)/overview"
+          : shell === "manager"
+            ? "/(manager)/overview"
+            : "/(tabs)/tickets";
+    const validShellGroup =
+      shell === "tech"
+        ? inTabsGroup
+        : shell === "supervisor"
+          ? inSupervisorGroup
+          : shell === "manager"
+            ? inManagerGroup
+            : inTabsGroup;
 
     if (!user && !inAuthGroup) {
       // Redirect to login if not authenticated
       console.log("[AuthGuard] Redirecting to login (no user)");
       router.replace("/login" as any);
     } else if (user && inAuthGroup) {
-      // Redirect to tickets if already authenticated and on login page
-      console.log("[AuthGuard] Redirecting to tickets (user logged in)");
-      router.replace("/(tabs)/tickets" as any);
-    } else if (user && !inTabsGroup && !inTicketDetails) {
-      // Redirect to tickets if authenticated but not in tabs or ticket details (e.g., on index)
-      console.log("[AuthGuard] Redirecting to tickets (not in tabs)");
-      router.replace("/(tabs)/tickets" as any);
+      // Redirect to the correct shell if already authenticated and on login page
+      console.log("[AuthGuard] Redirecting to shell (user logged in):", shell);
+      router.replace(homeRoute as any);
+    } else if (user && !validShellGroup && !inTicketDetails) {
+      // Redirect to the correct shell if authenticated but not in their shell group
+      console.log("[AuthGuard] Redirecting to shell (wrong group):", shell);
+      router.replace(homeRoute as any);
     }
   }, [user, isLoading, segments, router]);
 
@@ -180,6 +201,8 @@ export default function RootLayout() {
           >
             <Stack.Screen name="login" options={{ headerShown: false }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="(supervisor)" options={{ headerShown: false }} />
+            <Stack.Screen name="(manager)" options={{ headerShown: false }} />
             <Stack.Screen
               name="ticket-details/[id]"
               options={{ headerShown: true, title: "Ticket Details" }}

@@ -353,9 +353,9 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'Missing required fields: name, email, role' });
   }
 
-  const validRoles = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'MANAGER'];
+  const validRoles = ['TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER'];
   if (!validRoles.includes(role)) {
-    return res.status(400).json({ error: 'Invalid role. Must be TRAINEE, TRAINER, TECH, SUPERVISOR, AREA_MANAGER, or MANAGER' });
+    return res.status(400).json({ error: 'Invalid role. Must be TRAINEE, TRAINER, TECH, SUPERVISOR, AREA_MANAGER, or DISTRICT_MANAGER' });
   }
 
   const userId = `user-${uuidv4()}`;

@@ -26,13 +26,14 @@ import {
   MapIcon,
 } from "@heroicons/react/24/outline";
 import type { TicketDetailResponse } from "../../types/ops";
-import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
 import { getDueUrgencyBucket, getDueUrgencyTailwind, getDueUrgencyColor, DUE_URGENCY_LABELS, DUE_URGENCY_COLORS } from "../../utils/dueUrgency";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, Polyline, useMap } from "react-leaflet";
+import { useEffect, useMemo, useState } from "react";
+import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker, Polyline } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { allocationLabel, allocationColor } from "../../lib/allocationStyles";
+import { flattenTerritories, getBounds, makeTicketIcon, makeTechLocationIcon, MapRefocus } from "../../lib/mapUtils";
 
 delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -51,97 +52,6 @@ const TYPE_LABELS: Record<string, string> = {
   RECALL: "R",
   NO_RESPONSE: "NR",
 };
-
-const ALLOCATION_LABELS: Record<string, string> = {
-  locating: "Locating",
-  training: "Training",
-  truck_support: "Truck Support",
-  meeting: "Meeting",
-  oncall: "On Call",
-  other: "Other",
-};
-
-const ALLOCATION_COLORS: Record<string, string> = {
-  locating: "#10B981",
-  training: "#3B82F6",
-  truck_support: "#F59E0B",
-  meeting: "#8B5CF6",
-  oncall: "#EC4899",
-  other: "#6B7280",
-};
-
-function allocationLabel(v: string | null | undefined): string {
-  if (!v) return "Locating";
-  return ALLOCATION_LABELS[v] || v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function allocationColor(v: string | null | undefined): string {
-  if (!v) return ALLOCATION_COLORS.locating;
-  return ALLOCATION_COLORS[v] || ALLOCATION_COLORS.other;
-}
-
-function makeTicketIcon(color: string, label: string) {
-  return L.divIcon({
-    className: "ticket-div-icon",
-    html: `<div style="
-      width: 22px; height: 22px; border-radius: 50%;
-      background: ${color}; border: 2px solid #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 9px; font-weight: 700; color: #fff;
-      font-family: system-ui, sans-serif; line-height: 1;
-    ">${label}</div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
-function makeTechLocationIcon(name: string) {
-  const initials = name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-  return L.divIcon({
-    className: "tech-live-div-icon",
-    html: `<div style="
-      width: 28px; height: 28px; border-radius: 50%;
-      background: #10B981; border: 3px solid #fff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 800; color: #fff;
-      font-family: system-ui, sans-serif; line-height: 1;
-    ">${initials}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  });
-}
-
-function flattenTerritories(nodes: TerritoryNode[]): TerritoryNode[] {
-  const flattened: TerritoryNode[] = [];
-  const visit = (node: TerritoryNode) => {
-    flattened.push(node);
-    node.children.forEach(visit);
-  };
-  nodes.forEach(visit);
-  return flattened;
-}
-
-function getBounds(territory: TerritoryNode): [[number, number], [number, number]] | null {
-  if (
-    territory.bboxSouth == null ||
-    territory.bboxWest == null ||
-    territory.bboxNorth == null ||
-    territory.bboxEast == null
-  ) {
-    return null;
-  }
-  return [
-    [territory.bboxSouth, territory.bboxWest],
-    [territory.bboxNorth, territory.bboxEast],
-  ];
-}
 
 // Parse ticket scope bounds from payloadJson (same logic as mobile app)
 function getScopeBounds(payloadJson?: string): {
@@ -173,19 +83,6 @@ function getAllocatedMinutesFromPayload(payloadJson?: string): number {
   } catch {
     return 0;
   }
-}
-
-function MapRefocus({ center }: { center: [number, number] | null }) {
-  const map = useMap();
-  const lastKey = useRef("");
-  if (center) {
-    const key = `${center[0].toFixed(3)},${center[1].toFixed(3)}`;
-    if (key !== lastKey.current) {
-      lastKey.current = key;
-      map.flyTo(center, Math.max(map.getZoom(), 11), { duration: 0.8 });
-    }
-  }
-  return null;
 }
 
 export function TechDetailPage() {
@@ -706,7 +603,7 @@ export function TechDetailPage() {
                       scrollWheelZoom
                       style={{ height: "100%", width: "100%" }}
                     >
-                      <MapRefocus center={mapCenter} />
+                      <MapRefocus center={mapCenter} minZoom={11} />
                       <LayersControl position="topright">
                         <LayersControl.BaseLayer checked name="Street">
                           <TileLayer

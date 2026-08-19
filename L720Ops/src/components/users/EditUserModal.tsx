@@ -29,7 +29,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "TECH", label: "Technician" },
   { value: "SUPERVISOR", label: "Supervisor" },
   { value: "AREA_MANAGER", label: "Area Manager" },
-  { value: "MANAGER", label: "Manager" },
+  { value: "DISTRICT_MANAGER", label: "District Manager" },
 ];
 
 export function EditUserModal({
@@ -143,10 +143,10 @@ export function EditUserModal({
   };
 
   const canEditRole = () => {
-    const hierarchy = ["TRAINEE", "TRAINER", "TECH", "SUPERVISOR", "AREA_MANAGER", "MANAGER"];
+    const hierarchy = ["TRAINEE", "TRAINER", "TECH", "SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER"];
     const currentIdx = hierarchy.indexOf(currentUserRole);
     const userIdx = hierarchy.indexOf(user.role);
-    return currentIdx > userIdx || currentUserRole === "MANAGER";
+    return currentIdx > userIdx || currentUserRole === "DISTRICT_MANAGER";
   };
 
   return (

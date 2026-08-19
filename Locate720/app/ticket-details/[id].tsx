@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import withObservables from "@nozbe/with-observables";
@@ -14,6 +14,7 @@ import {
   CustomersTab,
   TimeAllocationCard,
   type CustomerMarkingByCustomerId,
+  type ScrollHandlers,
 } from "../../src/features/tickets/components/CustomersTab";
 import type { TicketPayload, TicketStatus } from "../../src/features/tickets/types";
 import { getAllocatableMinutes } from "../../src/features/tickets/utils/ticketTime";
@@ -538,6 +539,21 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   const tick = useOnsiteTick(ticket);
   const isClockedIn = useClockedInStatus(user?.id);
   const { customerMarking, setCustomerMarking } = useCustomerMarkingState(ticket);
+  const [scrollHandlers, setScrollHandlers] = useState<ScrollHandlers | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showListener = Keyboard.addListener("keyboardDidShow", (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideListener = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
+  }, []);
 
   const handleStatusChange = async (nextStatus: LocatorStatus) => {
     if (!ticket) return;
@@ -720,10 +736,13 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         ref={scrollViewRef}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        onScrollBeginDrag={scrollHandlers?.onScrollBeginDrag}
+        onScrollEndDrag={scrollHandlers?.onScrollEndDrag}
+        onMomentumScrollEnd={scrollHandlers?.onMomentumScrollEnd}
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: showFloatingTimeCard ? 8 : 16,
-          paddingBottom: 40 + insets.bottom,
+          paddingBottom: 40 + Math.max(insets.bottom, keyboardHeight),
           gap: 12,
         }}
       >
@@ -1002,6 +1021,7 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
               scrollViewRef={scrollViewRef}
               isReadOnly={isReadOnly}
               currentTechName={user?.name}
+              onScrollHandlersReady={setScrollHandlers}
             />
 
             {allCustomersCompleted && !isClosed && (

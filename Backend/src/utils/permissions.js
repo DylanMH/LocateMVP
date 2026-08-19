@@ -2,7 +2,7 @@
  * Permissions utility for role-based access control
  *
  * Role hierarchy (lowest to highest):
- *   TRAINEE < TRAINER < TECH < SUPERVISOR < AREA_MANAGER < MANAGER
+ *   TRAINEE < TRAINER < TECH < SUPERVISOR < AREA_MANAGER < DISTRICT_MANAGER
  *
  * Permission rules:
  * - Trainees: Can view own assigned tickets, limited editing
@@ -10,7 +10,7 @@
  * - Tech: Can view and manage own assigned tickets, full customer marking, clock in/out
  * - Supervisor: Can view/edit tickets in their area, manage clock time, manage field staff
  * - Area Manager: Can act across their area, view all area tickets and staff
- * - Manager: Full system access
+ * - District Manager: Full system access
  */
 
 import { canUserSeeTicket, buildTicketVisibilityFilter } from '../services/territoryService.js';
@@ -22,7 +22,6 @@ export const ROLES = {
   SUPERVISOR: 'SUPERVISOR',
   AREA_MANAGER: 'AREA_MANAGER',
   DISTRICT_MANAGER: 'DISTRICT_MANAGER',
-  MANAGER: 'MANAGER',
 };
 
 const ROLE_HIERARCHY = {
@@ -32,7 +31,6 @@ const ROLE_HIERARCHY = {
   [ROLES.SUPERVISOR]: 3,
   [ROLES.AREA_MANAGER]: 4,
   [ROLES.DISTRICT_MANAGER]: 5,
-  [ROLES.MANAGER]: 6,
 };
 
 /**
@@ -52,7 +50,7 @@ export function hasRoleLevel(userRole, minRole) {
  */
 export function canViewTicket(user, ticket, db) {
   if (!user || !ticket) return false;
-  if (user.role === ROLES.MANAGER) return true;
+  if (user.role === ROLES.DISTRICT_MANAGER) return true;
   if (db) return canUserSeeTicket(db, user, ticket);
   return ticket.assigned_tech_id === user.id;
 }
@@ -75,8 +73,8 @@ export function canCloseTicket(user, ticket) {
   // Only TECH and above can close (not TRAINEE)
   if (user.role === ROLES.TRAINEE) return false;
 
-  // Manager, Area Manager, Supervisor, District Manager can close any ticket in scope
-  if ([ROLES.MANAGER, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER, ROLES.SUPERVISOR].includes(user.role)) {
+  // District Manager, Area Manager, Supervisor can close any ticket in scope
+  if ([ROLES.DISTRICT_MANAGER, ROLES.AREA_MANAGER, ROLES.SUPERVISOR].includes(user.role)) {
     return canEditTicket(user, ticket, arguments[2]);
   }
 
@@ -97,8 +95,8 @@ export function canViewTimesheet(viewer, targetUserId) {
   // Self access
   if (viewer.id === targetUserId) return true;
 
-  // Manager can view all
-  if (viewer.role === ROLES.MANAGER) return true;
+  // District Manager can view all
+  if (viewer.role === ROLES.DISTRICT_MANAGER) return true;
 
   // Area manager can view all in their area
   // (Requires fetching target user's area)
@@ -142,7 +140,7 @@ export function getTicketVisibilityFilter(db, user) {
  */
 export function getTicketVisibilityClause(user) {
   if (!user) return '1=0';
-  if (user.role === ROLES.MANAGER) return '1=1';
+  if (user.role === ROLES.DISTRICT_MANAGER) return '1=1';
   return `assigned_tech_id = '${user.id}'`;
 }
 
@@ -151,7 +149,7 @@ export function getTicketVisibilityClause(user) {
  */
 export function getSearchScope(user) {
   switch (user.role) {
-    case ROLES.MANAGER:
+    case ROLES.DISTRICT_MANAGER:
       return { scope: 'ALL', filters: ['ticketNumber', 'address', 'contractor', 'utility', 'dateRange'] };
     case ROLES.AREA_MANAGER:
       return { scope: 'AREA', areaId: user.area_id, filters: ['ticketNumber', 'address', 'dateRange'] };
@@ -164,4 +162,40 @@ export function getSearchScope(user) {
     default:
       return { scope: 'OWN', filters: ['ticketNumber'] };
   }
+}
+
+export const PERMISSIONS = {
+  'ticket.viewOwn': [ROLES.TRAINEE, ROLES.TRAINER, ROLES.TECH],
+  'ticket.viewTeam': [ROLES.SUPERVISOR, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER],
+  'ticket.viewOrganization': [ROLES.DISTRICT_MANAGER],
+  'ticket.reassignTeam': [ROLES.SUPERVISOR, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER],
+  'ticket.closeOwn': [ROLES.TRAINEE, ROLES.TRAINER, ROLES.TECH],
+  'ticket.closeTeam': [ROLES.SUPERVISOR, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER],
+  'timesheet.viewOwn': [ROLES.TRAINEE, ROLES.TRAINER, ROLES.TECH],
+  'timesheet.viewTeam': [ROLES.SUPERVISOR, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER],
+  'timesheet.viewOrganization': [ROLES.DISTRICT_MANAGER],
+  'user.viewTeam': [ROLES.SUPERVISOR, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER],
+  'user.viewOrganization': [ROLES.DISTRICT_MANAGER],
+  'ops.viewTeam': [ROLES.SUPERVISOR, ROLES.AREA_MANAGER, ROLES.DISTRICT_MANAGER],
+  'ops.viewOrganization': [ROLES.DISTRICT_MANAGER],
+};
+
+export function hasPermission(userRole, permission) {
+  const allowedRoles = PERMISSIONS[permission];
+  if (!allowedRoles) return false;
+  return allowedRoles.includes(userRole);
+}
+
+/**
+ * Express middleware factory for permission checks.
+ * Usage: router.get('/me/techs', authenticateToken, requirePermission('ops.viewTeam'), handler)
+ */
+export function requirePermission(permission) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    if (!hasPermission(req.user.role, permission)) {
+      return res.status(403).json({ error: 'Forbidden', requiredPermission: permission });
+    }
+    next();
+  };
 }

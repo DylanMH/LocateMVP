@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
@@ -14,7 +14,7 @@ import { API_BASE_URL, ENDPOINTS } from "../../src/config/api";
 import { fetchWithTimeout } from "../../src/utils/fetchWithTimeout";
 import { getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
 import { parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
-import { getAllocationLabel } from "../../src/features/timesheet/components/ReasonSelectorModal";
+import { formatDuration } from "../../src/utils/formatDuration";
 
 // ── Types ──────────────────────────────────────────────────
 interface ProfileMetrics {
@@ -108,14 +108,6 @@ async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapsh
 }
 
 // ── Formatting ─────────────────────────────────────────────
-function formatDuration(ms: number): string {
-  const totalMinutes = Math.max(0, Math.floor(ms / 60000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
-
 function formatRate(value: number): string {
   return Number.isFinite(value) ? value.toFixed(1) : "0.0";
 }
@@ -144,27 +136,9 @@ export default function ProfileScreen() {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const [localClockMs, setLocalClockMs] = useState(0);
   const [hasActiveSession, setHasActiveSession] = useState(false);
-  const [allocationType, setAllocationType] = useState<string | null>(null);
   const [todayKey, setTodayKey] = useState(getTodayDateString());
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const displayedClockMs = Math.max(metrics.accumulatedClockInTimeMs, localClockMs);
-
-  // Live elapsed timer while clocked in.
-  useEffect(() => {
-    if (hasActiveSession) {
-      setElapsedSec(Math.floor(localClockMs / 1000));
-      timerRef.current = setInterval(() => {
-        setElapsedSec((s) => s + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [hasActiveSession, localClockMs]);
 
   const clockOutBeforeSignOut = async () => {
     if (!user) return;
@@ -208,7 +182,6 @@ export default function ProfileScreen() {
       });
       setLocalClockMs(fallback.accumulatedClockInTimeMs);
       setHasActiveSession(fallback.hasActiveSession);
-      setAllocationType(fallback.allocationType);
     } catch (error) {
       logger.error("[Profile] Failed to load metrics:", error);
       const fallback = await buildLocalMetricsSnapshot(user.id);
@@ -225,7 +198,6 @@ export default function ProfileScreen() {
       });
       setLocalClockMs(fallback.accumulatedClockInTimeMs);
       setHasActiveSession(fallback.hasActiveSession);
-      setAllocationType(fallback.allocationType);
       setMetricsError(error instanceof Error ? `${error.message}. Showing local values.` : "Failed to load metrics");
     } finally {
       setIsRefreshing(false);
@@ -243,7 +215,6 @@ export default function ProfileScreen() {
       if (cancelled) return;
       setLocalClockMs(snap.accumulatedClockInTimeMs);
       setHasActiveSession(snap.hasActiveSession);
-      setAllocationType(snap.allocationType);
       const next = getTodayDateString();
       if (next !== todayKey) { setTodayKey(next); loadProfileMetrics(); }
     };
@@ -314,25 +285,6 @@ export default function ProfileScreen() {
             </View>
           )}
         </View>
-
-        {/* Clock Status */}
-        {hasActiveSession && (
-          <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.success + "10", borderWidth: 1, borderColor: colors.success + "20" }}>
-            <View className="flex-row items-center justify-between mb-2">
-              <Text className="text-xs font-semibold uppercase tracking-wider" style={{ color: colors.success }}>Clocked In</Text>
-              {allocationType && (
-                <View className="rounded-lg px-2 py-0.5" style={{ backgroundColor: colors.primary + "20" }}>
-                  <Text className="text-xs font-semibold" style={{ color: colors.primary }}>
-                    {getAllocationLabel(allocationType)}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text className="text-2xl font-bold" style={{ color: colors.success }}>
-              {formatDuration(elapsedSec * 1000)}
-            </Text>
-          </View>
-        )}
 
         {/* Stats Grid */}
         <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.surface }}>

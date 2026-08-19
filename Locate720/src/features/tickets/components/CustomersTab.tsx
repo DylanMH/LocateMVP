@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { colors } from "../../../ui/colors";
 import { getAllocatableMinutes, type TicketPayload } from "../utils/ticketTime";
+import { formatDuration } from "../../../utils/formatDuration";
 import type { LocatorStatus } from "../domain/statusMachine";
 import type {
   Customer,
@@ -23,6 +24,12 @@ import { getUtilityColor } from "../utils/ticketPresentation";
 
 export type { CustomerMarkingByCustomerId, CustomerMarkingData };
 
+export type ScrollHandlers = {
+  onScrollBeginDrag: () => void;
+  onScrollEndDrag: () => void;
+  onMomentumScrollEnd: () => void;
+};
+
 interface CustomersTabProps {
   customers: Customer[];
   value: CustomerMarkingByCustomerId;
@@ -33,6 +40,7 @@ interface CustomersTabProps {
   scrollViewRef?: React.RefObject<ScrollView | null>;
   isReadOnly?: boolean;
   currentTechName?: string;
+  onScrollHandlersReady?: (handlers: ScrollHandlers) => void;
 }
 
 interface TimeAllocationCardProps {
@@ -69,10 +77,10 @@ export function TimeAllocationCard({
             Time Allocation
           </Text>
           <Text className="text-xs" style={{ color: colors.text }}>
-            Allocatable: {formatMinutesAsHours(allocatableMinutes)}
+            Allocatable: {formatDuration(allocatableMinutes * 60 * 1000)}
           </Text>
           <Text className="text-xs mt-0.5" style={{ color: colors.text }}>
-            Allocated: {formatMinutesAsHours(allocatedMinutes)}
+            Allocated: {formatDuration(allocatedMinutes * 60 * 1000)}
           </Text>
         </View>
         <View className="items-end">
@@ -85,7 +93,7 @@ export function TimeAllocationCard({
               color: remainingMinutes < 0 ? colors.danger : colors.accent,
             }}
           >
-            {formatMinutesAsHours(Math.abs(remainingMinutes))}
+            {formatDuration(Math.abs(remainingMinutes) * 60 * 1000)}
           </Text>
           {remainingMinutes < 0 && (
             <Text className="text-[10px] font-bold mt-0.5" style={{ color: colors.danger }}>
@@ -187,10 +195,6 @@ function getAllocatedMinutes(value: CustomerMarkingByCustomerId): number {
   }, 0);
 }
 
-function formatMinutesAsHours(minutes: number): string {
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
 function isCustomerMarkingComplete(
   data: CustomerMarkingData,
   wouldExceedTime: boolean,
@@ -221,10 +225,14 @@ export function CustomersTab({
   scrollViewRef,
   isReadOnly = false,
   currentTechName,
+  onScrollHandlersReady,
 }: CustomersTabProps) {
   const sectionOffsets = useRef<Record<string, number>>({});
   const inputOffsets = useRef<Record<string, number>>({});
   const rootYInScroll = useRef(0);
+  const isUserScrollingRef = useRef(false);
+  const lastAutoScrollTargetRef = useRef<number | null>(null);
+  const pendingScrollTargetRef = useRef<number | null>(null);
   const [tick, setTick] = useState(0);
   const isOnsite = locatorStatus === "ONSITE";
   const isClosed =
@@ -306,6 +314,17 @@ export function CustomersTab({
       rootYInScroll.current +
       (sectionOffsets.current[customerId] || 0) +
       offsetWithinSection;
+
+    if (isUserScrollingRef.current) {
+      pendingScrollTargetRef.current = absoluteY;
+      return;
+    }
+
+    if (lastAutoScrollTargetRef.current === absoluteY) {
+      return;
+    }
+
+    lastAutoScrollTargetRef.current = absoluteY;
     scrollToOffset(absoluteY);
   };
 
@@ -319,6 +338,32 @@ export function CustomersTab({
       });
     }
   };
+
+  const handleScrollBeginDrag = () => {
+    isUserScrollingRef.current = true;
+  };
+
+  const handleScrollEndDrag = () => {
+    // Don't clear immediately — wait for momentum to end
+  };
+
+  const handleMomentumScrollEnd = () => {
+    isUserScrollingRef.current = false;
+    if (pendingScrollTargetRef.current !== null) {
+      const target = pendingScrollTargetRef.current;
+      pendingScrollTargetRef.current = null;
+      lastAutoScrollTargetRef.current = target;
+      scrollToOffset(target);
+    }
+  };
+
+  useEffect(() => {
+    onScrollHandlersReady?.({
+      onScrollBeginDrag: handleScrollBeginDrag,
+      onScrollEndDrag: handleScrollEndDrag,
+      onMomentumScrollEnd: handleMomentumScrollEnd,
+    });
+  }, []);
 
   return (
     <View

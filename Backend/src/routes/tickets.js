@@ -2,6 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import { db } from '../server.js';
 import { canViewTicket, canEditTicket, ROLES, getTicketVisibilityFilter } from '../utils/permissions.js';
+import { computeDueUrgency } from '../utils/dueUrgency.js';
 import {
   getChainByTicketId,
   getChainWithSummaries,
@@ -45,6 +46,7 @@ function serializeTicket(t) {
   return {
     ...t,
     payloadJson: JSON.parse(t.payload_json || '{}'),
+    dueUrgency: t.due_at ? computeDueUrgency(t.due_at) : undefined,
     rootTicketId: t.root_ticket_id,
     parentTicketId: t.parent_ticket_id,
     sequenceNumber: t.sequence_number,

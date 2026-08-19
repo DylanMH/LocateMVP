@@ -42,8 +42,8 @@ const ROLE_OPTIONS: { value: UserRole; label: string; minRole: string }[] = [
   { value: "TRAINER", label: "Trainer", minRole: "SUPERVISOR" },
   { value: "TECH", label: "Technician", minRole: "SUPERVISOR" },
   { value: "SUPERVISOR", label: "Supervisor", minRole: "AREA_MANAGER" },
-  { value: "AREA_MANAGER", label: "Area Manager", minRole: "MANAGER" },
-  { value: "MANAGER", label: "Manager", minRole: "MANAGER" },
+  { value: "AREA_MANAGER", label: "Area Manager", minRole: "DISTRICT_MANAGER" },
+  { value: "DISTRICT_MANAGER", label: "District Manager", minRole: "DISTRICT_MANAGER" },
 ];
 
 export function CreateUserModal({
@@ -76,7 +76,7 @@ export function CreateUserModal({
     const roleOption = ROLE_OPTIONS.find((r) => r.value === role);
     if (!roleOption) return false;
 
-    const hierarchy = ["TRAINEE", "TRAINER", "TECH", "SUPERVISOR", "AREA_MANAGER", "MANAGER"];
+    const hierarchy = ["TRAINEE", "TRAINER", "TECH", "SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER"];
     const currentIdx = hierarchy.indexOf(currentUserRole);
     const requiredIdx = hierarchy.indexOf(roleOption.minRole as UserRole);
     return currentIdx >= requiredIdx;

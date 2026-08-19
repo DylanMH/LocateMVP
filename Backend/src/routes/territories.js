@@ -43,7 +43,7 @@ function authenticateToken(req, res, next) {
   });
 }
 
-const ROLE_ORDER = ['TRAINEE','TRAINER','TECH','SUPERVISOR','AREA_MANAGER','DISTRICT_MANAGER','MANAGER'];
+const ROLE_ORDER = ['TRAINEE','TRAINER','TECH','SUPERVISOR','AREA_MANAGER','DISTRICT_MANAGER'];
 function hasRole(userRole, minRole) {
   return ROLE_ORDER.indexOf(userRole) >= ROLE_ORDER.indexOf(minRole);
 }

@@ -19,6 +19,7 @@ import { TicketSelectorModal } from "../../src/features/timesheet/components/Tic
 import { ReasonSelectorModal, getAllocationLabel } from "../../src/features/timesheet/components/ReasonSelectorModal";
 import type { BreakType, ClockEventType } from "../../src/features/timesheet/types";
 import { Q } from "@nozbe/watermelondb";
+import { formatDuration } from "../../src/utils/formatDuration";
 
 export default function Timesheet() {
   const { user } = useAuth();
@@ -417,13 +418,7 @@ export default function Timesheet() {
     });
   };
 
-  const formatElapsed = (sec: number) => {
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    return `${m}m ${s}s`;
-  };
+
 
   if (isLoading) {
     return (
@@ -516,7 +511,7 @@ export default function Timesheet() {
               Elapsed
             </Text>
             <Text className="text-3xl font-bold" style={{ color: colors.success }}>
-              {formatElapsed(elapsedSec)}
+              {formatDuration(elapsedSec * 1000, { includeSeconds: true })}
             </Text>
           </View>
         )}
@@ -637,6 +632,7 @@ export default function Timesheet() {
           style={{
             backgroundColor: isClockedIn ? colors.danger : colors.success,
             opacity: isProcessing || isOnBreak ? 0.5 : 1,
+            minHeight: 48,
           }}
         >
           {isProcessing ? (

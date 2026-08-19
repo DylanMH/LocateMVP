@@ -174,4 +174,30 @@ export const OpsService = {
       range,
     );
   },
+
+  // Canonical /me endpoints (v1.6 — scoped to authenticated user)
+  getMyOverview() {
+    return opsFetch<{
+      techs: { totalTechs: number; clockedIn: number; enroute: number; onsite: number; paused: number; onLunch: number; onPersonal: number };
+      tickets: { open: number; overdue: number; dueSoon: number; completedToday: number; totalFootageToday: number; highPriority: number };
+      needsAttention: Array<{ type: string; id: string; label: string; detail: string }>;
+      activeTechs: Array<any>;
+      teamSummary: { totalWorkedMinutes: number; totalCompletedTickets: number; totalFootage: number; openBacklog: number };
+    }>("/ops/me/overview");
+  },
+  getMyTechs(params?: { status?: string; limit?: number; offset?: number }) {
+    return opsFetch<{ techs: Array<any> }>("/ops/me/techs", params);
+  },
+  getMyTeams() {
+    return opsFetch<{ teams: Array<any> }>("/ops/me/teams");
+  },
+  getOpsMap(params?: { techId?: string; dueUrgency?: string; active?: boolean }) {
+    return opsFetch<{
+      markers: Array<{
+        id: string; lat: number; lng: number; ticketNumber: string;
+        dueUrgency?: string; locatorStatus: string; assignedTechName?: string; isActive: boolean;
+      }>;
+      center: { lat: number; lng: number };
+    }>("/ops/map", params);
+  },
 };

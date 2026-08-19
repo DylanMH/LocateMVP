@@ -8,7 +8,7 @@ const SAMPLE_USERS = [
   { name: 'Sarah Johnson', email: 'sarah.johnson@locate720.com', role: 'TECH' },
   { name: 'Mike Williams', email: 'mike.williams@locate720.com', role: 'TECH' },
   { name: 'Emily Davis', email: 'emily.davis@locate720.com', role: 'SUPERVISOR' },
-  { name: 'David Brown', email: 'david.brown@locate720.com', role: 'MANAGER' },
+  { name: 'David Brown', email: 'david.brown@locate720.com', role: 'DISTRICT_MANAGER' },
 ];
 
 console.log('[Seed] Creating sample users...');

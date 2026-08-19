@@ -13,6 +13,8 @@
  * - closedAt?: number
  */
 
+export { formatDuration } from '../../../utils/formatDuration';
+
 export interface PauseEvent {
   start: number;
   end?: number;
@@ -137,19 +139,4 @@ export function getEnrouteMillis(payload: TicketPayload, locatorStatus: string):
 export function getAllocatableMinutes(payload: TicketPayload, locatorStatus: string): number {
   const onsiteMillis = getOnsiteMillis(payload, locatorStatus);
   return Math.floor(onsiteMillis / 60000);
-}
-
-/**
- * Format milliseconds to hours and minutes string.
- * Example: 3665000 -> "1h 1m"
- */
-export function formatDuration(millis: number): string {
-  const totalMinutes = Math.floor(millis / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
 }

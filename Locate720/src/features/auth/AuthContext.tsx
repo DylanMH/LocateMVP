@@ -4,7 +4,7 @@ import { setCurrentUser } from './devSession';
 import { SyncEngine } from '../tickets/sync/SyncEngine';
 import { logger } from '../../utils/logger';
 
-export type UserRole = 'TRAINEE' | 'TRAINER' | 'TECH' | 'SUPERVISOR' | 'AREA_MANAGER' | 'MANAGER';
+export type UserRole = 'TRAINEE' | 'TRAINER' | 'TECH' | 'SUPERVISOR' | 'AREA_MANAGER' | 'DISTRICT_MANAGER';
 
 interface User {
   id: string;

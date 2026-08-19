@@ -125,3 +125,53 @@ export function getDueUrgencyColor(dueAt?: number | null, nowMs: number = Date.n
 export function getDueUrgencyTailwind(dueAt?: number | null, nowMs: number = Date.now()): string {
   return DUE_URGENCY_TAILWIND[getDueUrgencyBucket(dueAt, nowMs)];
 }
+
+// ── Server-side due urgency (5 categories from backend) ───
+export type ServerDueUrgency = 'OVERDUE' | 'DUE_WITHIN_2_HOURS' | 'DUE_TODAY' | 'DUE_WITHIN_72_HOURS' | 'FUTURE';
+
+export const SERVER_DUE_URGENCY_COLORS: Record<ServerDueUrgency, string> = {
+  OVERDUE: '#F87171',
+  DUE_WITHIN_2_HOURS: '#D97706',
+  DUE_TODAY: '#FACC15',
+  DUE_WITHIN_72_HOURS: '#60A5FA',
+  FUTURE: '#1E40AF',
+};
+
+export const SERVER_DUE_URGENCY_LABELS: Record<ServerDueUrgency, string> = {
+  OVERDUE: 'Overdue',
+  DUE_WITHIN_2_HOURS: 'Due < 2h',
+  DUE_TODAY: 'Due Today',
+  DUE_WITHIN_72_HOURS: 'Due < 72h',
+  FUTURE: 'Future',
+};
+
+export const SERVER_DUE_URGENCY_TAILWIND: Record<ServerDueUrgency, string> = {
+  OVERDUE: 'bg-red-100 text-red-700 border-red-300',
+  DUE_WITHIN_2_HOURS: 'bg-amber-100 text-amber-700 border-amber-300',
+  DUE_TODAY: 'bg-yellow-100 text-yellow-700 border-yellow-300',
+  DUE_WITHIN_72_HOURS: 'bg-blue-100 text-blue-700 border-blue-300',
+  FUTURE: 'bg-blue-50 text-blue-600 border-blue-200',
+};
+
+// Map server 5-category to client 8-category for backward compatibility
+export function serverToClientUrgency(server: ServerDueUrgency): DueUrgencyBucket {
+  switch (server) {
+    case 'OVERDUE': return 'overdue';
+    case 'DUE_WITHIN_2_HOURS': return 'urgent';
+    case 'DUE_TODAY': return 'today';
+    case 'DUE_WITHIN_72_HOURS': return 'soon';
+    case 'FUTURE': return 'future';
+  }
+}
+
+// Get color for a ticket — uses server dueUrgency if available, falls back to client computation
+export function getTicketDueUrgencyColor(dueAt: number | null | undefined, serverDueUrgency?: ServerDueUrgency | null, nowMs: number = Date.now()): string {
+  if (serverDueUrgency) return SERVER_DUE_URGENCY_COLORS[serverDueUrgency];
+  return DUE_URGENCY_COLORS[getDueUrgencyBucket(dueAt, nowMs)];
+}
+
+// Get Tailwind classes for a ticket — uses server dueUrgency if available, falls back to client computation
+export function getTicketDueUrgencyTailwind(dueAt: number | null | undefined, serverDueUrgency?: ServerDueUrgency | null, nowMs: number = Date.now()): string {
+  if (serverDueUrgency) return SERVER_DUE_URGENCY_TAILWIND[serverDueUrgency];
+  return DUE_URGENCY_TAILWIND[getDueUrgencyBucket(dueAt, nowMs)];
+}

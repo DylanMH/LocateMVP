@@ -15,47 +15,11 @@ import {
   formatDuration,
 } from "../../components/ui";
 import { CreateUserModal, EditUserModal } from "../../components/users";
-import type { TechRow, User, TerritoryNode } from "../../types";
-
-const ALLOCATION_LABELS: Record<string, string> = {
-  locating: "Locating",
-  training: "Training",
-  truck_support: "Truck Support",
-  meeting: "Meeting",
-  oncall: "On Call",
-  other: "Other",
-};
-
-const ALLOCATION_COLORS: Record<string, string> = {
-  locating: "#10B981",
-  training: "#3B82F6",
-  truck_support: "#F59E0B",
-  meeting: "#8B5CF6",
-  oncall: "#EC4899",
-  other: "#6B7280",
-};
-
-function allocationLabel(v: string | null | undefined): string {
-  if (!v) return "Locating";
-  return ALLOCATION_LABELS[v] || v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function allocationColor(v: string | null | undefined): string {
-  if (!v) return ALLOCATION_COLORS.locating;
-  return ALLOCATION_COLORS[v] || ALLOCATION_COLORS.other;
-}
+import type { TechRow, User } from "../../types";
+import { allocationLabel, allocationColor } from "../../lib/allocationStyles";
+import { flattenTerritories } from "../../lib/mapUtils";
 
 const STATUS_OPTIONS = ["CLOCKED_IN", "ON_LUNCH", "ON_PERSONAL", "CLOCKED_OUT"];
-
-function flattenTerritories(nodes: TerritoryNode[]): TerritoryNode[] {
-  const flattened: TerritoryNode[] = [];
-  const visit = (node: TerritoryNode) => {
-    flattened.push(node);
-    node.children.forEach(visit);
-  };
-  nodes.forEach(visit);
-  return flattened;
-}
 
 export function TechsPage() {
   const { state: range, setRange, toQuery, queryKey } = useRange("day");

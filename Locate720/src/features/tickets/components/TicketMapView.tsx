@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Linking, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Linking, Pressable, Text, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 import Ticket from "../../../db/models/Ticket";
@@ -16,6 +16,7 @@ import {
   formatLocatorStatus,
   getLocatorStatusColor,
 } from "../utils/ticketPresentation";
+import { MapErrorBoundary } from "./MapErrorBoundary";
 
 type Region = {
   latitude: number;
@@ -51,7 +52,11 @@ function getInitialRegion(tickets: Ticket[]): Region {
   const mapTickets = tickets.filter(
     (ticket) =>
       typeof ticket.lat === "number" &&
-      typeof ticket.lng === "number",
+      typeof ticket.lng === "number" &&
+      !Number.isNaN(ticket.lat) &&
+      !Number.isNaN(ticket.lng) &&
+      Number.isFinite(ticket.lat) &&
+      Number.isFinite(ticket.lng),
   );
 
   if (mapTickets.length === 0) {
@@ -99,9 +104,10 @@ function getScopeBox(ticket: Ticket) {
 type Props = {
   tickets: Ticket[];
   onOpenTicket: (ticketId: string) => void;
+  isLoading?: boolean;
 };
 
-export function TicketMapView({ tickets, onOpenTicket }: Props) {
+export function TicketMapView({ tickets, onOpenTicket, isLoading = false }: Props) {
   const mapRef = useRef<any>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [hasDismissedDefaultSelection, setHasDismissedDefaultSelection] =
@@ -118,7 +124,11 @@ export function TicketMapView({ tickets, onOpenTicket }: Props) {
       tickets.filter(
         (ticket) =>
           typeof ticket.lat === "number" &&
-          typeof ticket.lng === "number",
+          typeof ticket.lng === "number" &&
+          !Number.isNaN(ticket.lat) &&
+          !Number.isNaN(ticket.lng) &&
+          Number.isFinite(ticket.lat) &&
+          Number.isFinite(ticket.lng),
       ),
     [tickets],
   );
@@ -330,10 +340,22 @@ export function TicketMapView({ tickets, onOpenTicket }: Props) {
         className="flex-1"
         style={{ backgroundColor: colors.surface }}
       >
+        {isLoading ? (
+          <View
+            className="flex-1 items-center justify-center rounded-3xl"
+            style={{ backgroundColor: colors.surface }}
+          >
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text className="text-sm mt-3" style={{ color: colors.muted }}>
+              Loading tickets...
+            </Text>
+          </View>
+        ) : (
         <View
           className="flex-1 overflow-hidden rounded-3xl"
           style={{ backgroundColor: colors.surface }}
         >
+          <MapErrorBoundary>
           <MapView
             ref={mapRef}
             style={{ flex: 1 }}
@@ -387,6 +409,7 @@ export function TicketMapView({ tickets, onOpenTicket }: Props) {
               );
             })}
           </MapView>
+          </MapErrorBoundary>
 
           <Pressable
             onPress={handleRecenter}
@@ -404,7 +427,7 @@ export function TicketMapView({ tickets, onOpenTicket }: Props) {
               {mappableTickets.length === 0 ? (
                 <>
                   <Text className="text-sm font-semibold" style={{ color: colors.text }}>
-                    No mappable tickets yet
+                    No tickets with coordinates to display
                   </Text>
                   <Text className="text-xs mt-1" style={{ color: colors.muted }}>
                     Tickets without coordinates will stay in the list until map data is available.
@@ -432,6 +455,7 @@ export function TicketMapView({ tickets, onOpenTicket }: Props) {
             </View>
           ) : null}
         </View>
+        )}
 
         {visibleTicket ? (
           <Animated.View

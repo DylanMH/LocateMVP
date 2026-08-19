@@ -189,7 +189,7 @@ export function getUserDirectTerritories(db, userId) {
  * "(<predicate>)" or "1=1" / "1=0", suitable for AND-ing into a WHERE clause.
  *
  * Visibility rules (roles determine WHAT, territories determine WHERE):
- *   MANAGER            -> everything
+ *   DISTRICT_MANAGER    -> everything
  *   AREA_MANAGER       -> tickets whose area_territory_id is in user's AREA assignments
  *                         (or, legacy fallback: district)
  *   SUPERVISOR         -> tickets whose supervisor_territory_id is in user's
@@ -203,7 +203,7 @@ export function buildTicketVisibilityFilter(db, user) {
   if (!user) return { sql: '1=0', params: [] };
 
   const role = user.role;
-  if (role === 'MANAGER') return { sql: '1=1', params: [] };
+  if (role === 'DISTRICT_MANAGER') return { sql: '1=1', params: [] };
 
   const dir = getUserDirectTerritories(db, user.id);
 
@@ -255,7 +255,7 @@ export function buildTicketVisibilityFilter(db, user) {
  */
 export function canUserSeeTicket(db, user, ticket) {
   if (!user || !ticket) return false;
-  if (user.role === 'MANAGER') return true;
+  if (user.role === 'DISTRICT_MANAGER') return true;
   if (ticket.assigned_tech_id && ticket.assigned_tech_id === user.id) return true;
 
   const dir = getUserDirectTerritories(db, user.id);
@@ -281,7 +281,7 @@ export function getTechIdsUnderUser(db, userId, role) {
   if (role === 'TECH' || role === 'TRAINEE' || role === 'TRAINER') {
     return [userId];
   }
-  if (role === 'MANAGER') {
+  if (role === 'DISTRICT_MANAGER') {
     return db.prepare(`
       SELECT id FROM users
       WHERE role IN ('TECH','TRAINEE','TRAINER') AND is_active = 1

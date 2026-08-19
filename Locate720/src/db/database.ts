@@ -5,7 +5,6 @@ import { schema } from './schema';
 import migrations from './migrations';
 import Ticket from './models/Ticket';
 import OutboxEvent from './models/OutboxEvent';
-import Draft from './models/Draft';
 import DaySession from './models/DaySession';
 import ClockEvent from './models/ClockEvent';
 import TicketNote from './models/TicketNote';
@@ -26,7 +25,7 @@ const adapter = new SQLiteAdapter({
 
 export const database = new Database({
   adapter,
-  modelClasses: [Ticket, OutboxEvent, Draft, DaySession, ClockEvent, TicketNote],
+  modelClasses: [Ticket, OutboxEvent, DaySession, ClockEvent, TicketNote],
 });
 
 console.log('[DB] Database initialized with SQLite adapter + JSI');

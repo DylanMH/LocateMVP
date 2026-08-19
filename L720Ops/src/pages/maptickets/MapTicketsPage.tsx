@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, useMap, Marker } from "react-leaflet";
+import { MapContainer, TileLayer, Rectangle, Tooltip, LayersControl, Marker } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { OpsService } from "../../services/opsService";
@@ -21,6 +21,7 @@ import type { TerritoryNode } from "../../types";
 import { formatTicketType } from "../../types/ticket";
 import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS, DUE_URGENCY_COLORS, getDueUrgencyColor } from "../../utils/dueUrgency";
 import { ArrowDownTrayIcon, MapIcon, TableCellsIcon } from "@heroicons/react/24/outline";
+import { PALETTE, flattenTerritories, getBounds, getCenter, makeTicketIcon, makeTechLocationIcon, MapRefocus } from "../../lib/mapUtils";
 
 delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -28,8 +29,6 @@ L.Icon.Default.mergeOptions({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
-
-const PALETTE = ["#2563EB", "#0F766E", "#DC2626", "#7C3AED", "#D97706", "#0891B2", "#4F46E5"];
 
 const LOCATOR_STATUSES = ["ASSIGNED", "ENROUTE", "ONSITE", "PAUSED", "CLOSED", "UNABLE"];
 const TICKET_TYPES = ["NORMAL", "EMERGENCY", "DIGUP", "NON_COMPLIANT", "UPDATE", "UPDATE_REMARK", "RECALL", "NO_RESPONSE"];
@@ -67,96 +66,6 @@ interface BoundaryUnitInfo {
   id: string;
   name: string;
   bbox: { north: number; south: number; east: number; west: number };
-}
-
-function flattenTerritories(nodes: TerritoryNode[]): TerritoryNode[] {
-  const flattened: TerritoryNode[] = [];
-  const visit = (node: TerritoryNode) => {
-    flattened.push(node);
-    node.children.forEach(visit);
-  };
-  nodes.forEach(visit);
-  return flattened;
-}
-
-function getBounds(territory: TerritoryNode): [[number, number], [number, number]] | null {
-  if (
-    territory.bboxSouth == null ||
-    territory.bboxWest == null ||
-    territory.bboxNorth == null ||
-    territory.bboxEast == null
-  ) {
-    return null;
-  }
-  return [
-    [territory.bboxSouth, territory.bboxWest],
-    [territory.bboxNorth, territory.bboxEast],
-  ];
-}
-
-function getCenter(territory: TerritoryNode): [number, number] | null {
-  if (territory.centerLat != null && territory.centerLng != null) {
-    return [territory.centerLat, territory.centerLng];
-  }
-  const bounds = getBounds(territory);
-  if (!bounds) return null;
-  return [
-    (bounds[0][0] + bounds[1][0]) / 2,
-    (bounds[0][1] + bounds[1][1]) / 2,
-  ];
-}
-
-// Create a Leaflet divIcon that renders a colored circle with the type label inside
-function makeTicketIcon(color: string, label: string) {
-  return L.divIcon({
-    className: "ticket-div-icon",
-    html: `<div style="
-      width: 22px; height: 22px; border-radius: 50%;
-      background: ${color}; border: 2px solid #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 9px; font-weight: 700; color: #fff;
-      font-family: system-ui, sans-serif; line-height: 1;
-    ">${label}</div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
-function makeTechLocationIcon(name: string) {
-  const initials = name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-  return L.divIcon({
-    className: "tech-live-div-icon",
-    html: `<div style="
-      width: 28px; height: 28px; border-radius: 50%;
-      background: #10B981; border: 3px solid #fff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 800; color: #fff;
-      font-family: system-ui, sans-serif; line-height: 1;
-    ">${initials}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  });
-}
-
-// Helper to recenter the map when filters change
-function MapRefocus({ center }: { center: [number, number] | null }) {
-  const map = useMap();
-  const lastCenter = useRef<string>("");
-  if (center) {
-    const key = `${center[0].toFixed(3)},${center[1].toFixed(3)}`;
-    if (key !== lastCenter.current) {
-      lastCenter.current = key;
-      map.flyTo(center, Math.max(map.getZoom(), 9), { duration: 0.8 });
-    }
-  }
-  return null;
 }
 
 export function MapTicketsPage() {

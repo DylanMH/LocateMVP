@@ -11,7 +11,9 @@
     "reset": "node src/scripts/resetDatabase.js",
     "test:phase1": "node tests/phase1-sync.test.js",
     "test:multi-device": "node tests/multi-device-clock.test.js",
-    "test:status-machine": "node src/validation/tests/statusMachine.test.js"
+    "test:status-machine": "node src/validation/tests/statusMachine.test.js",
+    "test:due-urgency": "node tests/dueUrgency.test.js",
+    "test:permissions": "node tests/permissions.test.js"
   },
   "keywords": [
     "811",

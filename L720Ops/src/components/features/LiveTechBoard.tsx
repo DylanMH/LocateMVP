@@ -2,19 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { TechStatusRow } from "../../types/ops";
 import { StatusBadge, formatDuration } from "../ui";
-
-function allocationLabel(v: string | null | undefined): string {
-  if (!v) return "";
-  const labels: Record<string, string> = {
-    locating: "Locating",
-    training: "Training",
-    truck_support: "Truck Support",
-    meeting: "Meeting",
-    oncall: "On Call",
-    other: "Other",
-  };
-  return labels[v] || v.replace(/_/g, " ");
-}
+import { allocationLabel } from "../../lib/allocationStyles";
 
 interface Props {
   techs: TechStatusRow[] | undefined;

@@ -720,7 +720,7 @@ function Field({
 function rolesForTerritoryType(t: TerritoryType): UserRole[] {
   switch (t) {
     case "DISTRICT":
-      return ["DISTRICT_MANAGER", "MANAGER"];
+      return ["DISTRICT_MANAGER"];
     case "AREA":
       return ["AREA_MANAGER"];
     case "SUPERVISOR_TERRITORY":

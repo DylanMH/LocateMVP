@@ -319,6 +319,7 @@ export default function TicketsScreen() {
               params: { id: ticketId },
             })
           }
+          isLoading={isCheckingClock}
         />
       ) : view === "RESCHEDULE" ? (
         <RescheduleTab

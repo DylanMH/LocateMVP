@@ -1,4 +1,4 @@
-export type TechRole = 'TRAINEE' | 'TRAINER' | 'TECH' | 'SUPERVISOR' | 'AREA_MANAGER' | 'MANAGER';
+export type TechRole = 'TRAINEE' | 'TRAINER' | 'TECH' | 'SUPERVISOR' | 'AREA_MANAGER' | 'DISTRICT_MANAGER';
 export type AreaId = string;
 export type ClockStatus = 'CLOCKED_IN' | 'CLOCKED_OUT';
 

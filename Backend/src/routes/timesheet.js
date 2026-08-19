@@ -54,8 +54,8 @@ function canViewTimesheet(viewer, targetUserId) {
   // Self access
   if (viewer.id === targetUserId) return true;
 
-  // Manager can view all
-  if (viewer.role === ROLES.MANAGER) return true;
+  // District Manager can view all
+  if (viewer.role === ROLES.DISTRICT_MANAGER) return true;
 
   // Area manager can view users in their area
   if (viewer.role === ROLES.AREA_MANAGER) {
