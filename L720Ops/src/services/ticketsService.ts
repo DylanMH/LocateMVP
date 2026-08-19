@@ -175,4 +175,77 @@ export class TicketsService {
 
     return response.blob();
   }
+
+  static async rescheduleTicket(
+    ticketId: string,
+    newDueAt: number,
+    reason: string,
+    requestId: string,
+  ): Promise<{
+    status: string;
+    ticketId: string;
+    previousDueAt: number;
+    newDueAt: number;
+    originalDueAt: number;
+    rescheduleId: string;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}/reschedule`, {
+      method: "POST",
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ newDueAt, reason, requestId }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: "Reschedule failed" }));
+      throw new Error(err.error || "Failed to reschedule ticket");
+    }
+    return response.json();
+  }
+
+  static async rescheduleBulk(
+    ticketIds: string[],
+    newDueAt: number,
+    reason: string,
+    requestId: string,
+  ): Promise<{
+    status: string;
+    rescheduledCount: number;
+    results: Array<{
+      ticketId: string;
+      previousDueAt: number;
+      newDueAt: number;
+      originalDueAt: number;
+    }>;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/tickets/reschedule-bulk`, {
+      method: "POST",
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ ticketIds, newDueAt, reason, requestId }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: "Bulk reschedule failed" }));
+      throw new Error(err.error || "Failed to bulk reschedule tickets");
+    }
+    return response.json();
+  }
+
+  static async getRescheduleHistory(ticketId: string): Promise<
+    Array<{
+      id: string;
+      ticket_id: string;
+      previous_due_at: number;
+      new_due_at: number;
+      reason: string | null;
+      created_at: number;
+    }>
+  > {
+    const response = await fetch(
+      `${API_BASE_URL}/tickets/${ticketId}/reschedules`,
+      { headers: this.getAuthHeaders() },
+    );
+    if (!response.ok) {
+      throw new Error("Failed to fetch reschedule history");
+    }
+    const data = await response.json();
+    return data.reschedules;
+  }
 }

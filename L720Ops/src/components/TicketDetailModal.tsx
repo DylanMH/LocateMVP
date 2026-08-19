@@ -3,6 +3,7 @@ import type { TicketChainRow, TicketDetail } from "../types/ticket";
 import { formatTicketType, ticketTypeBadgeClass } from "../types/ticket";
 import { TicketsService } from "../services/ticketsService";
 import { getDueUrgencyBucket, getDueUrgencyTailwind, DUE_URGENCY_LABELS } from "../utils/dueUrgency";
+import { RescheduleModal } from "./RescheduleModal";
 
 interface TicketDetailModalProps {
   ticket: TicketDetail | null;
@@ -177,6 +178,8 @@ function TicketChainPanel({ ticketId }: { ticketId: string }) {
 }
 
 export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModalProps) {
+  const [showReschedule, setShowReschedule] = useState(false);
+
   if (!ticket || !isOpen) return null;
 
   const payload = parsePayload(ticket.payloadJson);
@@ -603,9 +606,24 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
             >
               Close
             </button>
+            <button
+              type="button"
+              className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:mr-3 sm:w-auto sm:text-sm"
+              onClick={() => setShowReschedule(true)}
+            >
+              Reschedule
+            </button>
           </div>
         </div>
       </div>
+
+      <RescheduleModal
+        isOpen={showReschedule}
+        onClose={() => setShowReschedule(false)}
+        ticketId={ticket.id}
+        ticketNumber={ticket.ticketNumber}
+        currentDueAt={ticket.dueAt}
+      />
     </div>
   );
 }

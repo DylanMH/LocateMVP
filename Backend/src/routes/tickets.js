@@ -7,6 +7,7 @@ import {
 } from '../services/ticketChainService.js';
 import { isEventProcessed, markEventProcessed, getProcessedEventResult } from '../services/idempotencyService.js';
 import { queueOutbound811Event } from '../services/outbound811Service.js';
+import { queueContractorEmail } from '../services/emailService.js';
 import crypto from 'crypto';
 
 const router = express.Router();
@@ -334,6 +335,24 @@ router.post('/:id/reschedule', (req, res) => {
             reason,
           }),
         },
+      });
+    }
+
+    // Queue contractor email notification
+    let contractorEmail = null;
+    try {
+      const payload = JSON.parse(ticket.payload_json || '{}');
+      contractorEmail = payload.contactEmail || payload.contact_email || null;
+    } catch { /* ignore */ }
+
+    if (contractorEmail) {
+      const previousDate = new Date(previousDueAt).toLocaleString();
+      const newDate = new Date(newDueAt).toLocaleString();
+      queueContractorEmail(db, {
+        ticketId: id,
+        contractorEmail,
+        subject: `Ticket ${ticket.ticket_number} Due Date Rescheduled`,
+        body: `The due date for ticket ${ticket.ticket_number} has been rescheduled.\n\nPrevious due: ${previousDate}\nNew due: ${newDate}\nReason: ${reason || 'N/A'}\n\nThis is an automated notification from Locate720.`,
       });
     }
   });

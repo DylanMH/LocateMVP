@@ -505,6 +505,25 @@ db.exec(`
 db.exec(`CREATE INDEX IF NOT EXISTS idx_reschedules_ticket ON ticket_reschedules(ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_reschedules_created ON ticket_reschedules(created_at)`);
 
+// Contractor email queue for rescheduling notifications.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contractor_email_queue (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL,
+    contractor_email TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SENT', 'FAILED')),
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    sent_at INTEGER,
+    error_message TEXT,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+  );
+`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_email_queue_status ON contractor_email_queue(status)`);
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_root ON tickets(root_ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_ext_root ON tickets(external_root_number)`);

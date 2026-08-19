@@ -10,6 +10,7 @@ import inboundRouter from "./routes/inbound.js";
 import opsRouter from "./routes/ops.js";
 import territoriesRouter from "./routes/territories.js";
 import { processOutbound811Events } from "./services/outbound811Service.js";
+import { processEmailQueue } from "./services/emailService.js";
 import {
   pullTicketsFrom811,
 } from "./services/ingestionService.js";
@@ -111,6 +112,21 @@ setInterval(async () => {
     );
   }
 }, 30000); // 30 seconds
+
+// Auto-process contractor email queue every 60 seconds
+setInterval(async () => {
+  try {
+    const results = await processEmailQueue(db);
+    if (results.processed > 0) {
+      console.log(`[AutoEmail] Processed ${results.processed} contractor emails`);
+    }
+    if (results.errors.length > 0) {
+      console.error(`[AutoEmail] ${results.errors.length} errors occurred`);
+    }
+  } catch (error) {
+    console.error("[AutoEmail] Failed to process email queue:", error.message);
+  }
+}, 60000); // 60 seconds
 
 // Auto-delete tickets older than 4 days to keep the DB from growing unbounded.
 // Runs on startup and then every hour. Also cleans up related data
