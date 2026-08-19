@@ -216,6 +216,23 @@ export function TicketsPage() {
           </span>
         ),
       },
+      {
+        key: "actions",
+        header: "Actions",
+        align: "right",
+        render: (t) => (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedId(t.id);
+              setShowReschedule(true);
+            }}
+            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+          >
+            Reschedule
+          </button>
+        ),
+      },
     ],
     [listQuery.data, selected],
   );

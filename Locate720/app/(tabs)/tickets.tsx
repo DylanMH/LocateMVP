@@ -26,6 +26,11 @@ import { RescheduleModal } from "../../src/features/tickets/components/Reschedul
 import { SyncEngine } from "../../src/features/tickets/sync/SyncEngine";
 import { sortTickets } from "../../src/features/tickets/utils/ticketSorting";
 import { isTicketClosed } from "../../src/features/tickets/domain/statusMachine";
+import {
+  getDueUrgencyBucket,
+  getDueAccentColorFromTimestamp,
+  DUE_URGENCY_LABELS,
+} from "../../src/features/tickets/domain/dueColor";
 import { getTicketDisplayData, parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
 import { formatDueDateTime } from "../../src/utils/date";
 import { colors } from "../../src/ui/colors";
@@ -314,7 +319,12 @@ export default function TicketsScreen() {
         />
       ) : view === "RESCHEDULE" ? (
         <RescheduleTab
-          tickets={sorted.filter((t) => !isTicketClosed(t.locatorStatus))}
+          tickets={sorted.filter((t) => {
+            // Only open, non-late tickets can be rescheduled
+            if (isTicketClosed(t.locatorStatus)) return false;
+            if (t.dueAt && t.dueAt < Date.now()) return false;
+            return true;
+          })}
           selected={rescheduleSelected}
           onToggleSelect={(id) => {
             const next = new Set(rescheduleSelected);
@@ -541,7 +551,8 @@ function RescheduleTab({
             No eligible tickets
           </Text>
           <Text className="text-sm text-center" style={{ color: colors.muted }}>
-            Open tickets will appear here for rescheduling.
+            Open, non-late tickets will appear here for rescheduling. Late
+            tickets cannot be rescheduled.
           </Text>
         </View>
       ) : (
@@ -554,21 +565,34 @@ function RescheduleTab({
             const isSelected = selected.has(item.id);
             const payload = parseTicketPayload(item.payloadJson);
             const { contractor, workType } = getTicketDisplayData(item.payloadJson);
+            const dueBucket = getDueUrgencyBucket(item.dueAt);
+            const dueColor = getDueAccentColorFromTimestamp(item.dueAt);
+            const dueLabel = DUE_URGENCY_LABELS[dueBucket];
             return (
               <Pressable
                 onPress={() => onToggleSelect(item.id)}
                 className="rounded-2xl p-4"
                 style={{
                   backgroundColor: colors.surface,
-                  borderLeftWidth: isSelected ? 4 : 0,
-                  borderLeftColor: colors.accent,
+                  borderLeftWidth: 4,
+                  borderLeftColor: dueColor,
                 }}
               >
                 <View className="flex-row items-center justify-between">
                   <View className="flex-1">
-                    <Text className="text-sm font-bold" style={{ color: colors.text }}>
-                      {item.ticketNumber}
-                    </Text>
+                    <View className="flex-row items-center" style={{ gap: 6 }}>
+                      <Text className="text-sm font-bold" style={{ color: colors.text }}>
+                        {item.ticketNumber}
+                      </Text>
+                      <View
+                        className="px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: dueColor }}
+                      >
+                        <Text className="text-[10px] font-semibold" style={{ color: colors.bg }}>
+                          {dueLabel}
+                        </Text>
+                      </View>
+                    </View>
                     <Text
                       className="text-xs mt-0.5"
                       style={{ color: colors.muted }}
