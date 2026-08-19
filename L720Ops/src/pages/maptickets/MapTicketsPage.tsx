@@ -1186,6 +1186,16 @@ function TicketDetailBody({
               </span>
             )}
           </div>
+          {detail.originalDueAt && detail.originalDueAt !== detail.dueAt && (
+            <div className="text-xs text-gray-400 mt-1">
+              Original: {new Date(detail.originalDueAt).toLocaleString()}
+            </div>
+          )}
+          {detail.rescheduleCount != null && detail.rescheduleCount > 0 && (
+            <div className="text-xs text-blue-600 mt-0.5">
+              Rescheduled {detail.rescheduleCount}×
+            </div>
+          )}
         </div>
         <div>
           <div className="text-xs uppercase text-gray-500">Closed</div>

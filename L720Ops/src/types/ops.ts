@@ -140,6 +140,8 @@ export interface TicketListRow {
   assignedTech: { id: string; name: string; areaId: AreaId | null } | null;
   areaId: AreaId | null;
   dueAt: number;
+  originalDueAt?: number;
+  rescheduleCount?: number;
   createdAt: number;
   updatedAt: number;
   closedAt: number | null;

@@ -13,6 +13,7 @@ export default class Ticket extends Model {
   @field('locator_status') locatorStatus!: string;
   @field('assigned_tech_id') assignedTechId!: string;
   @field('due_at') dueAt?: number;
+  @field('original_due_at') originalDueAt?: number;
   @field('updated_at') updatedAt!: number;
   @field('version') version!: number;
   @field('closed_by_name') closedByName?: string;

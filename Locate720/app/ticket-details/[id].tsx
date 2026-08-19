@@ -841,6 +841,14 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                   <Text className="text-sm mt-1" style={{ color: colors.text }}>
                     {formatDueDateTime(ticket.dueAt)}
                   </Text>
+                  {ticket.originalDueAt && ticket.originalDueAt !== ticket.dueAt && (
+                    <Text
+                      className="text-xs mt-1"
+                      style={{ color: colors.muted }}
+                    >
+                      Original: {formatDueDateTime(ticket.originalDueAt)}
+                    </Text>
+                  )}
                 </View>
 
                 <View>

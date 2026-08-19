@@ -730,6 +730,7 @@ class SyncEngineImpl {
           locatorStatus: t.locator_status,
           assignedTechId: t.assigned_tech_id,
           dueAt: t.due_at,
+          originalDueAt: t.original_due_at,
           updatedAt: t.updated_at,
           version: t.version,
           closedByName: t.closed_by_name,
@@ -969,6 +970,7 @@ class SyncEngineImpl {
     locatorStatus: string;
     assignedTechId: string;
     dueAt?: number;
+    originalDueAt?: number;
     updatedAt: number;
     version: number;
     closedByName?: string;
@@ -1065,6 +1067,7 @@ class SyncEngineImpl {
               ticket.locatorStatus = delta.locatorStatus;
               ticket.assignedTechId = delta.assignedTechId;
               ticket.dueAt = delta.dueAt;
+              ticket.originalDueAt = delta.originalDueAt ?? delta.dueAt;
               ticket.updatedAt = delta.updatedAt;
               ticket.version = delta.version;
               ticket.closedByName = delta.closedByName;
@@ -1095,6 +1098,7 @@ class SyncEngineImpl {
             ticket.locatorStatus = delta.locatorStatus;
             ticket.assignedTechId = delta.assignedTechId;
             ticket.dueAt = delta.dueAt;
+            ticket.originalDueAt = delta.originalDueAt ?? delta.dueAt;
             ticket.updatedAt = delta.updatedAt;
             ticket.version = delta.version;
             ticket.closedByName = delta.closedByName;

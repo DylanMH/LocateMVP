@@ -130,5 +130,20 @@ export default schemaMigrations({
         }),
       ],
     },
+    {
+      // v9: original_due_at for tracking reschedule history on tickets.
+      // Preserved on first reschedule by the backend; used by the mobile
+      // app to show the original due date and apply half-color styling
+      // for late-but-rescheduled tickets.
+      toVersion: 9,
+      steps: [
+        addColumns({
+          table: 'tickets',
+          columns: [
+            { name: 'original_due_at', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

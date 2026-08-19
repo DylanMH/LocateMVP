@@ -6,7 +6,7 @@ import Ticket from "../../../db/models/Ticket";
 import { colors } from "../../../ui/colors";
 import { formatDueDateTime } from "../../../utils/date";
 import { logger } from "../../../utils/logger";
-import { getDueAccentColorFromTimestamp } from "../domain/dueColor";
+import { getDueAccentColorFromTimestamp, getRescheduledHalfColors, isLateButRescheduled, DUE_URGENCY_COLORS } from "../domain/dueColor";
 import {
   formatTicketType,
   getTicketDisplayData,
@@ -48,6 +48,8 @@ async function handleAddressPress(address: string) {
 
 const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () => void }) => {
   const dueBorderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
+  const halfColors = getRescheduledHalfColors(ticket.dueAt, ticket.originalDueAt);
+  const isRescheduledLate = isLateButRescheduled(ticket.dueAt, ticket.originalDueAt);
   const { workType, contractor, contractorPhone, customers } =
     getTicketDisplayData(ticket.payloadJson);
 
@@ -74,15 +76,31 @@ const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () 
   return (
     <Pressable
       onPress={onPress}
-      className="mx-4 rounded-2xl p-4"
+      className="mx-4 rounded-2xl flex-row"
       style={{
         backgroundColor: isActiveStatus
           ? `${getLocatorStatusColor(ticket.locatorStatus)}10`
           : colors.surface,
-        borderLeftWidth: isActiveStatus ? 6 : 4,
-        borderLeftColor: accentColor,
       }}
     >
+      {/* Left color bar — half red / half new-due-color when late-but-rescheduled */}
+      <View
+        style={{
+          width: isActiveStatus ? 6 : 4,
+          borderTopLeftRadius: 16,
+          borderBottomLeftRadius: 16,
+        }}
+      >
+        {halfColors ? (
+          <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, backgroundColor: halfColors.topColor }} />
+            <View style={{ flex: 1, backgroundColor: halfColors.bottomColor }} />
+          </View>
+        ) : (
+          <View style={{ flex: 1, backgroundColor: accentColor }} />
+        )}
+      </View>
+      <View className="flex-1 p-4">
       <View className="flex-row items-start justify-between mb-2">
         <View className="flex-1 pr-3">
           <Text className="text-base font-bold" style={{ color: colors.text }}>
@@ -164,7 +182,17 @@ const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () 
           <Text className="text-xs" style={{ color: colors.muted }}>
             {formatDueDateTime(ticket.dueAt)}
           </Text>
+          {isRescheduledLate && ticket.originalDueAt && (
+            <Text
+              className="text-[10px] mt-0.5"
+              style={{ color: DUE_URGENCY_COLORS.overdue }}
+              numberOfLines={1}
+            >
+              Orig: {formatDueDateTime(ticket.originalDueAt)}
+            </Text>
+          )}
         </View>
+      </View>
       </View>
     </Pressable>
   );

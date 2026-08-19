@@ -463,6 +463,11 @@ function mapTicketRow(ticket) {
         .get(ticket.assigned_tech_id)
     : null;
 
+  // Count reschedules for this ticket
+  const rescheduleCount = db
+    .prepare("SELECT COUNT(*) as c FROM ticket_reschedules WHERE ticket_id = ?")
+    .get(ticket.id)?.c || 0;
+
   return {
     id: ticket.id,
     ticketNumber: ticket.ticket_number,
@@ -478,6 +483,8 @@ function mapTicketRow(ticket) {
       : null,
     areaId: tech ? tech.area_id : null,
     dueAt: ticket.due_at,
+    originalDueAt: ticket.original_due_at ?? ticket.due_at,
+    rescheduleCount,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
     closedAt: ticket.closed_at,

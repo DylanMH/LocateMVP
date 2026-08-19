@@ -29,7 +29,10 @@ import { isTicketClosed } from "../../src/features/tickets/domain/statusMachine"
 import {
   getDueUrgencyBucket,
   getDueAccentColorFromTimestamp,
+  getRescheduledHalfColors,
+  isLateButRescheduled,
   DUE_URGENCY_LABELS,
+  DUE_URGENCY_COLORS,
 } from "../../src/features/tickets/domain/dueColor";
 import { getTicketDisplayData, parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
 import { formatDueDateTime } from "../../src/utils/date";
@@ -568,16 +571,34 @@ function RescheduleTab({
             const dueBucket = getDueUrgencyBucket(item.dueAt);
             const dueColor = getDueAccentColorFromTimestamp(item.dueAt);
             const dueLabel = DUE_URGENCY_LABELS[dueBucket];
+            const halfColors = getRescheduledHalfColors(item.dueAt, item.originalDueAt);
+            const isRescheduledLate = isLateButRescheduled(item.dueAt, item.originalDueAt);
             return (
               <Pressable
                 onPress={() => onToggleSelect(item.id)}
-                className="rounded-2xl p-4"
+                className="rounded-2xl flex-row"
                 style={{
                   backgroundColor: colors.surface,
-                  borderLeftWidth: 4,
-                  borderLeftColor: dueColor,
                 }}
               >
+                {/* Left color bar — half red / half new-due-color when late-but-rescheduled */}
+                <View
+                  style={{
+                    width: 4,
+                    borderTopLeftRadius: 16,
+                    borderBottomLeftRadius: 16,
+                  }}
+                >
+                  {halfColors ? (
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flex: 1, backgroundColor: halfColors.topColor }} />
+                      <View style={{ flex: 1, backgroundColor: halfColors.bottomColor }} />
+                    </View>
+                  ) : (
+                    <View style={{ flex: 1, backgroundColor: dueColor }} />
+                  )}
+                </View>
+                <View className="flex-1 p-4">
                 <View className="flex-row items-center justify-between">
                   <View className="flex-1">
                     <View className="flex-row items-center" style={{ gap: 6 }}>
@@ -604,6 +625,14 @@ function RescheduleTab({
                       <Text className="text-xs" style={{ color: colors.muted }}>
                         Due: {formatDueDateTime(item.dueAt)}
                       </Text>
+                      {isRescheduledLate && item.originalDueAt && (
+                        <Text
+                          className="text-[10px]"
+                          style={{ color: DUE_URGENCY_COLORS.overdue }}
+                        >
+                          Orig: {formatDueDateTime(item.originalDueAt)}
+                        </Text>
+                      )}
                       {contractor && (
                         <Text className="text-xs" style={{ color: colors.muted }}>
                           · {contractor}
@@ -624,6 +653,7 @@ function RescheduleTab({
                       </Text>
                     )}
                   </View>
+                </View>
                 </View>
               </Pressable>
             );
