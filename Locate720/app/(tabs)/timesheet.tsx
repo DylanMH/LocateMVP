@@ -121,7 +121,7 @@ export default function Timesheet() {
       }
 
       const now = Date.now();
-      const today = new Date().toISOString().split("T")[0];
+      const today = getTodayDateString();
 
       let newSessionId = "";
       const orphanCloseOuts: Array<{

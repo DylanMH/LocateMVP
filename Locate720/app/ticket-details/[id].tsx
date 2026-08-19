@@ -44,6 +44,7 @@ import {
 import { getTicketTypeColor } from "../../src/features/tickets/utils/ticketPresentation";
 import { colors } from "../../src/ui/colors";
 import { formatDueDateTime } from "../../src/utils/date";
+import { getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
 import { logger } from "../../src/utils/logger";
 
 function normalizeNumericString(value: unknown): string {
@@ -135,7 +136,7 @@ function useClockedInStatus(userId?: string) {
   useEffect(() => {
     if (!userId) return;
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getTodayDateString();
     const sessionsCollection = database.collections.get<DaySession>("day_sessions");
 
     const checkClockedInStatus = async () => {

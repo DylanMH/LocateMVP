@@ -15,7 +15,7 @@ import Ticket from "../../src/db/models/Ticket";
 import DaySession from "../../src/db/models/DaySession";
 import ClockEvent from "../../src/db/models/ClockEvent";
 import { useAuth } from "../../src/features/auth/AuthContext";
-import { getTodayStartTimestamp } from "../../src/features/timesheet/utils/breakStatus";
+import { getTodayStartTimestamp, getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketCard } from "../../src/features/tickets/components/TicketCard";
 import { CompactTicketCard } from "../../src/features/tickets/components/CompactTicketCard";
 import { FilterChips } from "../../src/features/tickets/components/FilterChips";
@@ -60,7 +60,7 @@ export default function TicketsScreen() {
     if (!user) return;
 
     try {
-      const today = new Date().toISOString().split("T")[0];
+      const today = getTodayDateString();
       const sessionsCollection =
         database.collections.get<DaySession>("day_sessions");
 
@@ -130,7 +130,7 @@ export default function TicketsScreen() {
     if (!user) return;
 
     setIsCheckingClock(true);
-    const today = new Date().toISOString().split("T")[0];
+    const today = getTodayDateString();
     const sessionsCollection =
       database.collections.get<DaySession>("day_sessions");
 

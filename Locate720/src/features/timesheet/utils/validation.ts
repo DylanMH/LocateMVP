@@ -8,7 +8,7 @@ import { database } from '../../../db/database';
 import Ticket from '../../../db/models/Ticket';
 import DaySession from '../../../db/models/DaySession';
 import ClockEvent from '../../../db/models/ClockEvent';
-import { checkUserBreakStatus } from './breakStatus';
+import { checkUserBreakStatus, getTodayDateString } from './breakStatus';
 import { createClockEvent } from '../../tickets/domain/outbox';
 import { SyncEngine } from '../../tickets/sync/SyncEngine';
 import { API_BASE_URL, ENDPOINTS } from '../../../config/api';
@@ -90,7 +90,7 @@ export function getActiveTicketsErrorMessage(
 }
 
 export async function getLatestTodaySession(userId: string): Promise<DaySession | null> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayDateString();
   const sessionsCollection = database.collections.get<DaySession>('day_sessions');
   const sessions = await sessionsCollection
     .query(

@@ -107,10 +107,15 @@ export async function checkUserBreakStatus(
 }
 
 /**
- * Get today's date in YYYY-MM-DD format
+ * Get today's date in YYYY-MM-DD format (local timezone).
+ *
+ * Uses toLocaleDateString with en-CA locale which produces YYYY-MM-DD.
+ * This avoids the UTC rollover bug where new Date().toISOString().split('T')[0]
+ * returns the UTC calendar date, which can differ from the local calendar
+ * date near local midnight (e.g. 11pm CST = 5am UTC next day).
  */
 export function getTodayDateString(): string {
-  return new Date().toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA');
 }
 
 /**

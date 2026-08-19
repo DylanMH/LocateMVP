@@ -9,6 +9,7 @@ import { database } from "../src/db/database";
 import DaySession from "../src/db/models/DaySession";
 import { Q } from "@nozbe/watermelondb";
 import { locationTracker } from "../src/features/tracking/locationTracker";
+import { getTodayDateString } from "../src/features/timesheet/utils/breakStatus";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, token, isLoading } = useAuth();
@@ -24,7 +25,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getTodayDateString();
     const sessionsCollection =
       database.collections.get<DaySession>("day_sessions");
 
@@ -96,7 +97,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
  */
 async function cleanOrphanedSessions() {
   try {
-    const today = new Date().toISOString().split("T")[0];
+    const today = getTodayDateString();
     const sessionsCollection =
       database.collections.get<DaySession>("day_sessions");
 
