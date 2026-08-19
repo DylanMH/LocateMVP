@@ -267,6 +267,7 @@ export class TicketsService {
       approval_name: string | null;
       approval_phone: string | null;
       excavator_response: string | null;
+      eight_one_one_revision_state: string | null;
       source: string;
       notes: string | null;
       created_at: number;
