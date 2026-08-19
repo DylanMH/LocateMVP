@@ -101,6 +101,11 @@ export function RescheduleModal({
   };
 
   const handleSubmit = async () => {
+    // Prevent rescheduling tickets that are already past due
+    if (currentDueAt && currentDueAt < Date.now()) {
+      setError("This ticket is already past its due date and cannot be rescheduled.");
+      return;
+    }
     if (!proposedDueAt) {
       setError("Please select an extension option or custom date");
       return;

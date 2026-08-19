@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import Ticket from "../../../db/models/Ticket";
 import { formatDueDateTime } from "../../../utils/date";
-import { getDueAccentColorFromTimestamp, getRescheduledHalfColors, isLateButRescheduled, DUE_URGENCY_COLORS } from "../domain/dueColor";
+import { getDueAccentColorFromTimestamp, getRescheduledHalfColors, isRescheduled, DUE_URGENCY_COLORS } from "../domain/dueColor";
 import {
   formatTicketType,
   getTicketDisplayData,
@@ -29,7 +29,7 @@ const CompactTicketCardComponent = ({
 }) => {
   const dueBorderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
   const halfColors = getRescheduledHalfColors(ticket.dueAt, ticket.originalDueAt);
-  const isRescheduledLate = isLateButRescheduled(ticket.dueAt, ticket.originalDueAt);
+  const isRescheduledLate = isRescheduled(ticket.dueAt, ticket.originalDueAt);
   const { customers, workType } = getTicketDisplayData(ticket.payloadJson);
 
   // Active-status highlighting: use status color for border + subtle tint

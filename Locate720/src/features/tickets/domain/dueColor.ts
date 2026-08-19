@@ -111,33 +111,31 @@ export function getDueAccentColorFromTimestamp(
 }
 
 /**
- * Check if a ticket is "late but rescheduled" — the original due date has
- * passed but the current due date is in the future. This is used for the
- * half-color indicator (top red, bottom new due color).
+ * Check if a ticket has been rescheduled — the original due date differs
+ * from the current due date. Used for the half-color indicator.
  */
-export function isLateButRescheduled(
+export function isRescheduled(
   dueAt?: number,
   originalDueAt?: number,
-  nowMs: number = Date.now(),
 ): boolean {
   if (!dueAt || !originalDueAt) return false;
-  if (originalDueAt === dueAt) return false;
-  return originalDueAt < nowMs && dueAt > nowMs;
+  return originalDueAt !== dueAt;
 }
 
 /**
- * Returns the two colors for a half-color indicator when a ticket is
- * late but rescheduled. Top color = red (overdue), bottom color = the
- * new due date's urgency color.
+ * Returns the two colors for a half-color indicator when a ticket has
+ * been rescheduled. Top color = the urgency color based on the ORIGINAL
+ * due date (what color the ticket would have been before rescheduling),
+ * bottom color = the urgency color based on the NEW due date.
  */
 export function getRescheduledHalfColors(
   dueAt?: number,
   originalDueAt?: number,
   nowMs: number = Date.now(),
 ): { topColor: string; bottomColor: string } | null {
-  if (!isLateButRescheduled(dueAt, originalDueAt, nowMs)) return null;
+  if (!isRescheduled(dueAt, originalDueAt)) return null;
   return {
-    topColor: DUE_URGENCY_COLORS.overdue,
+    topColor: getDueAccentColorFromTimestamp(originalDueAt, nowMs),
     bottomColor: getDueAccentColorFromTimestamp(dueAt, nowMs),
   };
 }

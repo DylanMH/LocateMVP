@@ -329,10 +329,17 @@ router.post('/:id/reschedule', (req, res) => {
     return res.status(404).json(result);
   }
 
+  // Prevent rescheduling tickets that are already past due
+  if (ticket.due_at && ticket.due_at < Date.now()) {
+    const result = { requestId, status: 'ERROR', error: 'Cannot reschedule a ticket that is already past due' };
+    markEventProcessed(requestId, result);
+    return res.status(400).json(result);
+  }
+
   // Identify who is performing the reschedule
   const performedBy = getAuthenticatedUser(req);
   const performedByUserId = performedBy?.id || null;
-  const performedByName = performedBy?.name || performedBy?.username || null;
+  const performedByName = performedBy?.name || performedBy?.email || null;
 
   const previousDueAt = ticket.due_at;
   const originalDueAt = ticket.original_due_at ?? previousDueAt;
@@ -495,11 +502,24 @@ router.post('/reschedule-bulk', (req, res) => {
     return res.status(400).json(result);
   }
 
+  // Prevent rescheduling tickets that are already past due
+  const now = Date.now();
+  const lateTickets = tickets.filter((t) => t.due_at && t.due_at < now);
+  if (lateTickets.length > 0) {
+    const lateNumbers = lateTickets.map((t) => t.ticket_number).join(', ');
+    const result = {
+      requestId,
+      status: 'ERROR',
+      error: `Cannot reschedule tickets that are already past due: ${lateNumbers}`,
+    };
+    markEventProcessed(requestId, result);
+    return res.status(400).json(result);
+  }
+
   // Identify who is performing the bulk reschedule
   const performedBy = getAuthenticatedUser(req);
   const performedByUserId = performedBy?.id || null;
 
-  const now = Date.now();
   const results = [];
 
   const tx = db.transaction(() => {

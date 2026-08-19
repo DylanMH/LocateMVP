@@ -30,7 +30,7 @@ import {
   getDueUrgencyBucket,
   getDueAccentColorFromTimestamp,
   getRescheduledHalfColors,
-  isLateButRescheduled,
+  isRescheduled,
   DUE_URGENCY_LABELS,
   DUE_URGENCY_COLORS,
 } from "../../src/features/tickets/domain/dueColor";
@@ -572,7 +572,7 @@ function RescheduleTab({
             const dueColor = getDueAccentColorFromTimestamp(item.dueAt);
             const dueLabel = DUE_URGENCY_LABELS[dueBucket];
             const halfColors = getRescheduledHalfColors(item.dueAt, item.originalDueAt);
-            const isRescheduledLate = isLateButRescheduled(item.dueAt, item.originalDueAt);
+            const isRescheduledLate = isRescheduled(item.dueAt, item.originalDueAt);
             return (
               <Pressable
                 onPress={() => onToggleSelect(item.id)}

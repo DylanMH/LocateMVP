@@ -6,7 +6,7 @@ import Ticket from "../../../db/models/Ticket";
 import { colors } from "../../../ui/colors";
 import { formatDueDateTime } from "../../../utils/date";
 import { logger } from "../../../utils/logger";
-import { getDueAccentColorFromTimestamp, getRescheduledHalfColors, isLateButRescheduled, DUE_URGENCY_COLORS } from "../domain/dueColor";
+import { getDueAccentColorFromTimestamp, getRescheduledHalfColors, isRescheduled, DUE_URGENCY_COLORS } from "../domain/dueColor";
 import {
   formatTicketType,
   getTicketDisplayData,
@@ -49,7 +49,7 @@ async function handleAddressPress(address: string) {
 const TicketCardComponent = ({ ticket, onPress }: { ticket: Ticket; onPress: () => void }) => {
   const dueBorderColor = getDueAccentColorFromTimestamp(ticket.dueAt);
   const halfColors = getRescheduledHalfColors(ticket.dueAt, ticket.originalDueAt);
-  const isRescheduledLate = isLateButRescheduled(ticket.dueAt, ticket.originalDueAt);
+  const isRescheduledLate = isRescheduled(ticket.dueAt, ticket.originalDueAt);
   const { workType, contractor, contractorPhone, customers } =
     getTicketDisplayData(ticket.payloadJson);
 
