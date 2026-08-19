@@ -623,8 +623,8 @@ export function TicketDetailModal({ ticket, isOpen, onClose }: TicketDetailModal
         ticketId={ticket.id}
         ticketNumber={ticket.ticketNumber}
         currentDueAt={ticket.dueAt}
-        contractorName={payload.contractor || payload.contractorName}
-        contractorEmail={payload.contactEmail || payload.contact_email}
+        contractorName={payload.contractor}
+        contractorEmail={payload.contactEmail}
         address={ticket.address}
       />
     </div>
