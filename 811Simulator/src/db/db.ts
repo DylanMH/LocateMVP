@@ -28,6 +28,7 @@ ensureColumn("tickets_811", "external_root_number", "ALTER TABLE tickets_811 ADD
 ensureColumn("tickets_811", "assigned_tech_name", "ALTER TABLE tickets_811 ADD COLUMN assigned_tech_name TEXT");
 ensureColumn("tickets_811", "assigned_tech_id", "ALTER TABLE tickets_811 ADD COLUMN assigned_tech_id TEXT");
 ensureColumn("tickets_811", "locator_status", "ALTER TABLE tickets_811 ADD COLUMN locator_status TEXT NOT NULL DEFAULT 'PENDING'");
+ensureColumn("tickets_811", "original_due_at", "ALTER TABLE tickets_811 ADD COLUMN original_due_at INTEGER");
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_root ON tickets_811(root_ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets_811(parent_ticket_id)`);

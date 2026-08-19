@@ -474,6 +474,37 @@ ensureColumnExists(
   "ALTER TABLE tickets ADD COLUMN external_root_number TEXT",
 );
 
+// Rescheduling: preserve the original due date when a ticket is rescheduled.
+ensureColumnExists(
+  "tickets",
+  "original_due_at",
+  "ALTER TABLE tickets ADD COLUMN original_due_at INTEGER",
+);
+
+// Rescheduling history table (append-only).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ticket_reschedules (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL,
+    previous_due_at INTEGER NOT NULL,
+    new_due_at INTEGER NOT NULL,
+    reason TEXT,
+    approver_user_id TEXT,
+    performed_by_user_id TEXT,
+    excavator_response TEXT,
+    eight_one_one_revision_state TEXT,
+    notes TEXT,
+    request_id TEXT UNIQUE,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id),
+    FOREIGN KEY (approver_user_id) REFERENCES users(id),
+    FOREIGN KEY (performed_by_user_id) REFERENCES users(id)
+  );
+`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_reschedules_ticket ON ticket_reschedules(ticket_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_reschedules_created ON ticket_reschedules(created_at)`);
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_root ON tickets(root_ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_ticket_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_ext_root ON tickets(external_root_number)`);

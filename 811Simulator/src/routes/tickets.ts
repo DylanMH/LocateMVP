@@ -26,6 +26,7 @@ function shapeTicketForApi(t: any) {
     createdAt: t.created_at,
     updatedAt: t.updated_at,
     dueAt: t.due_at,
+    originalDueAt: t.original_due_at,
     address: `${t.address_line1}, ${t.city}, ${t.state} ${t.zip}`,
     lat: t.lat,
     lng: t.lng,
@@ -388,6 +389,77 @@ export async function ticketsRoutes(app: FastifyInstance) {
     } catch (error) {
       console.error('[811Sim] Error updating ticket status:', error);
       return reply.code(500).send({ error: "Failed to update status" });
+    }
+  });
+
+  // Revise the due date of an existing ticket.
+  // This is the 811-side rescheduling operation. It:
+  //   - Preserves the original due_at in original_due_at (set on first revision)
+  //   - Updates due_at to the new value
+  //   - Increments version
+  //   - Logs a DUE_REVISED event in the event log
+  //   - Notifies the L720 backend to re-ingest
+  app.post("/api/811/tickets/:ticketId/revise-due", async (req, reply) => {
+    const { ticketId } = req.params as any;
+    const bodySchema = z.object({
+      newDueAt: z.number().int().positive(),
+      reason: z.string().optional(),
+      requestedBy: z.string().optional(),
+    });
+    const body = bodySchema.parse(req.body ?? {});
+
+    try {
+      const ticket = db.prepare(`SELECT * FROM tickets_811 WHERE id = ?`).get(ticketId) as any;
+      if (!ticket) return reply.code(404).send({ error: "Ticket not found" });
+
+      const now = Date.now();
+      const previousDueAt = ticket.due_at;
+
+      // Set original_due_at on first revision; preserve it on subsequent revisions
+      const originalDueAt = ticket.original_due_at ?? previousDueAt;
+
+      db.prepare(`
+        UPDATE tickets_811
+        SET due_at = ?,
+            original_due_at = ?,
+            updated_at = ?,
+            version = version + 1
+        WHERE id = ?
+      `).run(body.newDueAt, originalDueAt, now, ticketId);
+
+      db.prepare(`
+        INSERT INTO ticket_event_log_811 (id, ticket_id, type, occurred_at, payload_json)
+        VALUES (?, ?, 'DUE_REVISED', ?, ?)
+      `).run(
+        crypto.randomUUID(),
+        ticketId,
+        now,
+        JSON.stringify({
+          previousDueAt,
+          newDueAt: body.newDueAt,
+          originalDueAt,
+          reason: body.reason,
+          requestedBy: body.requestedBy,
+        }),
+      );
+
+      console.log(`[811Sim] Ticket ${ticketId} due revised: ${previousDueAt} -> ${body.newDueAt}`);
+
+      // Notify L720 backend to re-ingest the updated ticket
+      await notifyL720BackendOf811Change({ since: now - 1000 });
+
+      const updated = db.prepare(`SELECT * FROM tickets_811 WHERE id = ?`).get(ticketId) as any;
+      return reply.send({
+        success: true,
+        ticketId,
+        previousDueAt,
+        newDueAt: body.newDueAt,
+        originalDueAt,
+        version: updated.version,
+      });
+    } catch (error) {
+      console.error('[811Sim] Error revising due date:', error);
+      return reply.code(500).send({ error: "Failed to revise due date" });
     }
   });
 }

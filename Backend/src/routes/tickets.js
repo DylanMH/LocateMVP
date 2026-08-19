@@ -5,6 +5,9 @@ import {
   getChainByTicketId,
   getChainWithSummaries,
 } from '../services/ticketChainService.js';
+import { isEventProcessed, markEventProcessed, getProcessedEventResult } from '../services/idempotencyService.js';
+import { queueOutbound811Event } from '../services/outbound811Service.js';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -255,6 +258,250 @@ router.get('/stats/summary', (req, res) => {
       return acc;
     }, {}),
   });
+});
+
+/**
+ * POST /api/tickets/:id/reschedule
+ * Reschedule a single ticket's due date.
+ *
+ * - Preserves original_due_at (set on first reschedule)
+ * - Appends to ticket_reschedules history table
+ * - Updates due_at and version on the ticket
+ * - Queues an outbound 811 event (TICKET_DUE_REVISED)
+ * - Idempotent via request_id
+ *
+ * Body: { newDueAt, reason?, requestId, approverUserId?, notes? }
+ */
+router.post('/:id/reschedule', (req, res) => {
+  const { id } = req.params;
+  const { newDueAt, reason, requestId, approverUserId, notes } = req.body;
+
+  if (!newDueAt || typeof newDueAt !== 'number') {
+    return res.status(400).json({ error: 'newDueAt (number) required' });
+  }
+  if (!requestId || typeof requestId !== 'string') {
+    return res.status(400).json({ error: 'requestId required for idempotency' });
+  }
+
+  // Idempotency check
+  if (isEventProcessed(requestId)) {
+    const cached = getProcessedEventResult(requestId);
+    return res.json(cached);
+  }
+
+  const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+  if (!ticket) {
+    const result = { requestId, status: 'ERROR', error: 'Ticket not found' };
+    markEventProcessed(requestId, result);
+    return res.status(404).json(result);
+  }
+
+  const previousDueAt = ticket.due_at;
+  const originalDueAt = ticket.original_due_at ?? previousDueAt;
+  const now = Date.now();
+  const rescheduleId = crypto.randomUUID();
+
+  const tx = db.transaction(() => {
+    // Update ticket due_at and preserve original_due_at
+    db.prepare(`
+      UPDATE tickets
+      SET due_at = ?, original_due_at = ?, version = version + 1, updated_at = ?
+      WHERE id = ?
+    `).run(newDueAt, originalDueAt, now, id);
+
+    // Append to reschedule history
+    db.prepare(`
+      INSERT INTO ticket_reschedules (
+        id, ticket_id, previous_due_at, new_due_at, reason,
+        approver_user_id, performed_by_user_id, notes, request_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      rescheduleId, id, previousDueAt, newDueAt, reason || null,
+      approverUserId || null, null, notes || null, requestId, now,
+    );
+
+    // Queue outbound 811 event for the simulator to revise due
+    if (ticket.external_ticket_id) {
+      queueOutbound811Event(db, {
+        ticketId: id,
+        externalTicketId: ticket.external_ticket_id,
+        eventType: 'TICKET_DUE_REVISED',
+        payload: {
+          notes: JSON.stringify({
+            previousDueAt,
+            newDueAt,
+            originalDueAt,
+            reason,
+          }),
+        },
+      });
+    }
+  });
+
+  try {
+    tx();
+    const result = {
+      requestId,
+      status: 'OK',
+      ticketId: id,
+      previousDueAt,
+      newDueAt,
+      originalDueAt,
+      rescheduleId,
+    };
+    markEventProcessed(requestId, result);
+    console.log(`[Tickets] Rescheduled ${id}: due ${previousDueAt} -> ${newDueAt}`);
+    res.json(result);
+  } catch (error) {
+    console.error('[Tickets] Reschedule failed:', error.message);
+    const result = { requestId, status: 'ERROR', error: error.message };
+    markEventProcessed(requestId, result);
+    res.status(500).json(result);
+  }
+});
+
+/**
+ * POST /api/tickets/reschedule-bulk
+ * Reschedule multiple tickets from the same contractor.
+ *
+ * Body: { ticketIds: string[], newDueAt, reason?, requestId, approverUserId? }
+ * Rejects if tickets belong to different contractors.
+ */
+router.post('/reschedule-bulk', (req, res) => {
+  const { ticketIds, newDueAt, reason, requestId, approverUserId } = req.body;
+
+  if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
+    return res.status(400).json({ error: 'ticketIds (non-empty array) required' });
+  }
+  if (!newDueAt || typeof newDueAt !== 'number') {
+    return res.status(400).json({ error: 'newDueAt (number) required' });
+  }
+  if (!requestId || typeof requestId !== 'string') {
+    return res.status(400).json({ error: 'requestId required for idempotency' });
+  }
+
+  if (isEventProcessed(requestId)) {
+    const cached = getProcessedEventResult(requestId);
+    return res.json(cached);
+  }
+
+  // Fetch all tickets and verify same contractor
+  const placeholders = ticketIds.map(() => '?').join(',');
+  const tickets = db.prepare(`SELECT * FROM tickets WHERE id IN (${placeholders})`).all(...ticketIds);
+
+  if (tickets.length !== ticketIds.length) {
+    const found = new Set(tickets.map((t) => t.id));
+    const missing = ticketIds.filter((tid) => !found.has(tid));
+    const result = { requestId, status: 'ERROR', error: `Tickets not found: ${missing.join(', ')}` };
+    markEventProcessed(requestId, result);
+    return res.status(404).json(result);
+  }
+
+  // Check contractor consistency
+  const contractors = new Set(
+    tickets.map((t) => {
+      try {
+        const payload = JSON.parse(t.payload_json || '{}');
+        return payload.contractor || payload.contractorName || null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  if (contractors.size > 1) {
+    const result = {
+      requestId,
+      status: 'ERROR',
+      error: 'Cannot reschedule tickets from different contractors',
+      contractors: Array.from(contractors),
+    };
+    markEventProcessed(requestId, result);
+    return res.status(400).json(result);
+  }
+
+  const now = Date.now();
+  const results = [];
+
+  const tx = db.transaction(() => {
+    for (const ticket of tickets) {
+      const previousDueAt = ticket.due_at;
+      const originalDueAt = ticket.original_due_at ?? previousDueAt;
+      const rescheduleId = crypto.randomUUID();
+      const perRequestId = `${requestId}:${ticket.id}`;
+
+      db.prepare(`
+        UPDATE tickets
+        SET due_at = ?, original_due_at = ?, version = version + 1, updated_at = ?
+        WHERE id = ?
+      `).run(newDueAt, originalDueAt, now, ticket.id);
+
+      db.prepare(`
+        INSERT INTO ticket_reschedules (
+          id, ticket_id, previous_due_at, new_due_at, reason,
+          approver_user_id, notes, request_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        rescheduleId, ticket.id, previousDueAt, newDueAt, reason || null,
+        approverUserId || null, null, perRequestId, now,
+      );
+
+      if (ticket.external_ticket_id) {
+        queueOutbound811Event(db, {
+          ticketId: ticket.id,
+          externalTicketId: ticket.external_ticket_id,
+          eventType: 'TICKET_DUE_REVISED',
+          payload: {
+            notes: JSON.stringify({
+              previousDueAt,
+              newDueAt,
+              originalDueAt,
+              reason,
+            }),
+          },
+        });
+      }
+
+      results.push({
+        ticketId: ticket.id,
+        previousDueAt,
+        newDueAt,
+        originalDueAt,
+        rescheduleId,
+      });
+    }
+  });
+
+  try {
+    tx();
+    const result = {
+      requestId,
+      status: 'OK',
+      rescheduledCount: results.length,
+      results,
+    };
+    markEventProcessed(requestId, result);
+    console.log(`[Tickets] Bulk rescheduled ${results.length} tickets to due ${newDueAt}`);
+    res.json(result);
+  } catch (error) {
+    console.error('[Tickets] Bulk reschedule failed:', error.message);
+    const result = { requestId, status: 'ERROR', error: error.message };
+    markEventProcessed(requestId, result);
+    res.status(500).json(result);
+  }
+});
+
+/**
+ * GET /api/tickets/:id/reschedules
+ * Get reschedule history for a ticket.
+ */
+router.get('/:id/reschedules', (req, res) => {
+  const { id } = req.params;
+  const history = db.prepare(`
+    SELECT * FROM ticket_reschedules
+    WHERE ticket_id = ?
+    ORDER BY created_at DESC
+  `).all(id);
+  res.json({ ticketId: id, reschedules: history });
 });
 
 export default router;

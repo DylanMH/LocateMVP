@@ -80,6 +80,13 @@ export async function processOutbound811Events(db) {
         await sendTicketClosureTo811(event.external_ticket_id, payload);
       } else if (event.event_type === 'TICKET_STATUS_UPDATE') {
         await sendStatusUpdateTo811(event.external_ticket_id, payload);
+      } else if (event.event_type === 'TICKET_DUE_REVISED') {
+        // Parse the reschedule payload from notes (stored as JSON)
+        let reschedulePayload = {};
+        try {
+          reschedulePayload = JSON.parse(event.notes || '{}');
+        } catch { /* ignore */ }
+        await sendDueRevisionTo811(event.external_ticket_id, reschedulePayload);
       }
 
       // Mark as completed
@@ -181,6 +188,37 @@ async function sendStatusUpdateTo811(externalTicketId, payload) {
   // For now, 811 Simulator only handles closures
   // Status updates could be implemented later if needed
   console.log(`[Outbound811] Status update not implemented for 811 ticket ${externalTicketId}:`, payload);
+}
+
+/**
+ * Send due date revision to 811 Simulator
+ * @param {string} externalTicketId - 811 ticket ID
+ * @param {Object} payload - Reschedule payload { previousDueAt, newDueAt, originalDueAt, reason }
+ */
+async function sendDueRevisionTo811(externalTicketId, payload) {
+  const response = await fetch(`${SIMULATOR_URL}/api/811/tickets/${externalTicketId}/revise-due`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      newDueAt: payload.newDueAt,
+      reason: payload.reason,
+      requestedBy: 'l720-backend',
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    const error = new Error(`811 API error: ${response.status} ${response.statusText} - ${errorText}`);
+    error.statusCode = response.status;
+    error.nonRetryable = response.status >= 400 && response.status < 500;
+    throw error;
+  }
+
+  const result = await response.json();
+  console.log(`[Outbound811] 811 acknowledged due revision for ${externalTicketId}:`, result);
+  return result;
 }
 
 /**

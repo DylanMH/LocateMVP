@@ -199,10 +199,21 @@ export async function upsert811Ticket(db, ticket811) {
   if (existing) {
     // Update existing ticket (only 811 fields, preserve L720 workflow fields)
     // Lineage fields are immutable once set — only fill in if missing, never overwrite.
+    //
+    // Rescheduling guard: if the ticket has been locally rescheduled
+    // (original_due_at IS NOT NULL), don't overwrite due_at with the
+    // incoming 811 value unless the 811 simulator has actually revised
+    // the due date (detected by comparing incoming due_at to original_due_at;
+    // if they differ, the simulator has revised it and we accept the new value).
     const updateStmt = db.prepare(`
       UPDATE tickets 
       SET ticket_number = ?, ticket_type = ?, address = ?, lat = ?, lng = ?,
-          due_at = ?, payload_json = ?, last_811_sync_at = ?, 
+          due_at = CASE
+            WHEN original_due_at IS NOT NULL AND ? = original_due_at THEN due_at
+            ELSE ?
+          END,
+          original_due_at = COALESCE(original_due_at, ?),
+          payload_json = ?, last_811_sync_at = ?, 
           updated_at = ?, version = version + 1,
           root_ticket_id = COALESCE(root_ticket_id, ?),
           parent_ticket_id = COALESCE(parent_ticket_id, ?),
@@ -221,6 +232,8 @@ export async function upsert811Ticket(db, ticket811) {
       l720Ticket.address,
       l720Ticket.lat,
       l720Ticket.lng,
+      l720Ticket.due_at,
+      l720Ticket.due_at,
       l720Ticket.due_at,
       l720Ticket.payload_json,
       Date.now(), // last_811_sync_at
