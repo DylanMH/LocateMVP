@@ -1,0 +1,18 @@
+export const spacing = {
+  screen: 16,
+  tight: 8,
+  tightSm: 6,
+  normal: 12,
+  section: 20,
+  sectionSm: 16,
+  card: 16,
+  cardSm: 12,
+  item: 12,
+  itemSm: 8,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+} as const;
