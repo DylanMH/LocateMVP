@@ -317,77 +317,109 @@ export default function TechDetailScreen() {
             >
               Tickets
             </Text>
-            {techTickets.map((ticket) => (
-              <Pressable
-                key={ticket.id}
-                onPress={() =>
-                  router.push({
-                    pathname: "/(supervisor)/ops-ticket/[id]",
-                    params: { id: ticket.id },
-                  })
-                }
-                className="rounded-2xl p-4 mb-3 flex-row items-center"
-                style={{ backgroundColor: colors.surface }}
-              >
-                <View className="flex-1">
-                  <Text
-                    className="text-sm font-bold"
-                    style={{ color: colors.text }}
-                  >
-                    {ticket.ticketNumber}
-                  </Text>
-                  <Text
-                    className="text-xs mt-1"
-                    style={{ color: colors.muted }}
-                    numberOfLines={1}
-                  >
-                    {ticket.address}
-                  </Text>
-                  <View className="flex-row items-center mt-2" style={{ gap: 8 }}>
-                    <View
-                      className="rounded-full px-2 py-0.5"
-                      style={{ backgroundColor: colors.primary }}
-                    >
+            {techTickets.map((ticket) => {
+              const urgencyColor = ticket.dueUrgency
+                ? DUE_URGENCY_COLORS[ticket.dueUrgency]
+                : colors.muted;
+              const isActive = ticket.locatorStatus === "ONSITE" || ticket.locatorStatus === "ENROUTE";
+              const statusColor =
+                ticket.locatorStatus === "ONSITE"
+                  ? colors.accent
+                  : ticket.locatorStatus === "ENROUTE"
+                    ? colors.lightBlue
+                    : ticket.locatorStatus === "PAUSED"
+                      ? colors.warning
+                      : ticket.locatorStatus === "CLOSED" || ticket.locatorStatus === "UNABLE"
+                        ? colors.success
+                        : colors.muted;
+              return (
+                <Pressable
+                  key={ticket.id}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(supervisor)/ops-ticket/[id]",
+                      params: { id: ticket.id },
+                    })
+                  }
+                  className="rounded-2xl p-4 mb-3 flex-row items-center"
+                  style={{
+                    backgroundColor: colors.surface,
+                    borderLeftWidth: 4,
+                    borderLeftColor: urgencyColor,
+                  }}
+                >
+                  <View className="flex-1">
+                    <View className="flex-row items-center" style={{ gap: 6 }}>
                       <Text
-                        className="text-[10px] font-semibold"
+                        className="text-sm font-bold"
                         style={{ color: colors.text }}
                       >
-                        {ticket.locatorStatus}
+                        {ticket.ticketNumber}
                       </Text>
+                      {isActive ? (
+                        <View
+                          className="rounded-full px-1.5 py-0.5"
+                          style={{ backgroundColor: statusColor + "25" }}
+                        >
+                          <Text
+                            className="text-[9px] font-bold uppercase"
+                            style={{ color: statusColor }}
+                          >
+                            {ticket.locatorStatus}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
-                    {ticket.dueUrgency ? (
+                    <Text
+                      className="text-xs mt-1"
+                      style={{ color: colors.muted }}
+                      numberOfLines={1}
+                    >
+                      {ticket.address}
+                    </Text>
+                    <View className="flex-row items-center mt-2" style={{ gap: 8 }}>
                       <View
                         className="rounded-full px-2 py-0.5"
-                        style={{
-                          backgroundColor:
-                            DUE_URGENCY_COLORS[ticket.dueUrgency] + "30",
-                        }}
+                        style={{ backgroundColor: statusColor + "25" }}
                       >
                         <Text
                           className="text-[10px] font-semibold"
-                          style={{
-                            color: DUE_URGENCY_COLORS[ticket.dueUrgency],
-                          }}
+                          style={{ color: statusColor }}
                         >
-                          {DUE_URGENCY_LABELS[ticket.dueUrgency]}
+                          {ticket.locatorStatus}
                         </Text>
                       </View>
-                    ) : null}
+                      {ticket.dueUrgency ? (
+                        <View
+                          className="rounded-full px-2 py-0.5"
+                          style={{
+                            backgroundColor: urgencyColor + "30",
+                          }}
+                        >
+                          <Text
+                            className="text-[10px] font-semibold"
+                            style={{ color: urgencyColor }}
+                          >
+                            {DUE_URGENCY_LABELS[ticket.dueUrgency]}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text
+                      className="text-xs mt-2"
+                      style={{ color: colors.muted }}
+                    >
+                      Due: {formatDueDateTime(ticket.dueAt)}
+                    </Text>
                   </View>
-                  <Text
-                    className="text-xs mt-2"
-                    style={{ color: colors.muted }}
-                  >
-                    Due: {formatDueDateTime(ticket.dueAt)}
-                  </Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.muted}
-                />
-              </Pressable>
-            ))}
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={colors.muted}
+                  />
+                </Pressable>
+              );
+            })}
           </>
         ) : null}
 

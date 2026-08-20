@@ -290,10 +290,10 @@ export default function OverviewScreen() {
                   Total Footage
                 </Text>
                 <Text className="text-sm font-semibold" style={{ color: colors.text }}>
-                  {teamSummary.totalFootage} ft
+                  {teamSummary.totalFootage.toLocaleString()} ft
                 </Text>
               </View>
-              <View className="flex-row justify-between">
+              <View className="flex-row justify-between mb-3">
                 <Text className="text-sm" style={{ color: colors.muted }}>
                   Open Backlog
                 </Text>
@@ -301,21 +301,21 @@ export default function OverviewScreen() {
                   {teamSummary.openBacklog}
                 </Text>
               </View>
-              <View className="flex-row justify-between mt-3 pt-3" style={{ borderTopColor: colors.bg, borderTopWidth: 1 }}>
+              <View className="flex-row justify-between mb-3 pt-3" style={{ borderTopColor: colors.bg, borderTopWidth: 1 }}>
                 <Text className="text-sm" style={{ color: colors.muted }}>
                   Avg LPH
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold" style={{ color: colors.accent }}>
                   {teamSummary.totalWorkedMinutes > 0
                     ? (teamSummary.totalCompletedTickets / (teamSummary.totalWorkedMinutes / 60)).toFixed(1)
                     : "0.0"}
                 </Text>
               </View>
-              <View className="flex-row justify-between mt-3">
+              <View className="flex-row justify-between">
                 <Text className="text-sm" style={{ color: colors.muted }}>
                   Avg FPH
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold" style={{ color: colors.accent }}>
                   {teamSummary.totalWorkedMinutes > 0
                     ? (teamSummary.totalFootage / (teamSummary.totalWorkedMinutes / 60)).toFixed(1)
                     : "0.0"}
@@ -339,45 +339,66 @@ export default function OverviewScreen() {
               keyExtractor={(item, index) => `${item.type}-${item.id}-${index}`}
               scrollEnabled={false}
               ItemSeparatorComponent={() => <View className="h-2" />}
-              renderItem={({ item }) => (
-                <Pressable
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(supervisor)/ops-ticket/[id]",
-                      params: { id: item.id },
-                    })
-                  }
-                  className="rounded-xl p-4 flex-row items-start"
-                  style={{ backgroundColor: colors.surface }}
-                >
-                  <Ionicons
-                    name={needsAttentionIcon(item.type) as any}
-                    size={20}
-                    color={item.type === "EMERGENCY" ? colors.danger : colors.warning}
-                    style={{ marginRight: 10, marginTop: 2 }}
-                  />
-                  <View className="flex-1">
-                    <Text
-                      className="text-sm font-semibold"
-                      style={{ color: colors.text }}
-                    >
-                      {item.label}
-                    </Text>
-                    <Text
-                      className="text-xs mt-1"
-                      style={{ color: colors.muted }}
-                    >
-                      {item.detail}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={18}
-                    color={colors.muted}
-                    style={{ marginTop: 2 }}
-                  />
-                </Pressable>
-              )}
+              renderItem={({ item }) => {
+                const isEmergency = item.type === "EMERGENCY";
+                const accentColor = isEmergency ? colors.danger : colors.warning;
+                return (
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: "/(supervisor)/ops-ticket/[id]",
+                        params: { id: item.id },
+                      })
+                    }
+                    className="rounded-xl p-4 flex-row items-start"
+                    style={{
+                      backgroundColor: colors.surface,
+                      borderLeftWidth: 4,
+                      borderLeftColor: accentColor,
+                    }}
+                  >
+                    <Ionicons
+                      name={needsAttentionIcon(item.type) as any}
+                      size={20}
+                      color={accentColor}
+                      style={{ marginRight: 10, marginTop: 2 }}
+                    />
+                    <View className="flex-1">
+                      <View className="flex-row items-center" style={{ gap: 6 }}>
+                        <Text
+                          className="text-sm font-semibold"
+                          style={{ color: colors.text }}
+                        >
+                          {item.label}
+                        </Text>
+                        <View
+                          className="rounded-full px-2 py-0.5"
+                          style={{ backgroundColor: accentColor + "25" }}
+                        >
+                          <Text
+                            className="text-[10px] font-bold uppercase"
+                            style={{ color: accentColor }}
+                          >
+                            {isEmergency ? "Emergency" : "No Response"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text
+                        className="text-xs mt-1"
+                        style={{ color: colors.muted }}
+                      >
+                        {item.detail}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={colors.muted}
+                      style={{ marginTop: 2 }}
+                    />
+                  </Pressable>
+                );
+              }}
             />
           </>
         ) : null}
