@@ -10,13 +10,13 @@ import {
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useAuth } from "../../src/features/auth/AuthContext";
+import { useAuth } from "../../../src/features/auth/AuthContext";
 import {
   fetchOpsTeams,
   type TerritoryNode,
-} from "../../src/features/ops/api/opsApiClient";
-import { colors } from "../../src/ui/colors";
-import { logger } from "../../src/utils/logger";
+} from "../../../src/features/ops/api/opsApiClient";
+import { colors } from "../../../src/ui/colors";
+import { logger } from "../../../src/utils/logger";
 
 const TYPE_COLORS: Record<string, string> = {
   DISTRICT: "#7c3aed",

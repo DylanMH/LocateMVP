@@ -7,20 +7,20 @@ import {
   Text,
   View,
 } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useAuth } from "../../src/features/auth/AuthContext";
+import { useAuth } from "../../../src/features/auth/AuthContext";
 import {
   fetchOpsMap,
   type OpsMapMarker,
   type DueUrgency,
   DUE_URGENCY_COLORS,
   DUE_URGENCY_LABELS,
-} from "../../src/features/ops/api/opsApiClient";
-import { colors } from "../../src/ui/colors";
-import { logger } from "../../src/utils/logger";
-import { MapErrorBoundary } from "../../src/features/tickets/components/MapErrorBoundary";
+} from "../../../src/features/ops/api/opsApiClient";
+import { colors } from "../../../src/ui/colors";
+import { logger } from "../../../src/utils/logger";
+import { MapErrorBoundary } from "../../../src/features/tickets/components/MapErrorBoundary";
 
 type MapFilter = "all" | "OVERDUE" | "DUE_WITHIN_2_HOURS" | "DUE_TODAY" | "active";
 
@@ -85,6 +85,7 @@ function Chip({
 
 export default function ManagerMapScreen() {
   const { token } = useAuth();
+  const router = useRouter();
   const [markers, setMarkers] = useState<OpsMapMarker[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -288,7 +289,14 @@ export default function ManagerMapScreen() {
                         }}
                         pinColor={getMarkerColor(marker)}
                       >
-                        <Callout>
+                        <Callout
+                          onPress={() =>
+                            router.push({
+                              pathname: "/(manager)/ops-ticket/[id]",
+                              params: { id: marker.id },
+                            })
+                          }
+                        >
                           <View style={{ maxWidth: 220 }}>
                             <Text
                               style={{
