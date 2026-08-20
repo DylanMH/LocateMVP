@@ -702,6 +702,11 @@ function StickyActionBar({
           </Text>
         </Pressable>
       </View>
+      {isReadOnly && (
+        <Text style={{ color: colors.muted, fontSize: typography.caption, textAlign: "center", marginTop: 6 }}>
+          Clock in on the Timesheet tab to change status
+        </Text>
+      )}
     </View>
   );
 }
@@ -899,10 +904,12 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   const showFloatingTimeCard =
     tab === "CUSTOMER" && Boolean(payload.onsiteStartedAt) && !isClosed;
 
-  // Sticky action bar: visible when ticket is not closed and tech can act
+  // Sticky action bar: visible when ticket is not closed and there are
+  // available workflow transitions.  We show the bar even when read-only
+  // (not clocked in) so the tech can see the workflow — buttons are
+  // disabled in that case via isReadOnly.
   const showStickyActionBar =
     !isClosed &&
-    !isReadOnly &&
     (canTransitionStatus(ticket.locatorStatus as LocatorStatus, "ENROUTE") ||
       canTransitionStatus(ticket.locatorStatus as LocatorStatus, "ONSITE") ||
       canTransitionStatus(ticket.locatorStatus as LocatorStatus, "PAUSED") ||
