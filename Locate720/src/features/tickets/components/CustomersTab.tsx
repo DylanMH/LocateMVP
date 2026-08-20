@@ -384,7 +384,7 @@ export function CustomersTab({
         </Text>
       )}
 
-      {/* Customer progress bar */}
+      {/* Customer count + time allocation summary */}
       {customers.length > 0 && (
         <View
           style={{
@@ -401,24 +401,6 @@ export function CustomersTab({
             <Text style={{ color: colors.muted, fontSize: typography.metadata }}>
               {customers.filter((c) => value[c.id]?.completed === true).length} of {customers.length} complete
             </Text>
-          </View>
-          {/* Progress bar */}
-          <View
-            style={{
-              height: 8,
-              backgroundColor: colors.bg,
-              borderRadius: 4,
-              overflow: "hidden",
-            }}
-          >
-            <View
-              style={{
-                height: "100%",
-                width: `${customers.length > 0 ? (customers.filter((c) => value[c.id]?.completed === true).length / customers.length) * 100 : 0}%`,
-                backgroundColor: colors.success,
-                borderRadius: 4,
-              }}
-            />
           </View>
           {/* Time allocation summary */}
           {Boolean(payload.onsiteStartedAt) && (
@@ -488,18 +470,10 @@ export function CustomersTab({
                 opacity: data.completed ? 0.85 : 1,
               }}
             >
-              {/* Collapsed completed summary */}
+              {/* Collapsed completed summary (read-only — completed
+                  customers cannot be edited) */}
               {isCollapsedCompleted ? (
-                <Pressable
-                  onPress={() => {
-                    setExpandedCompleted((prev) => {
-                      const next = new Set(prev);
-                      next.add(customer.id);
-                      return next;
-                    });
-                  }}
-                  hitSlop={8}
-                >
+                <View>
                   <View className="flex-row items-center justify-between">
                     <View className="flex-1" style={{ marginRight: spacing.sm }}>
                       <View className="flex-row items-center" style={{ gap: 6 }}>
@@ -518,28 +492,8 @@ export function CustomersTab({
                         {data.footage ? ` · ${data.footage} ft` : ""}
                       </Text>
                     </View>
-                    <Pressable
-                      onPress={() => {
-                        setExpandedCompleted((prev) => {
-                          const next = new Set(prev);
-                          next.add(customer.id);
-                          return next;
-                        });
-                      }}
-                      hitSlop={8}
-                      style={{
-                        backgroundColor: colors.surface,
-                        borderRadius: radius.buttonSm,
-                        paddingHorizontal: spacing.normal,
-                        paddingVertical: spacing.tight,
-                      }}
-                    >
-                      <Text style={{ color: colors.accent, fontSize: typography.metadata, fontWeight: typography.weightSemibold }}>
-                        Edit
-                      </Text>
-                    </Pressable>
                   </View>
-                </Pressable>
+                </View>
               ) : (
                 <>
               <View className="flex-row items-center justify-between">
@@ -558,28 +512,10 @@ export function CustomersTab({
                     {customer.name}
                   </Text>
                 </View>
-                {data.completed && (
-                  <View className="flex-row items-center" style={{ gap: 4 }}>
-                    {data.closedByTechName && (
-                      <Text style={{ color: colors.muted, fontSize: typography.captionSm }}>
-                        by {data.closedByTechName}
-                      </Text>
-                    )}
-                    <Pressable
-                      onPress={() => {
-                        setExpandedCompleted((prev) => {
-                          const next = new Set(prev);
-                          next.delete(customer.id);
-                          return next;
-                        });
-                      }}
-                      hitSlop={8}
-                    >
-                      <Text style={{ color: colors.muted, fontSize: typography.caption, fontWeight: typography.weightSemibold }}>
-                        Collapse
-                      </Text>
-                    </Pressable>
-                  </View>
+                {data.completed && data.closedByTechName && (
+                  <Text style={{ color: colors.muted, fontSize: typography.captionSm }}>
+                    by {data.closedByTechName}
+                  </Text>
                 )}
               </View>
 

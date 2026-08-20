@@ -77,14 +77,15 @@ export function matchesFilters(
     if (filters.rescheduled === "NOT_RESCHEDULED" && rescheduled) return false;
   }
 
-  // Emergency filter
-  if (filters.emergency && ticket.ticketType !== "EMERGENCY") {
-    return false;
-  }
-
-  // No Response filter
-  if (filters.noResponse && ticket.ticketType !== "NO_RESPONSE") {
-    return false;
+  // Emergency + No Response filters: these are ticket-type dimensions,
+  // so when both are selected the ticket should match EITHER (OR), not
+  // both (AND).  Selecting both means "show me emergencies AND no-responses".
+  if (filters.emergency || filters.noResponse) {
+    const matchesEmergency = filters.emergency && ticket.ticketType === "EMERGENCY";
+    const matchesNoResponse = filters.noResponse && ticket.ticketType === "NO_RESPONSE";
+    if (!matchesEmergency && !matchesNoResponse) {
+      return false;
+    }
   }
 
   return true;
