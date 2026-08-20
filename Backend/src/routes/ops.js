@@ -1519,6 +1519,13 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
       };
     });
 
+    // Extract contractor info from payload
+    const contractorRaw = payload.contractor;
+    const contractor = typeof contractorRaw === 'string' ? contractorRaw : (contractorRaw?.name || null);
+    const contractorPhone = typeof contractorRaw === 'object' ? (contractorRaw?.phone || payload.contractorPhone || null) : (payload.contractorPhone || null);
+    const contactName = typeof contractorRaw === 'object' ? (contractorRaw?.contact?.name || payload.contactName || null) : (payload.contactName || null);
+    const contactEmail = typeof contractorRaw === 'object' ? (contractorRaw?.contact?.email || payload.contactEmail || null) : (payload.contactEmail || null);
+
     res.json({
       ...mapTicketRow(ticket),
       assignedTech: tech
@@ -1526,6 +1533,10 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
         : null,
       timeAllocation: computeTicketTimeAllocation(ticket),
       customers,
+      contractor,
+      contractorPhone,
+      contactName,
+      contactEmail,
       productionLedger: productionLedger.map((p) => ({
         id: p.id,
         userId: p.user_id,
@@ -2808,12 +2819,14 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
 
     // Needs attention: tickets with ticket_type EMERGENCY or NO_RESPONSE (from 811)
     const attentionTickets = db.prepare(`
-      SELECT id, ticket_number, address, ticket_type, locator_status, due_at, payload_json
-      FROM tickets
-      WHERE assigned_tech_id IN (${ph})
-        AND locator_status NOT IN ('CLOSED','UNABLE')
-        AND ticket_type IN ('EMERGENCY', 'NO_RESPONSE')
-      ORDER BY due_at ASC
+      SELECT t.id, t.ticket_number, t.address, t.ticket_type, t.locator_status, t.due_at, t.payload_json, t.assigned_tech_id,
+             u.name as tech_name
+      FROM tickets t
+      LEFT JOIN users u ON u.id = t.assigned_tech_id
+      WHERE t.assigned_tech_id IN (${ph})
+        AND t.locator_status NOT IN ('CLOSED','UNABLE')
+        AND t.ticket_type IN ('EMERGENCY', 'NO_RESPONSE')
+      ORDER BY t.due_at ASC
     `).all(...techIds);
     const needsAttention = attentionTickets.map((t) => {
       const payload = parseJson(t.payload_json);
@@ -2821,6 +2834,8 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
         id: c.id,
         utility: c.utility || c.utilityType || 'UNKNOWN',
       }));
+      const contractorRaw = payload.contractor;
+      const contractor = typeof contractorRaw === 'string' ? contractorRaw : (contractorRaw?.name || null);
       return {
         type: t.ticket_type,
         id: t.id,
@@ -2829,6 +2844,8 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
         locatorStatus: t.locator_status,
         dueAt: t.due_at,
         customers,
+        assignedTechName: t.tech_name || null,
+        contractor,
       };
     });
 

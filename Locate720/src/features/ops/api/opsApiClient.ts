@@ -63,6 +63,8 @@ export interface OpsOverview {
     locatorStatus?: string;
     dueAt?: number;
     customers?: Array<{ id: string; utility: string }>;
+    assignedTechName?: string | null;
+    contractor?: string | null;
   }>;
   activeTechs: TechOpsSummary[];
   teamSummary: {
@@ -155,6 +157,10 @@ export interface OpsTicketDetail {
     closedAt: number | null;
   };
   customers: OpsTicketCustomer[];
+  contractor: string | null;
+  contractorPhone: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
   notes: Array<{ id: string; author_id: string | null; author_name: string | null; body: string; note_type: string; created_at: number }>;
   events: OpsTicketEvent[];
 }
