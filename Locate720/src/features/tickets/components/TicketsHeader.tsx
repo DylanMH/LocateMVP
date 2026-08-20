@@ -11,11 +11,15 @@ export function TicketsHeader({
   view,
   onChangeView,
   onPressSearch,
+  onPressFilter,
+  filterCount = 0,
 }: {
   userName?: string;
   view: SegmentedToggleOption;
   onChangeView: (next: SegmentedToggleOption) => void;
   onPressSearch: () => void;
+  onPressFilter: () => void;
+  filterCount?: number;
 }) {
   const insets = useSafeAreaInsets();
   const initials = (userName || "Locate Technician")
@@ -61,13 +65,39 @@ export function TicketsHeader({
 
       <View className="flex-row items-center justify-between mt-4">
         <SegmentedToggle value={view} onChange={onChangeView} />
-        <Pressable
-          onPress={onPressSearch}
-          className="w-11 h-11 rounded-2xl items-center justify-center ml-3"
-          style={{ backgroundColor: colors.surface }}
-        >
-          <Ionicons name="search" size={20} color={colors.text} />
-        </Pressable>
+        <View className="flex-row items-center ml-3" style={{ gap: 8 }}>
+          <Pressable
+            onPress={onPressFilter}
+            className="w-11 h-11 rounded-2xl items-center justify-center"
+            style={{ backgroundColor: filterCount > 0 ? colors.primary : colors.surface }}
+          >
+            <Ionicons
+              name="filter"
+              size={20}
+              color={filterCount > 0 ? colors.text : colors.muted}
+            />
+            {filterCount > 0 && (
+              <View
+                className="absolute -top-1 -right-1 w-5 h-5 rounded-full items-center justify-center"
+                style={{ backgroundColor: colors.accent }}
+              >
+                <Text
+                  className="text-xs font-bold"
+                  style={{ color: colors.bg, fontSize: 10 }}
+                >
+                  {filterCount}
+                </Text>
+              </View>
+            )}
+          </Pressable>
+          <Pressable
+            onPress={onPressSearch}
+            className="w-11 h-11 rounded-2xl items-center justify-center"
+            style={{ backgroundColor: colors.surface }}
+          >
+            <Ionicons name="search" size={20} color={colors.text} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );

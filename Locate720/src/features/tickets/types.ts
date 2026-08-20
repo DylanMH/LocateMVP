@@ -28,6 +28,48 @@ export type TicketType =
 export type TicketViewStatusFilter = "OPEN" | "CLOSED";
 export type TicketAssignedFilter = "MINE" | "ALL";
 
+// v1.7 ticket filter system (plan §21-23). These are the technician-
+// selectable filters applied AFTER assignment and active/closed split.
+export type DueFilterCategory =
+    | "ALL"
+    | "OVERDUE"
+    | "DUE_WITHIN_2_HOURS"
+    | "DUE_TODAY"
+    | "DUE_WITHIN_72_HOURS"
+    | "FUTURE";
+
+export type RescheduledFilterCategory = "ALL" | "RESCHEDULED" | "NOT_RESCHEDULED";
+
+export interface TicketFilters {
+    contractor: string | null;       // case-insensitive contractor name, or null = any
+    due: DueFilterCategory;
+    rescheduled: RescheduledFilterCategory;
+    emergency: boolean;              // ticket type EMERGENCY
+    noResponse: boolean;             // ticket type NO_RESPONSE
+}
+
+export const NO_FILTERS: TicketFilters = {
+    contractor: null,
+    due: "ALL",
+    rescheduled: "ALL",
+    emergency: false,
+    noResponse: false,
+};
+
+export function countActiveFilters(filters: TicketFilters): number {
+    let count = 0;
+    if (filters.contractor) count++;
+    if (filters.due !== "ALL") count++;
+    if (filters.rescheduled !== "ALL") count++;
+    if (filters.emergency) count++;
+    if (filters.noResponse) count++;
+    return count;
+}
+
+export function hasActiveFilters(filters: TicketFilters): boolean {
+    return countActiveFilters(filters) > 0;
+}
+
 export type UtilityType = "ELECTRIC" | "FIBER" | "GAS" | "COPPER" | "WATER" | "SEWER";
 
 export interface Customer {

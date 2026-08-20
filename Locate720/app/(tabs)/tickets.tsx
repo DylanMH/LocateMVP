@@ -20,12 +20,14 @@ import { getTodayStartTimestamp, getTodayDateString, getStartOfNextLocalDay } fr
 import { TicketCard } from "../../src/features/tickets/components/TicketCard";
 import { CompactTicketCard } from "../../src/features/tickets/components/CompactTicketCard";
 import { FilterChips } from "../../src/features/tickets/components/FilterChips";
+import { FilterBottomSheet } from "../../src/features/tickets/components/FilterBottomSheet";
 import { TicketsHeader } from "../../src/features/tickets/components/TicketsHeader";
 import { TicketMapView } from "../../src/features/tickets/components/TicketMapView";
 import { RescheduleModal } from "../../src/features/tickets/components/RescheduleModal";
 import { SyncEngine } from "../../src/features/tickets/sync/SyncEngine";
 import { sortTickets } from "../../src/features/tickets/utils/ticketSorting";
 import { isTicketClosed } from "../../src/features/tickets/domain/statusMachine";
+import { matchesFilters } from "../../src/features/tickets/domain/filterPredicate";
 import {
   getDueUrgencyBucket,
   getDueAccentColorFromTimestamp,
@@ -38,6 +40,8 @@ import { getTicketDisplayData, parseTicketPayload } from "../../src/features/tic
 import { formatDueDateTime } from "../../src/utils/date";
 import { colors } from "../../src/ui/colors";
 import type { SegmentedToggleOption } from "../../src/features/tickets/components/SegmentedToggle";
+import type { TicketFilters } from "../../src/features/tickets/types";
+import { NO_FILTERS, countActiveFilters } from "../../src/features/tickets/types";
 
 type TicketViewStatusFilter = "OPEN" | "CLOSED";
 type TicketAssignedFilter = "MINE" | "ALL";
@@ -61,6 +65,8 @@ export default function TicketsScreen() {
   const [clockOutTicketId, setClockOutTicketId] = useState<string | null>(null);
   const [rescheduleSelected, setRescheduleSelected] = useState<Set<string>>(new Set());
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [filters, setFilters] = useState<TicketFilters>(NO_FILTERS);
   const currentUserId = user?.id || "";
 
   // Track the start of the current local day so the Closed tab can filter
@@ -291,6 +297,37 @@ export default function TicketsScreen() {
     );
   }, []);
 
+  // Build the list of known contractors from the current ticket set for the
+  // filter bottom sheet.  Memoized so we don't re-parse every payload on
+  // every render (plan §55).
+  const contractorOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const ticket of tickets) {
+      const display = getTicketDisplayData(ticket.payloadJson);
+      if (display.contractor) {
+        set.add(display.contractor);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [tickets]);
+
+  const handleRemoveFilter = useCallback((key: keyof TicketFilters) => {
+    setFilters((prev) => {
+      if (key === "contractor") return { ...prev, contractor: null };
+      if (key === "due") return { ...prev, due: "ALL" };
+      if (key === "rescheduled") return { ...prev, rescheduled: "ALL" };
+      if (key === "emergency") return { ...prev, emergency: false };
+      if (key === "noResponse") return { ...prev, noResponse: false };
+      return prev;
+    });
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setFilters(NO_FILTERS);
+  }, []);
+
+  const activeFilterCount = countActiveFilters(filters);
+
   const filteredTickets = tickets.filter((ticket) => {
     // If on break, hide all tickets
     if (isOnBreak) {
@@ -328,6 +365,13 @@ export default function TicketsScreen() {
       return false;
     }
 
+    // Apply technician-selected filters (plan §24 step 3).
+    // Filters only apply to the OPEN tab — the CLOSED tab is a daily
+    // operational view and should not be further filtered.
+    if (statusFilter === "OPEN" && !matchesFilters(ticket, filters)) {
+      return false;
+    }
+
     return true;
   });
 
@@ -341,6 +385,8 @@ export default function TicketsScreen() {
         view={view}
         onChangeView={setView}
         onPressSearch={handleSearchPress}
+        onPressFilter={() => setShowFilterSheet(true)}
+        filterCount={activeFilterCount}
       />
       {view !== "RESCHEDULE" ? (
         <FilterChips
@@ -348,8 +394,18 @@ export default function TicketsScreen() {
           onChangeStatus={setStatusFilter}
           assigned={assignedFilter}
           onChangeAssigned={setAssignedFilter}
+          filters={filters}
+          onRemoveFilter={handleRemoveFilter}
+          onClearAllFilters={handleClearAllFilters}
         />
       ) : null}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        filters={filters}
+        contractors={contractorOptions}
+        onApply={setFilters}
+        onClose={() => setShowFilterSheet(false)}
+      />
 
       {view === "MAP" ? (
         <TicketMapView
@@ -475,6 +531,33 @@ export default function TicketsScreen() {
                       </Text>
                     </>
                   )}
+                </>
+              ) : activeFilterCount > 0 ? (
+                <>
+                  <Text
+                    className="text-base font-semibold"
+                    style={{ color: colors.text }}
+                  >
+                    No tickets match your filters.
+                  </Text>
+                  <Text
+                    className="text-sm mt-2"
+                    style={{ color: colors.muted }}
+                  >
+                    Try clearing some filters to see more tickets.
+                  </Text>
+                  <Pressable
+                    onPress={handleClearAllFilters}
+                    className="mt-4 px-4 py-2.5 rounded-xl self-start"
+                    style={{ backgroundColor: colors.surface }}
+                  >
+                    <Text
+                      className="text-sm font-semibold"
+                      style={{ color: colors.accent }}
+                    >
+                      Clear all filters
+                    </Text>
+                  </Pressable>
                 </>
               ) : (
                 <>
