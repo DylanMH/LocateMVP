@@ -2,9 +2,9 @@ import { useState } from "react";
 import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../../src/ui/colors";
-import { useAuth } from "../../src/features/auth/AuthContext";
-import { logger } from "../../src/utils/logger";
+import { colors } from "../../../src/ui/colors";
+import { useAuth } from "../../../src/features/auth/AuthContext";
+import { logger } from "../../../src/utils/logger";
 
 export default function SupervisorProfileScreen() {
   const { user, logout } = useAuth();

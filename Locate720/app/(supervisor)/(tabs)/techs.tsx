@@ -10,15 +10,15 @@ import {
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useAuth } from "../../src/features/auth/AuthContext";
+import { useAuth } from "../../../src/features/auth/AuthContext";
 import {
   fetchOpsTechs,
   type TechOpsSummary,
-} from "../../src/features/ops/api/opsApiClient";
-import { colors } from "../../src/ui/colors";
-import { logger } from "../../src/utils/logger";
-import { formatDuration } from "../../src/utils/formatDuration";
-import { formatTime } from "../../src/utils/date";
+} from "../../../src/features/ops/api/opsApiClient";
+import { colors } from "../../../src/ui/colors";
+import { logger } from "../../../src/utils/logger";
+import { formatDuration } from "../../../src/utils/formatDuration";
+import { formatTime } from "../../../src/utils/date";
 
 type StatusFilter = "all" | "clocked_in" | "onsite" | "enroute" | "paused";
 
@@ -278,7 +278,7 @@ export default function TechsScreen() {
               <View className="flex-row items-center" style={{ gap: 4 }}>
                 <Ionicons name="footsteps" size={12} color={colors.muted} />
                 <Text className="text-xs" style={{ color: colors.muted }}>
-                  {item.today.footageFeet} ft
+                  {item.today.footageFeet.toLocaleString()} ft
                 </Text>
               </View>
               <View className="flex-row items-center" style={{ gap: 4 }}>

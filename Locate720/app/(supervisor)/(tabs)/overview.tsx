@@ -11,15 +11,15 @@ import {
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useAuth } from "../../src/features/auth/AuthContext";
+import { useAuth } from "../../../src/features/auth/AuthContext";
 import {
   fetchOpsOverview,
   type OpsOverview,
-} from "../../src/features/ops/api/opsApiClient";
-import { colors } from "../../src/ui/colors";
-import { logger } from "../../src/utils/logger";
-import { formatDuration } from "../../src/utils/formatDuration";
-import { getUtilityColor, getUtilityIcon } from "../../src/features/tickets/utils/ticketPresentation";
+} from "../../../src/features/ops/api/opsApiClient";
+import { colors } from "../../../src/ui/colors";
+import { logger } from "../../../src/utils/logger";
+import { formatDuration } from "../../../src/utils/formatDuration";
+import { getUtilityColor, getUtilityIcon } from "../../../src/features/tickets/utils/ticketPresentation";
 
 function StatCard({
   label,
@@ -303,20 +303,20 @@ export default function OverviewScreen() {
                 </Text>
               </View>
               <View className="flex-row justify-between mb-3 pt-3" style={{ borderTopColor: colors.bg, borderTopWidth: 1 }}>
-                <Text className="text-sm" style={{ color: colors.muted }}>
-                  Avg LPH
+                <Text className="text-sm flex-1" style={{ color: colors.muted }}>
+                  Avg LPH (locates/hr)
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.accent }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.accent }}>
                   {teamSummary.totalWorkedMinutes > 0
                     ? (teamSummary.totalCompletedTickets / (teamSummary.totalWorkedMinutes / 60)).toFixed(1)
                     : "0.0"}
                 </Text>
               </View>
               <View className="flex-row justify-between">
-                <Text className="text-sm" style={{ color: colors.muted }}>
-                  Avg FPH
+                <Text className="text-sm flex-1" style={{ color: colors.muted }}>
+                  Avg FPH (ft/hr)
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.accent }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.accent }}>
                   {teamSummary.totalWorkedMinutes > 0
                     ? (teamSummary.totalFootage / (teamSummary.totalWorkedMinutes / 60)).toFixed(1)
                     : "0.0"}

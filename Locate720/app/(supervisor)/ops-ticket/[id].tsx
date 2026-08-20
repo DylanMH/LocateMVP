@@ -44,7 +44,11 @@ function StatRow({ label, value }: { label: string; value: string }) {
       <Text className="text-sm" style={{ color: colors.muted }}>
         {label}
       </Text>
-      <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+      <Text
+        className="text-sm font-semibold flex-1 text-right ml-3"
+        style={{ color: colors.text }}
+        numberOfLines={2}
+      >
         {value}
       </Text>
     </View>
