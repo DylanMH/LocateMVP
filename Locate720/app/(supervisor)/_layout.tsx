@@ -82,14 +82,14 @@ export default function SupervisorLayout() {
         }}
       />
       <Tabs.Screen
-        name="tech-details"
+        name="tech-details/[id]"
         options={{
           href: null,
           headerShown: false,
         }}
       />
       <Tabs.Screen
-        name="ops-ticket"
+        name="ops-ticket/[id]"
         options={{
           href: null,
           headerShown: false,

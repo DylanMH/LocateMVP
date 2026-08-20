@@ -77,15 +77,22 @@ export default function TechDetailScreen() {
           setError("Tech not found");
         } else {
           setTech(found);
-          const ticketsData = await fetchOpsTechTickets(token, id);
-          setTechTickets(ticketsData.tickets);
         }
       } catch (e) {
-        logger.error("[Supervisor TechDetail] Failed to load:", e);
+        logger.error("[Supervisor TechDetail] Failed to load tech:", e);
         setError(e instanceof Error ? e.message : "Failed to load tech");
       } finally {
         setLoading(false);
         setRefreshing(false);
+      }
+
+      // Fetch tickets separately so a failure doesn't kill the tech display
+      try {
+        const ticketsData = await fetchOpsTechTickets(token, id);
+        setTechTickets(ticketsData.tickets || []);
+      } catch (e) {
+        logger.error("[Supervisor TechDetail] Failed to load tickets:", e);
+        setTechTickets([]);
       }
     },
     [token, id],

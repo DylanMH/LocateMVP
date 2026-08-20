@@ -252,7 +252,7 @@ export async function fetchOpsTicketDetail(token: string, ticketId: string): Pro
 }
 
 export async function fetchOpsTechTickets(token: string, techId: string): Promise<{ tickets: OpsTechTicket[] }> {
-  return opsFetch(`/ops/techs/${techId}/tickets`, token);
+  return opsFetch(`/ops/techs/${techId}/tickets?range=all`, token);
 }
 
 export async function assignOpsTicket(token: string, ticketId: string, techId: string | null): Promise<{ message: string; ticketId: string; assignedTechId: string | null; assignedTechName: string | null }> {

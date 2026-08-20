@@ -2805,24 +2805,27 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
         dueSoon += 1;
       }
 
-      // Needs attention: only NO_RESPONSE (ASSIGNED + overdue) and EMERGENCY (due within 2h)
+      // Needs attention: only EMERGENCY (due < 2h, tech not onsite yet) and NO_RESPONSE (ASSIGNED + overdue)
       if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS) {
         const ticketRow = db.prepare("SELECT id, ticket_number, address, locator_status FROM tickets WHERE id = ?").get(t.id);
-        needsAttention.push({
-          type: 'EMERGENCY',
-          id: t.id,
-          label: ticketRow?.ticket_number || t.id,
-          detail: ticketRow?.address || 'Due within 2 hours',
-        });
+        // Only show as emergency if tech hasn't arrived onsite yet
+        if (ticketRow && (ticketRow.locator_status === 'ASSIGNED' || ticketRow.locator_status === 'ENROUTE')) {
+          needsAttention.push({
+            type: 'EMERGENCY',
+            id: t.id,
+            label: ticketRow.ticket_number || t.id,
+            detail: ticketRow.address || 'Due within 2 hours',
+          });
+        }
       } else if (urgency === DUE_URGENCY.OVERDUE) {
         const ticketRow = db.prepare("SELECT id, ticket_number, address, locator_status FROM tickets WHERE id = ?").get(t.id);
-        // Only show as needs attention if tech hasn't responded (still ASSIGNED)
-        if (ticketRow?.locator_status === 'ASSIGNED') {
+        // Only show as needs attention if tech hasn't responded at all (still ASSIGNED)
+        if (ticketRow && ticketRow.locator_status === 'ASSIGNED') {
           needsAttention.push({
             type: 'NO_RESPONSE',
             id: t.id,
-            label: ticketRow?.ticket_number || t.id,
-            detail: ticketRow?.address || 'No response - overdue',
+            label: ticketRow.ticket_number || t.id,
+            detail: ticketRow.address || 'No response - overdue',
           });
         }
       }
