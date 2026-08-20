@@ -2796,7 +2796,6 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
 
     let overdue = 0;
     let dueSoon = 0;
-    const needsAttention = [];
     for (const t of openTickets) {
       const urgency = computeDueUrgency(t.due_at, now);
       if (urgency === DUE_URGENCY.OVERDUE) {
@@ -2804,32 +2803,23 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
       } else if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS || urgency === DUE_URGENCY.DUE_TODAY) {
         dueSoon += 1;
       }
-
-      // Needs attention: only EMERGENCY (due < 2h, tech not onsite yet) and NO_RESPONSE (ASSIGNED + overdue)
-      if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS) {
-        const ticketRow = db.prepare("SELECT id, ticket_number, address, locator_status FROM tickets WHERE id = ?").get(t.id);
-        // Only show as emergency if tech hasn't arrived onsite yet
-        if (ticketRow && (ticketRow.locator_status === 'ASSIGNED' || ticketRow.locator_status === 'ENROUTE')) {
-          needsAttention.push({
-            type: 'EMERGENCY',
-            id: t.id,
-            label: ticketRow.ticket_number || t.id,
-            detail: ticketRow.address || 'Due within 2 hours',
-          });
-        }
-      } else if (urgency === DUE_URGENCY.OVERDUE) {
-        const ticketRow = db.prepare("SELECT id, ticket_number, address, locator_status FROM tickets WHERE id = ?").get(t.id);
-        // Only show as needs attention if tech hasn't responded at all (still ASSIGNED)
-        if (ticketRow && ticketRow.locator_status === 'ASSIGNED') {
-          needsAttention.push({
-            type: 'NO_RESPONSE',
-            id: t.id,
-            label: ticketRow.ticket_number || t.id,
-            detail: ticketRow.address || 'No response - overdue',
-          });
-        }
-      }
     }
+
+    // Needs attention: tickets with ticket_type EMERGENCY or NO_RESPONSE (from 811)
+    const attentionTickets = db.prepare(`
+      SELECT id, ticket_number, address, ticket_type, locator_status, due_at
+      FROM tickets
+      WHERE assigned_tech_id IN (${ph})
+        AND locator_status NOT IN ('CLOSED','UNABLE')
+        AND ticket_type IN ('EMERGENCY', 'NO_RESPONSE')
+      ORDER BY due_at ASC
+    `).all(...techIds);
+    const needsAttention = attentionTickets.map((t) => ({
+      type: t.ticket_type,
+      id: t.id,
+      label: t.ticket_number,
+      detail: t.address || t.ticket_type,
+    }));
 
     // High priority tickets (open with due urgency OVERDUE or DUE_WITHIN_2_HOURS)
     const highPriority = overdue;
