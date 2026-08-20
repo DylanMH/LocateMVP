@@ -200,7 +200,7 @@ export default function TechDetailScreen() {
               if (router.canGoBack()) {
                 router.back();
               } else {
-                router.replace("/(supervisor)/techs");
+                router.replace("/(supervisor)/(tabs)/techs" as any);
               }
             }}
             hitSlop={10}

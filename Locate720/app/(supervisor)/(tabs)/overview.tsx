@@ -274,7 +274,7 @@ export default function OverviewScreen() {
                 <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Total Worked
                 </Text>
-                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text, fontVariant: ['tabular-nums'] }}>
                   {formatDuration(teamSummary.totalWorkedMinutes * 60 * 1000)}
                 </Text>
               </View>
@@ -282,7 +282,7 @@ export default function OverviewScreen() {
                 <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Completed Tickets
                 </Text>
-                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text, fontVariant: ['tabular-nums'] }}>
                   {teamSummary.totalCompletedTickets}
                 </Text>
               </View>
@@ -290,7 +290,10 @@ export default function OverviewScreen() {
                 <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Total Footage
                 </Text>
-                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
+                <Text
+                  className="text-sm font-semibold ml-3"
+                  style={{ color: colors.text, fontVariant: ['tabular-nums'] }}
+                >
                   {teamSummary.totalFootage.toLocaleString()} ft
                 </Text>
               </View>
@@ -298,7 +301,7 @@ export default function OverviewScreen() {
                 <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Open Backlog
                 </Text>
-                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text, fontVariant: ['tabular-nums'] }}>
                   {teamSummary.openBacklog}
                 </Text>
               </View>
@@ -306,7 +309,7 @@ export default function OverviewScreen() {
                 <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Avg LPH (locates/hr)
                 </Text>
-                <Text className="text-sm font-semibold ml-3" style={{ color: colors.accent }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.accent, fontVariant: ['tabular-nums'] }}>
                   {teamSummary.totalWorkedMinutes > 0
                     ? (teamSummary.totalCompletedTickets / (teamSummary.totalWorkedMinutes / 60)).toFixed(1)
                     : "0.0"}
@@ -316,7 +319,7 @@ export default function OverviewScreen() {
                 <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Avg FPH (ft/hr)
                 </Text>
-                <Text className="text-sm font-semibold ml-3" style={{ color: colors.accent }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.accent, fontVariant: ['tabular-nums'] }}>
                   {teamSummary.totalWorkedMinutes > 0
                     ? (teamSummary.totalFootage / (teamSummary.totalWorkedMinutes / 60)).toFixed(1)
                     : "0.0"}

@@ -228,7 +228,7 @@ export default function OpsTicketDetailScreen() {
                 if (router.canGoBack()) {
                   router.back();
                 } else {
-                  router.replace("/(supervisor)/overview");
+                  router.replace("/(supervisor)/(tabs)/overview" as any);
                 }
               }}
               hitSlop={10}
