@@ -50,13 +50,16 @@ export function SimulatorPage() {
 
   const generateTestSetMutation = useMutation({
     mutationFn: async () => {
+      // Reset both 811 simulator DB and Backend ingested tickets
       await SimulatorService.resetDatabase();
+      await BackendService.reset811Tickets();
       return SimulatorService.generateTestTickets(300);
     },
     onSuccess: (data) => {
-      alert(`Success: Generated ${data.tickets.length} new test tickets (811 DB was reset first).`);
+      alert(`Success: Reset both DBs and generated ${data.tickets.length} new test tickets.`);
       refetch();
       queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["backend-811-status"] });
     },
     onError: (error) => {
       console.error("[SimulatorPage] Failed to generate test set:", error);
@@ -94,6 +97,16 @@ export function SimulatorPage() {
     queryFn: () => BackendService.get811Status(),
     refetchInterval: 30000,
   });
+
+  // assignmentStats is a per-territory object; sum up total assigned tickets
+  const totalAssignedTickets = useMemo(() => {
+    const stats = backendStatus?.status?.assignmentStats;
+    if (!stats || typeof stats !== "object") return 0;
+    return Object.values(stats).reduce(
+      (sum: number, t: any) => sum + (t.totalTickets || 0),
+      0,
+    );
+  }, [backendStatus]);
 
   const pull811TicketsMutation = useMutation({
     mutationFn: () => BackendService.pull811Tickets(),
@@ -431,7 +444,7 @@ export function SimulatorPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Assigned Tickets:</span>
                   <span className="text-lg font-semibold text-green-600">
-                    {backendStatus.status.assignmentStats.assigned || 0}
+                    {totalAssignedTickets}
                   </span>
                 </div>
               )}
