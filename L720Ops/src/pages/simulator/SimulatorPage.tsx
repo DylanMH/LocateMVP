@@ -119,6 +119,19 @@ export function SimulatorPage() {
     },
   });
 
+  // Client-side search filter (on top of server-side status/area filters)
+  const filteredTickets = useMemo(() => {
+    const tickets = simulatorTickets?.tickets || [];
+    if (!searchQuery.trim()) return tickets;
+    const q = searchQuery.toLowerCase();
+    return tickets.filter(
+      (t) =>
+        t.ticketNumber.toLowerCase().includes(q) ||
+        t.areaId.toLowerCase().includes(q) ||
+        t.ticketType.toLowerCase().includes(q),
+    );
+  }, [simulatorTickets, searchQuery]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -156,19 +169,6 @@ export function SimulatorPage() {
   const availableAreas = Array.from(
     new Set((simulatorTickets?.tickets || []).map((ticket) => ticket.areaId).filter(Boolean)),
   ).sort();
-
-  // Client-side search filter (on top of server-side status/area filters)
-  const filteredTickets = useMemo(() => {
-    const tickets = simulatorTickets?.tickets || [];
-    if (!searchQuery.trim()) return tickets;
-    const q = searchQuery.toLowerCase();
-    return tickets.filter(
-      (t) =>
-        t.ticketNumber.toLowerCase().includes(q) ||
-        t.areaId.toLowerCase().includes(q) ||
-        t.ticketType.toLowerCase().includes(q),
-    );
-  }, [simulatorTickets, searchQuery]);
 
   return (
     <div className="space-y-6">
