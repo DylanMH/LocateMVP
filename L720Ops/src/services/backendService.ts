@@ -76,6 +76,26 @@ export class BackendService {
   }
 
   /**
+   * DEV ONLY: Reset ALL tickets in the L720 Backend (not just 811 source)
+   */
+  static async resetAllTickets(): Promise<{
+    success: boolean;
+    deleted: number;
+    message: string;
+  }> {
+    const response = await fetch(`${BACKEND_API_BASE_URL}/inbound/811/reset-all`, {
+      method: "POST",
+      headers: this.getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to reset all tickets");
+    }
+
+    return response.json();
+  }
+
+  /**
    * Manually trigger assignment for unassigned tickets
    */
   static async assign811Tickets(): Promise<{

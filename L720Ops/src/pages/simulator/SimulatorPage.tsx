@@ -130,14 +130,20 @@ export function SimulatorPage() {
   });
 
   const resetBackendTicketsMutation = useMutation({
-    mutationFn: () => BackendService.reset811Tickets(),
+    mutationFn: async () => {
+      // Wipe ALL tickets from both the 811 simulator DB and the L720 Backend DB
+      await SimulatorService.resetDatabase();
+      return BackendService.resetAllTickets();
+    },
     onSuccess: (data) => {
-      alert(`Success: Deleted ${data.deleted} tickets from backend.`);
+      alert(`Success: Deleted ALL ${data.deleted} tickets from the L720 Backend and wiped the 811 simulator DB.`);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
       queryClient.invalidateQueries({ queryKey: ["backend-811-status"] });
     },
     onError: (error) => {
-      console.error("[SimulatorPage] Failed to reset backend tickets:", error);
-      alert("Failed to reset backend tickets. Please try again.");
+      console.error("[SimulatorPage] Failed to reset all tickets:", error);
+      alert("Failed to reset all tickets. Please try again.");
     },
   });
 
@@ -262,7 +268,7 @@ export function SimulatorPage() {
             onClick={() => {
               if (
                 confirm(
-                  "Are you sure you want to reset all Backend tickets? This will delete all ingested 811 tickets from the Backend.",
+                  "DEV RESET: This will delete ALL tickets in BOTH the 811 simulator DB and the L720 Backend DB (not just 811 source). This cannot be undone. Continue?",
                 )
               ) {
                 resetBackendTicketsMutation.mutate();
@@ -272,8 +278,8 @@ export function SimulatorPage() {
             className="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {resetBackendTicketsMutation.isPending
-              ? "Resetting..."
-              : "Reset Backend"}
+              ? "Resetting All..."
+              : "Reset All Tickets"}
           </button>
         </div>
       </div>

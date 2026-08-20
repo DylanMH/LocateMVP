@@ -225,4 +225,58 @@ router.post('/811/reset', (req, res) => {
   }
 });
 
+/**
+ * POST /api/inbound/811/reset-all
+ * DEV ONLY: Delete ALL tickets in the L720 Backend (not just 811 source).
+ * Wipes tickets, ticket_events, outbox_811_events, clock_events,
+ * utility_production_ledger, ticket_notes, ticket_attachments,
+ * ticket_reschedules, contractor_email_queue, break_segments,
+ * allocation_segments, tech_locations, and idempotency_records.
+ * Preserves users, territories, and assignments.
+ */
+router.post('/811/reset-all', (req, res) => {
+  try {
+    console.log('[Inbound] FULL RESET: deleting ALL tickets and related data');
+
+    const result = db.transaction(() => {
+      // Clear child tables that reference tickets
+      db.prepare('DELETE FROM contractor_email_queue').run();
+      db.prepare('DELETE FROM ticket_reschedules').run();
+      db.prepare('DELETE FROM ticket_attachments').run();
+      db.prepare('DELETE FROM ticket_notes').run();
+      db.prepare('DELETE FROM utility_production_ledger').run();
+      db.prepare('DELETE FROM allocation_segments').run();
+      db.prepare('DELETE FROM break_segments').run();
+      db.prepare('DELETE FROM clock_events').run();
+      db.prepare('DELETE FROM outbox_811_events').run();
+      db.prepare('DELETE FROM ticket_events').run();
+      db.prepare('DELETE FROM tech_locations').run();
+      db.prepare('DELETE FROM idempotency_records').run();
+
+      // Clear ticket references in day_sessions
+      db.prepare('UPDATE day_sessions SET clock_out_ticket_id = NULL').run();
+
+      // Finally delete all tickets
+      const countRow = db.prepare('SELECT COUNT(*) as count FROM tickets').get();
+      db.prepare('DELETE FROM tickets').run();
+
+      return countRow.count;
+    })();
+
+    console.log(`[Inbound] FULL RESET complete: deleted ${result} tickets`);
+    res.json({
+      success: true,
+      deleted: result,
+      message: `Full reset complete: deleted ${result} tickets and all related data`
+    });
+
+  } catch (error) {
+    console.error('[Inbound] Full reset failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 export default router;
