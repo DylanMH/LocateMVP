@@ -167,6 +167,22 @@ router.post('/811/reset', (req, res) => {
       DELETE FROM utility_production_ledger
       WHERE ticket_id = ?
     `);
+    const deleteTicketNotes = db.prepare(`
+      DELETE FROM ticket_notes
+      WHERE ticket_id = ?
+    `);
+    const deleteTicketAttachments = db.prepare(`
+      DELETE FROM ticket_attachments
+      WHERE ticket_id = ?
+    `);
+    const deleteTicketReschedules = db.prepare(`
+      DELETE FROM ticket_reschedules
+      WHERE ticket_id = ?
+    `);
+    const deleteContractorEmailQueue = db.prepare(`
+      DELETE FROM contractor_email_queue
+      WHERE ticket_id = ?
+    `);
     const deleteTicket = db.prepare(`
       DELETE FROM tickets
       WHERE id = ?
@@ -181,6 +197,10 @@ router.post('/811/reset', (req, res) => {
         deleteClockEvents.run(ticket.id);
         clearClockOutTicketReferences.run(ticket.id);
         deleteUtilityProduction.run(ticket.id);
+        deleteTicketNotes.run(ticket.id);
+        deleteTicketAttachments.run(ticket.id);
+        deleteTicketReschedules.run(ticket.id);
+        deleteContractorEmailQueue.run(ticket.id);
         deleteTicket.run(ticket.id);
         count += 1;
       }

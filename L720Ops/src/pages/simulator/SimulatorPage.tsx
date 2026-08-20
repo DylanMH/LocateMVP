@@ -81,10 +81,19 @@ export function SimulatorPage() {
   });
 
   const resetDatabaseMutation = useMutation({
-    mutationFn: () => SimulatorService.resetDatabase(),
+    mutationFn: async () => {
+      await SimulatorService.resetDatabase();
+      // Also reset backend ingested tickets so the status card is accurate
+      try {
+        await BackendService.reset811Tickets();
+      } catch (e) {
+        console.error("[SimulatorPage] Backend reset failed (non-fatal):", e);
+      }
+    },
     onSuccess: () => {
       refetch();
       queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["backend-811-status"] });
     },
     onError: (error) => {
       console.error("[SimulatorPage] Failed to reset database:", error);
