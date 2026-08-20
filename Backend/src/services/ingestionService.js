@@ -541,8 +541,12 @@ function hasPendingLocalChanges(db, ticketId) {
   ).get(ticketId);
   if (!ticket) return false;
 
-  // Active field-work states: tech is working this ticket on their device.
-  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED"]);
+  // States where the tech's device holds the source of truth and 811
+  // re-ingestion must NOT overwrite any field.  CLOSED/UNABLE are included
+  // because the closure data (closedByName, closedAt, customerMarkings)
+  // originates from the mobile and must be preserved permanently — not just
+  // for the 5-minute recent-event window.
+  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED", "CLOSED", "UNABLE"]);
   if (activeStates.has(ticket.locator_status)) return true;
 
   // Check for recent mobile-sourced events (last 5 minutes).

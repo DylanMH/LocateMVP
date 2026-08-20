@@ -787,12 +787,27 @@ class SyncEngineImpl {
       return;
     }
 
-    const pendingEvents = await outboxCollection
-      .query(Q.where('status', 'PENDING'))
+    // Check both PENDING and recently-SENT events.  PENDING events mean
+    // the ticket has local changes not yet acked by the backend.  Recently-SENT
+    // events (within 60 seconds) cover the race window between the flush
+    // completing and the next pull converging — the server may temporarily
+    // not return the ticket if the backend's 811 re-ingestion or assignment
+    // hasn't caught up yet.
+    const recentEvents = await outboxCollection
+      .query(Q.where('status', Q.oneOf(['PENDING', 'SENT'])))
       .fetch();
-    const pendingTicketIds = new Set(
-      pendingEvents.map((event) => event.ticketId).filter(Boolean) as string[],
-    );
+
+    const pendingTicketIds = new Set<string>();
+    const recentSentTicketIds = new Set<string>();
+    const sixtySecondsAgo = Date.now() - 60000;
+    for (const event of recentEvents) {
+      if (!event.ticketId) continue;
+      if (event.status === 'PENDING') {
+        pendingTicketIds.add(event.ticketId);
+      } else if (event.status === 'SENT' && (event.lastAttemptAt || 0) > sixtySecondsAgo) {
+        recentSentTicketIds.add(event.ticketId);
+      }
+    }
 
     // The backend query `?assignedTo=userId` returns ALL tickets
     // assigned to this user.  If a local ticket is missing from that
@@ -800,16 +815,8 @@ class SyncEngineImpl {
     // (reassigned, deleted, or backend reset).  The only legitimate
     // reason to preserve a missing ticket is if it has pending outbox
     // events (the ticket may have been just created/assigned locally
-    // and not yet synced to the backend).
-    //
-    // The previous "active-state preservation" logic (keeping
-    // ENROUTE/ONSITE/PAUSED tickets when missing from a partial
-    // snapshot) was wrong — it kept stale tickets around after backend
-    // resets and reassignments.  The original "disappearing
-    // ENROUTE/ONSITE" bug was caused by the board query not being
-    // scoped to assigned_tech_id (fixed) and the pending-outbox skip
-    // being too aggressive (fixed with field-aware overlay), NOT by
-    // over-eager reconciliation.
+    // and not yet synced to the backend) or a recently-SENT event
+    // (race window between flush and pull convergence).
     const ticketsToDelete = localTickets.filter((ticket) => {
       if (serverTicketIds.has(ticket.id)) {
         return false;
@@ -817,6 +824,11 @@ class SyncEngineImpl {
 
       if (pendingTicketIds.has(ticket.id)) {
         logger.log(`[SyncEngine] Preserving local ticket ${ticket.id} because it has pending outbox events`);
+        return false;
+      }
+
+      if (recentSentTicketIds.has(ticket.id)) {
+        logger.log(`[SyncEngine] Preserving local ticket ${ticket.id} because it has a recently-SENT event (race window)`);
         return false;
       }
 
@@ -1145,19 +1157,20 @@ class SyncEngineImpl {
               ticket.lng = delta.lng;
               ticket.status = delta.status;
               // Status overlay: keep the local optimistic locatorStatus /
-              // closedAt / closedByName while there is a pending or recently
-              // acked status event.  The server delta for these fields may
-              // reflect a pre-ack state and would temporarily revert the
-              // ticket to ASSIGNED, causing the "disappearing ENROUTE/ONSITE"
-              // symptom.
+              // closedAt / closedByName / assignedTechId while there is a
+              // pending or recently acked status event.  The server delta for
+              // these fields may reflect a pre-ack state and would temporarily
+              // revert the ticket to ASSIGNED or clear its assignment, causing
+              // the "disappearing ENROUTE/ONSITE" symptom.
               if (preserveLocalStatus) {
-                // preserve ticket.locatorStatus, ticket.closedAt, ticket.closedByName
+                // preserve ticket.locatorStatus, ticket.closedAt,
+                // ticket.closedByName, ticket.assignedTechId
               } else {
                 ticket.locatorStatus = delta.locatorStatus;
                 ticket.closedByName = delta.closedByName;
                 ticket.closedAt = delta.closedAt;
+                ticket.assignedTechId = delta.assignedTechId;
               }
-              ticket.assignedTechId = delta.assignedTechId;
               ticket.dueAt = delta.dueAt;
               ticket.originalDueAt = delta.originalDueAt ?? delta.dueAt;
               ticket.updatedAt = delta.updatedAt;
