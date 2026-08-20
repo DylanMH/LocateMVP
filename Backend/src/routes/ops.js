@@ -2801,33 +2801,30 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
       const urgency = computeDueUrgency(t.due_at, now);
       if (urgency === DUE_URGENCY.OVERDUE) {
         overdue += 1;
-        const ticketRow = db.prepare("SELECT id, ticket_number, address FROM tickets WHERE id = ?").get(t.id);
-        needsAttention.push({
-          type: 'OVERDUE',
-          id: t.id,
-          label: ticketRow?.ticket_number || t.id,
-          detail: ticketRow?.address || 'Overdue ticket',
-        });
       } else if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS || urgency === DUE_URGENCY.DUE_TODAY) {
         dueSoon += 1;
       }
-    }
 
-    // Stalled tickets (ONSITE for >4hrs)
-    const stalledTickets = db.prepare(`
-      SELECT id, ticket_number, payload_json FROM tickets
-      WHERE assigned_tech_id IN (${ph})
-        AND locator_status = 'ONSITE'
-    `).all(...techIds);
-    for (const t of stalledTickets) {
-      const payload = parseJson(t.payload_json);
-      if (payload.onsiteStartedAt && (now - payload.onsiteStartedAt) > 4 * 60 * 60 * 1000) {
+      // Needs attention: only NO_RESPONSE (ASSIGNED + overdue) and EMERGENCY (due within 2h)
+      if (urgency === DUE_URGENCY.DUE_WITHIN_2_HOURS) {
+        const ticketRow = db.prepare("SELECT id, ticket_number, address, locator_status FROM tickets WHERE id = ?").get(t.id);
         needsAttention.push({
-          type: 'STALLED',
+          type: 'EMERGENCY',
           id: t.id,
-          label: t.ticket_number,
-          detail: 'Onsite for over 4 hours',
+          label: ticketRow?.ticket_number || t.id,
+          detail: ticketRow?.address || 'Due within 2 hours',
         });
+      } else if (urgency === DUE_URGENCY.OVERDUE) {
+        const ticketRow = db.prepare("SELECT id, ticket_number, address, locator_status FROM tickets WHERE id = ?").get(t.id);
+        // Only show as needs attention if tech hasn't responded (still ASSIGNED)
+        if (ticketRow?.locator_status === 'ASSIGNED') {
+          needsAttention.push({
+            type: 'NO_RESPONSE',
+            id: t.id,
+            label: ticketRow?.ticket_number || t.id,
+            detail: ticketRow?.address || 'No response - overdue',
+          });
+        }
       }
     }
 

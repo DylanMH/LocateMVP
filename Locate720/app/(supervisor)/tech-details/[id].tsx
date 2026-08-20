@@ -13,7 +13,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../../src/features/auth/AuthContext";
 import {
   fetchOpsTechs,
+  fetchOpsTechTickets,
   type TechOpsSummary,
+  type OpsTechTicket,
   DUE_URGENCY_COLORS,
   DUE_URGENCY_LABELS,
 } from "../../../src/features/ops/api/opsApiClient";
@@ -53,6 +55,7 @@ export default function TechDetailScreen() {
   const { token } = useAuth();
   const router = useRouter();
   const [tech, setTech] = useState<TechOpsSummary | null>(null);
+  const [techTickets, setTechTickets] = useState<OpsTechTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +77,8 @@ export default function TechDetailScreen() {
           setError("Tech not found");
         } else {
           setTech(found);
+          const ticketsData = await fetchOpsTechTickets(token, id);
+          setTechTickets(ticketsData.tickets);
         }
       } catch (e) {
         logger.error("[Supervisor TechDetail] Failed to load:", e);
@@ -283,6 +288,8 @@ export default function TechDetailScreen() {
             value={String(tech.today.completedTickets)}
           />
           <StatRow label="Footage" value={`${tech.today.footageFeet} ft`} />
+          <StatRow label="LPH" value={tech.today.lph.toFixed(1)} />
+          <StatRow label="FPH" value={tech.today.fph.toFixed(1)} />
         </View>
 
         {/* Assigned counts */}
@@ -300,6 +307,89 @@ export default function TechDetailScreen() {
           <StatRow label="Overdue" value={String(tech.assigned.overdue)} />
           <StatRow label="Due Soon" value={String(tech.assigned.dueSoon)} />
         </View>
+
+        {/* Tickets */}
+        {techTickets.length > 0 ? (
+          <>
+            <Text
+              className="text-xs font-semibold uppercase tracking-wider mt-2 mb-3"
+              style={{ color: colors.muted }}
+            >
+              Tickets
+            </Text>
+            {techTickets.map((ticket) => (
+              <Pressable
+                key={ticket.id}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(supervisor)/ops-ticket/[id]",
+                    params: { id: ticket.id },
+                  })
+                }
+                className="rounded-2xl p-4 mb-3 flex-row items-center"
+                style={{ backgroundColor: colors.surface }}
+              >
+                <View className="flex-1">
+                  <Text
+                    className="text-sm font-bold"
+                    style={{ color: colors.text }}
+                  >
+                    {ticket.ticketNumber}
+                  </Text>
+                  <Text
+                    className="text-xs mt-1"
+                    style={{ color: colors.muted }}
+                    numberOfLines={1}
+                  >
+                    {ticket.address}
+                  </Text>
+                  <View className="flex-row items-center mt-2" style={{ gap: 8 }}>
+                    <View
+                      className="rounded-full px-2 py-0.5"
+                      style={{ backgroundColor: colors.primary }}
+                    >
+                      <Text
+                        className="text-[10px] font-semibold"
+                        style={{ color: colors.text }}
+                      >
+                        {ticket.locatorStatus}
+                      </Text>
+                    </View>
+                    {ticket.dueUrgency ? (
+                      <View
+                        className="rounded-full px-2 py-0.5"
+                        style={{
+                          backgroundColor:
+                            DUE_URGENCY_COLORS[ticket.dueUrgency] + "30",
+                        }}
+                      >
+                        <Text
+                          className="text-[10px] font-semibold"
+                          style={{
+                            color: DUE_URGENCY_COLORS[ticket.dueUrgency],
+                          }}
+                        >
+                          {DUE_URGENCY_LABELS[ticket.dueUrgency]}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text
+                    className="text-xs mt-2"
+                    style={{ color: colors.muted }}
+                  >
+                    Due: {formatDueDateTime(ticket.dueAt)}
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
+            ))}
+          </>
+        ) : null}
 
         {tech.lastActivityAt ? (
           <Text className="text-xs text-center" style={{ color: colors.muted }}>

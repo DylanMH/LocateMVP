@@ -281,6 +281,18 @@ export default function TechsScreen() {
                   {item.today.footageFeet} ft
                 </Text>
               </View>
+              <View className="flex-row items-center" style={{ gap: 4 }}>
+                <Ionicons name="speedometer-outline" size={12} color={colors.muted} />
+                <Text className="text-xs" style={{ color: colors.muted }}>
+                  LPH: {item.today.lph.toFixed(1)}
+                </Text>
+              </View>
+              <View className="flex-row items-center" style={{ gap: 4 }}>
+                <Ionicons name="trending-up-outline" size={12} color={colors.muted} />
+                <Text className="text-xs" style={{ color: colors.muted }}>
+                  FPH: {item.today.fph.toFixed(1)}
+                </Text>
+              </View>
             </View>
 
             <View className="flex-row mt-2" style={{ gap: 8 }}>

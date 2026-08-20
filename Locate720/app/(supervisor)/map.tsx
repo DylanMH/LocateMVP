@@ -2,12 +2,10 @@ import { Fragment, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  RefreshControl,
-  ScrollView,
   Text,
   View,
 } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../src/features/auth/AuthContext";
@@ -85,6 +83,7 @@ function Chip({
 
 export default function OpsMapScreen() {
   const { token } = useAuth();
+  const router = useRouter();
   const [markers, setMarkers] = useState<OpsMapMarker[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,17 +218,27 @@ export default function OpsMapScreen() {
 
   return (
     <View className="flex-1" style={{ backgroundColor: colors.bg }}>
-      {/* Filter chips */}
+      {/* Filter chips + refresh button */}
       <View className="px-4 pt-3 pb-2">
-        <View className="flex-row flex-wrap" style={{ gap: 8 }}>
-          {FILTERS.map((f) => (
-            <Chip
-              key={f.value}
-              label={f.label}
-              selected={filter === f.value}
-              onPress={() => setFilter(f.value)}
-            />
-          ))}
+        <View className="flex-row items-center" style={{ gap: 8 }}>
+          <View className="flex-1 flex-row flex-wrap" style={{ gap: 8 }}>
+            {FILTERS.map((f) => (
+              <Chip
+                key={f.value}
+                label={f.label}
+                selected={filter === f.value}
+                onPress={() => setFilter(f.value)}
+              />
+            ))}
+          </View>
+          <Pressable
+            onPress={handleRefresh}
+            hitSlop={10}
+            className="px-3 py-2 rounded-full"
+            style={{ backgroundColor: colors.surface }}
+          >
+            <Ionicons name="refresh" size={18} color={colors.accent} />
+          </Pressable>
         </View>
       </View>
 
@@ -249,93 +258,91 @@ export default function OpsMapScreen() {
         style={{ backgroundColor: colors.surface }}
       >
         <MapErrorBoundary>
-          <ScrollView
-            contentContainerStyle={{ flex: 1 }}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-            }
-          >
-            <View style={{ height: "100%" }}>
-              {markers.length === 0 ? (
-                <View className="flex-1 items-center justify-center">
-                  <Ionicons name="map-outline" size={48} color={colors.muted} />
-                  <Text
-                    className="text-base font-semibold mt-4"
-                    style={{ color: colors.text }}
-                  >
-                    No markers to display
-                  </Text>
-                  <Text
-                    className="text-sm mt-2 text-center"
-                    style={{ color: colors.muted }}
-                  >
-                    Try adjusting filters.
-                  </Text>
-                </View>
-              ) : (
-                <MapView
-                  style={{ flex: 1, minHeight: 400 }}
-                  provider={PROVIDER_GOOGLE}
-                  initialRegion={initialRegion}
-                  showsUserLocation
-                >
-                  {markers.map((marker) => (
-                    <Fragment key={marker.id}>
-                      <Marker
-                        coordinate={{
-                          latitude: marker.lat,
-                          longitude: marker.lng,
-                        }}
-                        pinColor={getMarkerColor(marker)}
-                      >
-                        <Callout>
-                          <View style={{ maxWidth: 220 }}>
-                            <Text
-                              style={{
-                                fontWeight: "bold",
-                                fontSize: 13,
-                                color: "#0B1220",
-                              }}
-                            >
-                              {marker.ticketNumber}
-                            </Text>
-                            <Text
-                              style={{ fontSize: 11, color: "#555", marginTop: 2 }}
-                            >
-                              Status: {marker.locatorStatus}
-                            </Text>
-                            {marker.assignedTechName ? (
-                              <Text
-                                style={{
-                                  fontSize: 11,
-                                  color: "#555",
-                                  marginTop: 2,
-                                }}
-                              >
-                                Tech: {marker.assignedTechName}
-                              </Text>
-                            ) : null}
-                            {marker.dueUrgency ? (
-                              <Text
-                                style={{
-                                  fontSize: 11,
-                                  color: getMarkerColor(marker),
-                                  marginTop: 2,
-                                  fontWeight: "600",
-                                }}
-                              >
-                                {DUE_URGENCY_LABELS[marker.dueUrgency]}
-                              </Text>
-                            ) : null}
-                          </View>
-                        </Callout>
-                      </Marker>
-                    </Fragment>
-                  ))}
-                </MapView>
-              )}
+          {markers.length === 0 ? (
+            <View className="flex-1 items-center justify-center">
+              <Ionicons name="map-outline" size={48} color={colors.muted} />
+              <Text
+                className="text-base font-semibold mt-4"
+                style={{ color: colors.text }}
+              >
+                No markers to display
+              </Text>
+              <Text
+                className="text-sm mt-2 text-center"
+                style={{ color: colors.muted }}
+              >
+                Try adjusting filters.
+              </Text>
             </View>
-          </ScrollView>
+          ) : (
+            <MapView
+              style={{ flex: 1, minHeight: 400 }}
+              provider={PROVIDER_GOOGLE}
+              initialRegion={initialRegion}
+              showsUserLocation
+            >
+              {markers.map((marker) => (
+                <Fragment key={marker.id}>
+                  <Marker
+                    coordinate={{
+                      latitude: marker.lat,
+                      longitude: marker.lng,
+                    }}
+                    pinColor={getMarkerColor(marker)}
+                  >
+                    <Callout
+                      onPress={() =>
+                        router.push({
+                          pathname: "/(supervisor)/ops-ticket/[id]",
+                          params: { id: marker.id },
+                        })
+                      }
+                    >
+                      <View style={{ maxWidth: 220 }}>
+                        <Text
+                          style={{
+                            fontWeight: "bold",
+                            fontSize: 13,
+                            color: "#0B1220",
+                          }}
+                        >
+                          {marker.ticketNumber}
+                        </Text>
+                        <Text
+                          style={{ fontSize: 11, color: "#555", marginTop: 2 }}
+                        >
+                          Status: {marker.locatorStatus}
+                        </Text>
+                        {marker.assignedTechName ? (
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              color: "#555",
+                              marginTop: 2,
+                            }}
+                          >
+                            Tech: {marker.assignedTechName}
+                          </Text>
+                        ) : null}
+                        {marker.dueUrgency ? (
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              color: getMarkerColor(marker),
+                              marginTop: 2,
+                              fontWeight: "600",
+                            }}
+                          >
+                            {DUE_URGENCY_LABELS[marker.dueUrgency]}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </Callout>
+                  </Marker>
+                </Fragment>
+              ))}
+            </MapView>
+          )}
         </MapErrorBoundary>
       </View>
     </View>

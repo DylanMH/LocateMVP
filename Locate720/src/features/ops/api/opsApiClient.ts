@@ -26,6 +26,8 @@ export interface TechOpsSummary {
     workedMinutes: number;
     completedTickets: number;
     footageFeet: number;
+    lph: number;
+    fph: number;
   };
   assigned: {
     open: number;
@@ -89,6 +91,100 @@ export interface OpsMapMarker {
   isActive: boolean;
 }
 
+// ── Ops Ticket Detail ──────────────────────────────────────
+
+export interface OpsTicketCustomer {
+  customerId: string;
+  customerName: string | null;
+  utilityType: string | null;
+  status: string;
+  result: string;
+  minutes: string | number;
+  footage: string | number;
+  completed: boolean;
+  notes: string;
+}
+
+export interface OpsTicketEvent {
+  id: string;
+  type: string;
+  oldStatus: string | null;
+  newStatus: string | null;
+  oldLocatorStatus: string | null;
+  newLocatorStatus: string | null;
+  userId: string | null;
+  notes: string | null;
+  payload: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface OpsTicketDetail {
+  id: string;
+  ticketNumber: string;
+  ticketType: string;
+  status: string;
+  locatorStatus: string;
+  address: string;
+  lat: number;
+  lng: number;
+  assignedTechId: string | null;
+  assignedTech: { id: string; name: string; email: string; areaId: string | null } | null;
+  areaId: string | null;
+  dueAt: number;
+  originalDueAt?: number;
+  rescheduleCount?: number;
+  createdAt: number;
+  updatedAt: number;
+  closedAt: number | null;
+  version: number;
+  source: string;
+  priority: string;
+  dueUrgency?: DueUrgency;
+  timeAllocation: {
+    enrouteMs: number;
+    onsiteMs: number;
+    pausedMs: number;
+    totalMs: number;
+    enrouteStartedAt: number | null;
+    enrouteEndedAt: number | null;
+    onsiteStartedAt: number | null;
+    onsiteEndedAt: number | null;
+    closedAt: number | null;
+  };
+  customers: OpsTicketCustomer[];
+  notes: Array<{ id: string; author_id: string | null; author_name: string | null; body: string; note_type: string; created_at: number }>;
+  events: OpsTicketEvent[];
+}
+
+export interface OpsTechTicket {
+  id: string;
+  ticketNumber: string;
+  ticketType: string;
+  status: string;
+  locatorStatus: string;
+  address: string;
+  lat: number;
+  lng: number;
+  assignedTechId: string | null;
+  dueAt: number;
+  dueUrgency?: DueUrgency;
+  createdAt: number;
+  updatedAt: number;
+  closedAt: number | null;
+  priority: string;
+  timeAllocation: {
+    enrouteMs: number;
+    onsiteMs: number;
+    pausedMs: number;
+    totalMs: number;
+    enrouteStartedAt: number | null;
+    enrouteEndedAt: number | null;
+    onsiteStartedAt: number | null;
+    onsiteEndedAt: number | null;
+    closedAt: number | null;
+  };
+}
+
 // ── Due urgency colors and labels ──────────────────────────
 
 export const DUE_URGENCY_COLORS: Record<DueUrgency, string> = {
@@ -149,4 +245,26 @@ export async function fetchOpsMap(token: string, filters?: { techId?: string; du
   if (filters?.active) params.set('active', 'true');
   const qs = params.toString();
   return opsFetch(`/ops/map${qs ? '?' + qs : ''}`, token);
+}
+
+export async function fetchOpsTicketDetail(token: string, ticketId: string): Promise<OpsTicketDetail> {
+  return opsFetch(`/ops/tickets/${ticketId}`, token);
+}
+
+export async function fetchOpsTechTickets(token: string, techId: string): Promise<{ tickets: OpsTechTicket[] }> {
+  return opsFetch(`/ops/techs/${techId}/tickets`, token);
+}
+
+export async function assignOpsTicket(token: string, ticketId: string, techId: string | null): Promise<{ message: string; ticketId: string; assignedTechId: string | null; assignedTechName: string | null }> {
+  return opsFetch(`/ops/tickets/${ticketId}/assign`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ techId }),
+  });
+}
+
+export async function rescheduleOpsTicket(token: string, ticketId: string, newDueAt: number, reason?: string): Promise<any> {
+  return opsFetch(`/tickets/${ticketId}/reschedule`, token, {
+    method: 'POST',
+    body: JSON.stringify({ newDueAt, reason, performedBy: 'supervisor' }),
+  });
 }

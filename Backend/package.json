@@ -1,6 +1,6 @@
 {
   "name": "locate720-backend",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Backend server for Locate720 - simulates 811 ticket system",
   "main": "src/server.js",
   "type": "module",

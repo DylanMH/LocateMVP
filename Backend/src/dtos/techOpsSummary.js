@@ -47,6 +47,8 @@ export function toTechOpsSummary(user, liveClockState, productivity, activeTicke
       workedMinutes: Math.round((productivity?.workedMs || 0) / 60000),
       completedTickets: productivity?.ticketsClosedInRange || 0,
       footageFeet: productivity?.footage || 0,
+      lph: Math.round((productivity?.lph || 0) * 10) / 10,
+      fph: Math.round((productivity?.fph || 0) * 10) / 10,
     },
     assigned: {
       open: assignedCounts?.open || 0,
