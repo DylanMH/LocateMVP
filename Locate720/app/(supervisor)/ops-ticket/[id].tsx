@@ -27,6 +27,7 @@ import { colors } from "../../../src/ui/colors";
 import { logger } from "../../../src/utils/logger";
 import { formatDuration } from "../../../src/utils/formatDuration";
 import { formatDueDateTime } from "../../../src/utils/date";
+import { getUtilityColor, getUtilityIcon } from "../../../src/features/tickets/utils/ticketPresentation";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -384,44 +385,53 @@ export default function OpsTicketDetailScreen() {
                   style={{ backgroundColor: colors.bg }}
                 >
                   <View className="flex-row items-center justify-between">
-                    <Text
-                      className="text-sm font-semibold"
-                      style={{ color: colors.text }}
-                    >
-                      {c.customerName || c.customerId}
-                    </Text>
+                    <View className="flex-row items-center flex-1" style={{ gap: 8 }}>
+                      <View
+                        className="w-6 h-6 rounded-full items-center justify-center"
+                        style={{ backgroundColor: getUtilityColor((c.utilityType || "UNKNOWN") as any) }}
+                      >
+                        <Ionicons name={getUtilityIcon((c.utilityType || "UNKNOWN") as any)} size={14} color="#fff" />
+                      </View>
+                      <Text
+                        className="text-sm font-semibold flex-1"
+                        style={{ color: colors.text }}
+                        numberOfLines={1}
+                      >
+                        {c.customerName || c.customerId}
+                      </Text>
+                    </View>
                     {c.completed ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={16}
-                        color={colors.success}
-                      />
+                      <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: colors.success + "25" }}>
+                        <Text className="text-[10px] font-bold" style={{ color: colors.success }}>DONE</Text>
+                      </View>
+                    ) : c.status ? (
+                      <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: colors.warning + "25" }}>
+                        <Text className="text-[10px] font-bold" style={{ color: colors.warning }}>{c.status}</Text>
+                      </View>
                     ) : null}
                   </View>
-                  <View className="flex-row flex-wrap mt-2" style={{ gap: 8 }}>
-                    {c.utilityType ? (
-                      <Text className="text-xs" style={{ color: colors.muted }}>
-                        {c.utilityType}
-                      </Text>
+                  <View className="flex-row flex-wrap mt-2" style={{ gap: 12 }}>
+                    {c.result ? (
+                      <View className="flex-row items-center" style={{ gap: 4 }}>
+                        <Text className="text-[10px] uppercase" style={{ color: colors.muted }}>Result</Text>
+                        <Text className="text-xs font-semibold" style={{ color: colors.text }}>{c.result}</Text>
+                      </View>
                     ) : null}
-                    <Text className="text-xs" style={{ color: colors.muted }}>
-                      Status: {c.status}
-                    </Text>
-                    <Text className="text-xs" style={{ color: colors.muted }}>
-                      Result: {c.result}
-                    </Text>
-                    <Text className="text-xs" style={{ color: colors.muted }}>
-                      Min: {c.minutes}
-                    </Text>
-                    <Text className="text-xs" style={{ color: colors.muted }}>
-                      Ft: {c.footage}
-                    </Text>
+                    {c.minutes && c.minutes !== "0" ? (
+                      <View className="flex-row items-center" style={{ gap: 4 }}>
+                        <Ionicons name="time-outline" size={12} color={colors.muted} />
+                        <Text className="text-xs font-semibold" style={{ color: colors.text }}>{c.minutes}m</Text>
+                      </View>
+                    ) : null}
+                    {c.footage && c.footage !== "0" ? (
+                      <View className="flex-row items-center" style={{ gap: 4 }}>
+                        <Ionicons name="footsteps" size={12} color={colors.muted} />
+                        <Text className="text-xs font-semibold" style={{ color: colors.text }}>{c.footage}ft</Text>
+                      </View>
+                    ) : null}
                   </View>
                   {c.notes ? (
-                    <Text
-                      className="text-xs mt-2"
-                      style={{ color: colors.muted }}
-                    >
+                    <Text className="text-xs mt-2" style={{ color: colors.muted }}>
                       {c.notes}
                     </Text>
                   ) : null}

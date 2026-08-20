@@ -19,6 +19,7 @@ import {
 import { colors } from "../../src/ui/colors";
 import { logger } from "../../src/utils/logger";
 import { formatDuration } from "../../src/utils/formatDuration";
+import { getUtilityColor, getUtilityIcon } from "../../src/features/tickets/utils/ticketPresentation";
 
 function StatCard({
   label,
@@ -389,6 +390,19 @@ export default function OverviewScreen() {
                       >
                         {item.detail}
                       </Text>
+                      {item.customers && item.customers.length > 0 ? (
+                        <View className="flex-row items-center mt-1.5" style={{ gap: 4 }}>
+                          {item.customers.map((c) => (
+                            <View
+                              key={c.id}
+                              className="w-4 h-4 rounded-full items-center justify-center"
+                              style={{ backgroundColor: getUtilityColor(c.utility as any) }}
+                            >
+                              <Ionicons name={getUtilityIcon(c.utility as any)} size={10} color="#fff" />
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
                     </View>
                     <Ionicons
                       name="chevron-forward"

@@ -1503,12 +1503,13 @@ router.get("/tickets/:id", authenticateToken, (req, res) => {
       (payload.customers || []).map((c) => [c.id, c]),
     );
     const markings = payload.customerMarkings || payload.customerMarking || {};
-    const customers = Object.entries(markings).map(([customerId, m]) => {
-      const c = customerLookup.get(customerId) || {};
+    // Build customers from payload.customers, merging in any markings data
+    const customers = (payload.customers || []).map((c) => {
+      const m = markings[c.id] || {};
       return {
-        customerId,
+        customerId: c.id,
         customerName: c.name || null,
-        utilityType: c.utility || null,
+        utilityType: c.utility || c.utilityType || null,
         status: m?.status || "",
         result: m?.result || "",
         minutes: m?.minutes || "0",
@@ -2807,19 +2808,29 @@ router.get("/me/overview", authenticateToken, requirePermission('ops.viewTeam'),
 
     // Needs attention: tickets with ticket_type EMERGENCY or NO_RESPONSE (from 811)
     const attentionTickets = db.prepare(`
-      SELECT id, ticket_number, address, ticket_type, locator_status, due_at
+      SELECT id, ticket_number, address, ticket_type, locator_status, due_at, payload_json
       FROM tickets
       WHERE assigned_tech_id IN (${ph})
         AND locator_status NOT IN ('CLOSED','UNABLE')
         AND ticket_type IN ('EMERGENCY', 'NO_RESPONSE')
       ORDER BY due_at ASC
     `).all(...techIds);
-    const needsAttention = attentionTickets.map((t) => ({
-      type: t.ticket_type,
-      id: t.id,
-      label: t.ticket_number,
-      detail: t.address || t.ticket_type,
-    }));
+    const needsAttention = attentionTickets.map((t) => {
+      const payload = parseJson(t.payload_json);
+      const customers = (payload.customers || []).map((c) => ({
+        id: c.id,
+        utility: c.utility || c.utilityType || 'UNKNOWN',
+      }));
+      return {
+        type: t.ticket_type,
+        id: t.id,
+        label: t.ticket_number,
+        detail: t.address || t.ticket_type,
+        locatorStatus: t.locator_status,
+        dueAt: t.due_at,
+        customers,
+      };
+    });
 
     // High priority tickets (open with due urgency OVERDUE or DUE_WITHIN_2_HOURS)
     const highPriority = overdue;

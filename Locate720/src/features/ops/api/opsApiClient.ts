@@ -60,6 +60,9 @@ export interface OpsOverview {
     id: string;
     label: string;
     detail: string;
+    locatorStatus?: string;
+    dueAt?: number;
+    customers?: Array<{ id: string; utility: string }>;
   }>;
   activeTechs: TechOpsSummary[];
   teamSummary: {
@@ -172,6 +175,7 @@ export interface OpsTechTicket {
   updatedAt: number;
   closedAt: number | null;
   priority: string;
+  payloadJson?: string;
   timeAllocation: {
     enrouteMs: number;
     onsiteMs: number;

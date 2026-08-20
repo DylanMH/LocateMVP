@@ -23,6 +23,7 @@ import { colors } from "../../../src/ui/colors";
 import { logger } from "../../../src/utils/logger";
 import { formatDuration } from "../../../src/utils/formatDuration";
 import { formatDueDateTime } from "../../../src/utils/date";
+import { getUtilityColor, getUtilityIcon } from "../../../src/features/tickets/utils/ticketPresentation";
 
 function timesheetStateColor(state: string): string {
   switch (state) {
@@ -48,6 +49,16 @@ function StatRow({ label, value }: { label: string; value: string }) {
       </Text>
     </View>
   );
+}
+
+function parseTicketCustomers(payloadJson?: string): Array<{ id: string; utility: string }> {
+  if (!payloadJson) return [];
+  try {
+    const payload = JSON.parse(payloadJson);
+    return (payload.customers || []).map((c: any) => ({ id: c.id, utility: c.utility || c.utilityType || "UNKNOWN" }));
+  } catch {
+    return [];
+  }
 }
 
 export default function TechDetailScreen() {
@@ -89,9 +100,10 @@ export default function TechDetailScreen() {
       // Fetch tickets separately so a failure doesn't kill the tech display
       try {
         const ticketsData = await fetchOpsTechTickets(token, id);
+        logger.log("[Supervisor TechDetail] Loaded tickets:", ticketsData.tickets?.length || 0);
         setTechTickets(ticketsData.tickets || []);
       } catch (e) {
-        logger.error("[Supervisor TechDetail] Failed to load tickets:", e);
+        logger.error("[Supervisor TechDetail] Failed to load tickets:", e instanceof Error ? e.message : e);
         setTechTickets([]);
       }
     },
@@ -363,6 +375,31 @@ export default function TechDetailScreen() {
                       >
                         {ticket.ticketNumber}
                       </Text>
+                      {ticket.ticketType && ticket.ticketType !== "NORMAL" ? (
+                        <View
+                          className="rounded-full px-1.5 py-0.5"
+                          style={{
+                            backgroundColor: ticket.ticketType === "EMERGENCY"
+                              ? colors.danger + "25"
+                              : ticket.ticketType === "NO_RESPONSE"
+                                ? colors.warning + "25"
+                                : colors.muted + "25"
+                          }}
+                        >
+                          <Text
+                            className="text-[9px] font-bold uppercase"
+                            style={{
+                              color: ticket.ticketType === "EMERGENCY"
+                                ? colors.danger
+                                : ticket.ticketType === "NO_RESPONSE"
+                                  ? colors.warning
+                                  : colors.muted
+                            }}
+                          >
+                            {ticket.ticketType.replace(/_/g, " ")}
+                          </Text>
+                        </View>
+                      ) : null}
                       {isActive ? (
                         <View
                           className="rounded-full px-1.5 py-0.5"
@@ -384,6 +421,23 @@ export default function TechDetailScreen() {
                     >
                       {ticket.address}
                     </Text>
+                    {(() => {
+                      const customers = parseTicketCustomers(ticket.payloadJson);
+                      if (customers.length === 0) return null;
+                      return (
+                        <View className="flex-row items-center mt-1.5" style={{ gap: 4 }}>
+                          {customers.map((c) => (
+                            <View
+                              key={c.id}
+                              className="w-4 h-4 rounded-full items-center justify-center"
+                              style={{ backgroundColor: getUtilityColor(c.utility as any) }}
+                            >
+                              <Ionicons name={getUtilityIcon(c.utility as any)} size={10} color="#fff" />
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })()}
                     <View className="flex-row items-center mt-2" style={{ gap: 8 }}>
                       <View
                         className="rounded-full px-2 py-0.5"
