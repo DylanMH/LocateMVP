@@ -138,16 +138,39 @@ function reconcileMissing811Tickets(db, current811Tickets) {
   const activeExternalIds = new Set(current811Tickets.map((ticket) => ticket.id));
 
   const existing811Tickets = db.prepare(`
-    SELECT id, ticket_number, external_ticket_id
+    SELECT id, ticket_number, external_ticket_id, locator_status
     FROM tickets
     WHERE source = '811' AND external_ticket_id IS NOT NULL
   `).all();
+
+  // States where the tech's device holds the source of truth and the
+  // ticket must NOT be deleted by 811 reconciliation, even if the 811
+  // simulator no longer returns it.  This prevents linked tickets
+  // (UPDATE/UPDATE_REMARK) from being deleted while a tech is actively
+  // working them.
+  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED", "CLOSED", "UNABLE"]);
 
   let removedCount = 0;
 
   const tx = db.transaction(() => {
     for (const ticket of existing811Tickets) {
       if (activeExternalIds.has(ticket.external_ticket_id)) {
+        continue;
+      }
+
+      // Never delete tickets that are in an active field-work state or
+      // have pending local changes (recent mobile-sourced events).
+      if (activeStates.has(ticket.locator_status)) {
+        console.log(
+          `[Ingestion] Preserving active ticket ${ticket.ticket_number} (${ticket.id}, locator_status=${ticket.locator_status}) during 811 reconcile`,
+        );
+        continue;
+      }
+
+      if (hasPendingLocalChanges(db, ticket.id)) {
+        console.log(
+          `[Ingestion] Preserving ticket ${ticket.ticket_number} (${ticket.id}) with pending local changes during 811 reconcile`,
+        );
         continue;
       }
 
