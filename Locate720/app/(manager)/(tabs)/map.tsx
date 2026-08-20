@@ -2,8 +2,6 @@ import { Fragment, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  RefreshControl,
-  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -220,17 +218,27 @@ export default function ManagerMapScreen() {
 
   return (
     <View className="flex-1" style={{ backgroundColor: colors.bg }}>
-      {/* Filter chips */}
+      {/* Filter chips + refresh button */}
       <View className="px-4 pt-3 pb-2">
-        <View className="flex-row flex-wrap" style={{ gap: 8 }}>
-          {FILTERS.map((f) => (
-            <Chip
-              key={f.value}
-              label={f.label}
-              selected={filter === f.value}
-              onPress={() => setFilter(f.value)}
-            />
-          ))}
+        <View className="flex-row items-center" style={{ gap: 8 }}>
+          <View className="flex-1 flex-row flex-wrap" style={{ gap: 8 }}>
+            {FILTERS.map((f) => (
+              <Chip
+                key={f.value}
+                label={f.label}
+                selected={filter === f.value}
+                onPress={() => setFilter(f.value)}
+              />
+            ))}
+          </View>
+          <Pressable
+            onPress={handleRefresh}
+            hitSlop={10}
+            className="px-3 py-2 rounded-full"
+            style={{ backgroundColor: colors.surface }}
+          >
+            <Ionicons name="refresh" size={18} color={colors.accent} />
+          </Pressable>
         </View>
       </View>
 
@@ -250,31 +258,24 @@ export default function ManagerMapScreen() {
         style={{ backgroundColor: colors.surface }}
       >
         <MapErrorBoundary>
-          <ScrollView
-            contentContainerStyle={{ flex: 1 }}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-            }
-          >
-            <View style={{ height: "100%" }}>
-              {markers.length === 0 ? (
-                <View className="flex-1 items-center justify-center">
-                  <Ionicons name="map-outline" size={48} color={colors.muted} />
-                  <Text
-                    className="text-base font-semibold mt-4"
-                    style={{ color: colors.text }}
-                  >
-                    No markers to display
-                  </Text>
-                  <Text
-                    className="text-sm mt-2 text-center"
-                    style={{ color: colors.muted }}
-                  >
-                    Try adjusting filters.
-                  </Text>
-                </View>
-              ) : (
-                <MapView
+          {markers.length === 0 ? (
+            <View className="flex-1 items-center justify-center">
+              <Ionicons name="map-outline" size={48} color={colors.muted} />
+              <Text
+                className="text-base font-semibold mt-4"
+                style={{ color: colors.text }}
+              >
+                No markers to display
+              </Text>
+              <Text
+                className="text-sm mt-2 text-center"
+                style={{ color: colors.muted }}
+              >
+                Try adjusting filters.
+              </Text>
+            </View>
+          ) : (
+            <MapView
                   style={{ flex: 1, minHeight: 400 }}
                   provider={PROVIDER_GOOGLE}
                   initialRegion={initialRegion}
@@ -342,8 +343,6 @@ export default function ManagerMapScreen() {
                   ))}
                 </MapView>
               )}
-            </View>
-          </ScrollView>
         </MapErrorBoundary>
       </View>
     </View>
