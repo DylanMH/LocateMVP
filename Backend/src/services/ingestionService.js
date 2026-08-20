@@ -206,15 +206,15 @@ export async function upsert811Ticket(db, ticket811) {
     // the due date (detected by comparing incoming due_at to original_due_at;
     // if they differ, the simulator has revised it and we accept the new value).
     const updateStmt = db.prepare(`
-      UPDATE tickets 
+      UPDATE tickets
       SET ticket_number = ?, ticket_type = ?, address = ?, lat = ?, lng = ?,
           due_at = CASE
             WHEN original_due_at IS NOT NULL AND ? = original_due_at THEN due_at
             ELSE ?
           END,
           original_due_at = COALESCE(original_due_at, ?),
-          payload_json = ?, last_811_sync_at = ?, 
-          updated_at = ?, version = version + 1,
+          payload_json = ?, last_811_sync_at = ?,
+          updated_at = ?,
           root_ticket_id = COALESCE(root_ticket_id, ?),
           parent_ticket_id = COALESCE(parent_ticket_id, ?),
           sequence_number = COALESCE(sequence_number, ?),

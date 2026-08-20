@@ -1023,17 +1023,33 @@ class SyncEngineImpl {
     // fields from the server delta are still applied (address, due date,
     // payload metadata, etc.) while local optimistic status and timeline
     // fields are preserved until the pending event is acked.
+    //
+    // We also track recently-SENT status events (within the last 60 seconds).
+    // These are events that the backend has confirmed, but the server delta
+    // in this pull may still reflect a pre-ack state due to a race between
+    // the flush and the pull.  Preserving the local status for a short window
+    // after ack prevents the "status reverts after refresh" symptom.
     const pendingTicketIds = new Set<string>();
     const pendingStatusTicketIds = new Set<string>();
-    const pendingEvents = await outboxCollection
-      .query(Q.where('status', 'PENDING'))
+    const recentStatusTicketIds = new Set<string>();
+    const recentEvents = await outboxCollection
+      .query(Q.where('status', Q.oneOf(['PENDING', 'SENT'])))
       .fetch();
 
-    for (const event of pendingEvents) {
+    const sixtySecondsAgo = Date.now() - 60000;
+    for (const event of recentEvents) {
       if (event.ticketId) {
-        pendingTicketIds.add(event.ticketId);
-        if (event.type === 'TICKET_STATUS_SET') {
-          pendingStatusTicketIds.add(event.ticketId);
+        if (event.status === 'PENDING') {
+          pendingTicketIds.add(event.ticketId);
+          if (event.type === 'TICKET_STATUS_SET') {
+            pendingStatusTicketIds.add(event.ticketId);
+          }
+        } else if (event.status === 'SENT' && event.type === 'TICKET_STATUS_SET') {
+          // Recently SENT status event — preserve local status for a short
+          // window to avoid race conditions with the pull.
+          if ((event.lastAttemptAt || 0) > sixtySecondsAgo) {
+            recentStatusTicketIds.add(event.ticketId);
+          }
         }
       }
     }
@@ -1044,21 +1060,27 @@ class SyncEngineImpl {
 
         const hasPending = pendingTicketIds.has(delta.id);
         const hasPendingStatus = pendingStatusTicketIds.has(delta.id);
+        const hasRecentStatus = recentStatusTicketIds.has(delta.id);
+        // Preserve local status if there's a pending OR recently-SENT status
+        // event.  The recent-SENT window covers the race between the flush
+        // completing and the next pull seeing the updated server state.
+        const preserveLocalStatus = hasPendingStatus || hasRecentStatus;
 
         try {
           const existing = await ticketsCollection.find(delta.id);
 
-          // When the ticket has a pending status event we must not let a
-          // stale server row overwrite the optimistic locatorStatus /
-          // timeline.  However, we still want non-status fields (address,
-          // due date, etc.) to converge.  We achieve this by:
+          // When the ticket has a pending or recently-acked status event we
+          // must not let a stale server row overwrite the optimistic
+          // locatorStatus / timeline.  However, we still want non-status
+          // fields (address, due date, etc.) to converge.  We achieve this
+          // by:
           //   1. Only applying the delta when the server version is newer
           //      (unchanged guard).
           //   2. When applying, preserving local locatorStatus, closedAt,
           //      closedByName, and timeline payload fields if the ticket
-          //      has a pending TICKET_STATUS_SET event.
+          //      has a pending or recently-SENT TICKET_STATUS_SET event.
           if (delta.version > existing.version) {
-            logger.log('[SyncEngine] Updating existing ticket:', delta.id, hasPendingStatus ? '(pending status overlay)' : '');
+            logger.log('[SyncEngine] Updating existing ticket:', delta.id, preserveLocalStatus ? '(status overlay)' : '');
 
             await existing.update((ticket) => {
               // Preserve local timeline fields if they exist and server doesn't have them
@@ -1078,13 +1100,13 @@ class SyncEngineImpl {
                   }
                 }
 
-                // When there is a pending status event, also preserve
-                // timeline fields that the server DOES have but that
-                // originated from the local optimistic write (the server
-                // simply mirrors them back).  Overwriting with the server
-                // copy is harmless in principle, but preserving the local
-                // copy avoids any chance of a partial mirror race.
-                if (hasPendingStatus) {
+                // When there is a pending or recently-SENT status event,
+                // also preserve timeline fields that the server DOES have
+                // but that originated from the local optimistic write (the
+                // server simply mirrors them back).  Overwriting with the
+                // server copy is harmless in principle, but preserving the
+                // local copy avoids any chance of a partial mirror race.
+                if (preserveLocalStatus) {
                   for (const field of timelineFields) {
                     if (localPayload[field]) {
                       serverPayload[field] = localPayload[field];
@@ -1122,13 +1144,13 @@ class SyncEngineImpl {
               ticket.lat = delta.lat;
               ticket.lng = delta.lng;
               ticket.status = delta.status;
-              // Pending-status overlay: keep the local optimistic
-              // locatorStatus / closedAt / closedByName until the outbox
-              // event is acked.  The server delta for these fields likely
-              // reflects the pre-ack state and would temporarily revert the
+              // Status overlay: keep the local optimistic locatorStatus /
+              // closedAt / closedByName while there is a pending or recently
+              // acked status event.  The server delta for these fields may
+              // reflect a pre-ack state and would temporarily revert the
               // ticket to ASSIGNED, causing the "disappearing ENROUTE/ONSITE"
               // symptom.
-              if (hasPendingStatus) {
+              if (preserveLocalStatus) {
                 // preserve ticket.locatorStatus, ticket.closedAt, ticket.closedByName
               } else {
                 ticket.locatorStatus = delta.locatorStatus;
