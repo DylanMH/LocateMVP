@@ -277,19 +277,19 @@ export default function TechsScreen() {
               </View>
               <View className="flex-row items-center" style={{ gap: 4 }}>
                 <Ionicons name="footsteps" size={12} color={colors.muted} />
-                <Text className="text-xs" style={{ color: colors.muted, fontVariant: ['tabular-nums'] }}>
+                <Text className="text-xs" style={{ color: colors.muted }}>
                   {item.today.footageFeet.toLocaleString()} ft
                 </Text>
               </View>
               <View className="flex-row items-center" style={{ gap: 4 }}>
                 <Ionicons name="speedometer-outline" size={12} color={colors.muted} />
-                <Text className="text-xs" style={{ color: colors.muted, fontVariant: ['tabular-nums'] }}>
+                <Text className="text-xs" style={{ color: colors.muted }}>
                   LPH: {item.today.lph.toFixed(1)}
                 </Text>
               </View>
               <View className="flex-row items-center" style={{ gap: 4 }}>
                 <Ionicons name="trending-up-outline" size={12} color={colors.muted} />
-                <Text className="text-xs" style={{ color: colors.muted, fontVariant: ['tabular-nums'] }}>
+                <Text className="text-xs" style={{ color: colors.muted }}>
                   FPH: {item.today.fph.toFixed(1)}
                 </Text>
               </View>
