@@ -271,34 +271,34 @@ export default function OverviewScreen() {
               style={{ backgroundColor: colors.surface }}
             >
               <View className="flex-row justify-between mb-3">
-                <Text className="text-sm" style={{ color: colors.muted }}>
+                <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Total Worked
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
                   {formatDuration(teamSummary.totalWorkedMinutes * 60 * 1000)}
                 </Text>
               </View>
               <View className="flex-row justify-between mb-3">
-                <Text className="text-sm" style={{ color: colors.muted }}>
+                <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Completed Tickets
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
                   {teamSummary.totalCompletedTickets}
                 </Text>
               </View>
               <View className="flex-row justify-between mb-3">
-                <Text className="text-sm" style={{ color: colors.muted }}>
+                <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Total Footage
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
                   {teamSummary.totalFootage.toLocaleString()} ft
                 </Text>
               </View>
               <View className="flex-row justify-between mb-3">
-                <Text className="text-sm" style={{ color: colors.muted }}>
+                <Text className="text-sm flex-1" style={{ color: colors.muted }}>
                   Open Backlog
                 </Text>
-                <Text className="text-sm font-semibold" style={{ color: colors.text }}>
+                <Text className="text-sm font-semibold ml-3" style={{ color: colors.text }}>
                   {teamSummary.openBacklog}
                 </Text>
               </View>
