@@ -794,15 +794,22 @@ class SyncEngineImpl {
       pendingEvents.map((event) => event.ticketId).filter(Boolean) as string[],
     );
 
-    // When the server returns zero tickets for this user, the backend
-    // genuinely has nothing assigned (reset, different env, etc.).  In
-    // that case we must NOT preserve active-state tickets — they are
-    // stale local rows, not a transient race.  Active-state preservation
-    // only applies when the server returned a partial snapshot (some
-    // tickets present, some missing), which suggests a transient race.
-    const serverHasAnyTickets = serverTicketIds.size > 0;
-    const activeWorkflowStates = ['ENROUTE', 'ONSITE', 'PAUSED'];
-
+    // The backend query `?assignedTo=userId` returns ALL tickets
+    // assigned to this user.  If a local ticket is missing from that
+    // response, it means the ticket is no longer assigned to this user
+    // (reassigned, deleted, or backend reset).  The only legitimate
+    // reason to preserve a missing ticket is if it has pending outbox
+    // events (the ticket may have been just created/assigned locally
+    // and not yet synced to the backend).
+    //
+    // The previous "active-state preservation" logic (keeping
+    // ENROUTE/ONSITE/PAUSED tickets when missing from a partial
+    // snapshot) was wrong — it kept stale tickets around after backend
+    // resets and reassignments.  The original "disappearing
+    // ENROUTE/ONSITE" bug was caused by the board query not being
+    // scoped to assigned_tech_id (fixed) and the pending-outbox skip
+    // being too aggressive (fixed with field-aware overlay), NOT by
+    // over-eager reconciliation.
     const ticketsToDelete = localTickets.filter((ticket) => {
       if (serverTicketIds.has(ticket.id)) {
         return false;
@@ -810,24 +817,6 @@ class SyncEngineImpl {
 
       if (pendingTicketIds.has(ticket.id)) {
         logger.log(`[SyncEngine] Preserving local ticket ${ticket.id} because it has pending outbox events`);
-        return false;
-      }
-
-      // Preserve tickets in active workflow states (ENROUTE / ONSITE /
-      // PAUSED) when missing from a PARTIAL server snapshot.  A transient
-      // pull race or backend ingestion lag can cause the ticket to be
-      // absent from one snapshot and present in the next; deleting it
-      // here would make it disappear from the board and reappear on the
-      // next pull — the "disappearing ENROUTE/ONSITE" symptom.
-      //
-      // BUT: when the server returns zero tickets for this user, the
-      // backend genuinely has nothing — this is not a transient race,
-      // and we must clean up stale local rows (e.g. after a backend
-      // reset or when switching between dev/prod environments).
-      if (serverHasAnyTickets && activeWorkflowStates.includes(ticket.locatorStatus)) {
-        logger.log(
-          `[SyncEngine] Preserving local ticket ${ticket.id} in active workflow state ${ticket.locatorStatus} (missing from partial server snapshot, likely transient)`,
-        );
         return false;
       }
 
