@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -10,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../../src/features/auth/AuthContext";
@@ -53,6 +55,7 @@ export default function OpsTicketDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [ticket, setTicket] = useState<OpsTicketDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -213,10 +216,19 @@ export default function OpsTicketDetailScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
       >
-        <View className="px-5 pt-6 pb-32">
+        <View className="px-5 pb-32" style={{ paddingTop: insets.top + 8 }}>
           {/* Header */}
           <View className="flex-row items-center mb-6">
-            <Pressable onPress={() => router.back()} hitSlop={10}>
+            <Pressable
+              onPress={() => {
+                if (router.canGoBack()) {
+                  router.back();
+                } else {
+                  router.replace("/(supervisor)/overview");
+                }
+              }}
+              hitSlop={10}
+            >
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
             <View className="ml-3 flex-1">
@@ -437,6 +449,61 @@ export default function OpsTicketDetailScreen() {
                   ) : null}
                 </View>
               ))}
+            </View>
+          ) : null}
+
+          {/* Contractor */}
+          {(ticket.contractor || ticket.contractorPhone || ticket.contactName || ticket.contactEmail) ? (
+            <View
+              className="rounded-2xl p-5 mb-4"
+              style={{ backgroundColor: colors.surface }}
+            >
+              <Text
+                className="text-xs font-semibold uppercase tracking-wider mb-3"
+                style={{ color: colors.muted }}
+              >
+                Contractor
+              </Text>
+              {ticket.contractor ? (
+                <View className="flex-row items-center mb-2" style={{ gap: 8 }}>
+                  <Ionicons name="business-outline" size={16} color={colors.muted} />
+                  <Text className="text-sm" style={{ color: colors.text }}>
+                    {ticket.contractor}
+                  </Text>
+                </View>
+              ) : null}
+              {ticket.contractorPhone ? (
+                <View className="flex-row items-center mb-2" style={{ gap: 8 }}>
+                  <Ionicons name="call-outline" size={16} color={colors.muted} />
+                  <Text className="text-sm" style={{ color: colors.accent }}>
+                    {ticket.contractorPhone}
+                  </Text>
+                </View>
+              ) : null}
+              {ticket.contactName ? (
+                <View className="flex-row items-center mb-2" style={{ gap: 8 }}>
+                  <Ionicons name="person-outline" size={16} color={colors.muted} />
+                  <Text className="text-sm" style={{ color: colors.text }}>
+                    {ticket.contactName}
+                  </Text>
+                </View>
+              ) : null}
+              {ticket.contactEmail ? (
+                <Pressable
+                  onPress={() => {
+                    const subject = encodeURIComponent(`Ticket ${ticket.ticketNumber}`);
+                    Linking.openURL(`mailto:${ticket.contactEmail}?subject=${subject}`);
+                  }}
+                  hitSlop={8}
+                >
+                  <View className="flex-row items-center mb-2" style={{ gap: 8 }}>
+                    <Ionicons name="mail-outline" size={16} color={colors.muted} />
+                    <Text className="text-sm" style={{ color: colors.accent, textDecorationLine: "underline" }}>
+                      {ticket.contactEmail}
+                    </Text>
+                  </View>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 

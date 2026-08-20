@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../../src/features/auth/AuthContext";
@@ -61,10 +62,24 @@ function parseTicketCustomers(payloadJson?: string): Array<{ id: string; utility
   }
 }
 
+function parseTicketContractor(payloadJson?: string): string | null {
+  if (!payloadJson) return null;
+  try {
+    const payload = JSON.parse(payloadJson);
+    const c = payload.contractor;
+    if (typeof c === "string") return c;
+    if (c && typeof c === "object" && c.name) return c.name;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function TechDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [tech, setTech] = useState<TechOpsSummary | null>(null);
   const [techTickets, setTechTickets] = useState<OpsTechTicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,10 +188,19 @@ export default function TechDetailScreen() {
         <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
       }
     >
-      <View className="px-5 pt-6 pb-24">
+      <View className="px-5 pb-24" style={{ paddingTop: insets.top + 8 }}>
         {/* Header */}
         <View className="flex-row items-center mb-6">
-          <Pressable onPress={() => router.back()} hitSlop={10}>
+          <Pressable
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace("/(supervisor)/techs");
+              }
+            }}
+            hitSlop={10}
+          >
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </Pressable>
           <View className="ml-3 flex-1">
@@ -435,6 +459,18 @@ export default function TechDetailScreen() {
                               <Ionicons name={getUtilityIcon(c.utility as any)} size={10} color="#fff" />
                             </View>
                           ))}
+                        </View>
+                      );
+                    })()}
+                    {(() => {
+                      const contractor = parseTicketContractor(ticket.payloadJson);
+                      if (!contractor) return null;
+                      return (
+                        <View className="flex-row items-center mt-1" style={{ gap: 4 }}>
+                          <Ionicons name="business-outline" size={11} color={colors.muted} />
+                          <Text className="text-[11px]" style={{ color: colors.muted }} numberOfLines={1}>
+                            {contractor}
+                          </Text>
                         </View>
                       );
                     })()}

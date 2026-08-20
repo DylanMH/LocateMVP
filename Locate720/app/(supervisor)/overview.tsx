@@ -390,6 +390,26 @@ export default function OverviewScreen() {
                       >
                         {item.detail}
                       </Text>
+                      {(item.assignedTechName || item.contractor) ? (
+                        <View className="flex-row items-center mt-1" style={{ gap: 8 }}>
+                          {item.assignedTechName ? (
+                            <View className="flex-row items-center" style={{ gap: 3 }}>
+                              <Ionicons name="person-outline" size={11} color={colors.muted} />
+                              <Text className="text-[11px]" style={{ color: colors.muted }}>
+                                {item.assignedTechName}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {item.contractor ? (
+                            <View className="flex-row items-center" style={{ gap: 3 }}>
+                              <Ionicons name="business-outline" size={11} color={colors.muted} />
+                              <Text className="text-[11px]" style={{ color: colors.muted }} numberOfLines={1}>
+                                {item.contractor}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                      ) : null}
                       {item.customers && item.customers.length > 0 ? (
                         <View className="flex-row items-center mt-1.5" style={{ gap: 4 }}>
                           {item.customers.map((c) => (
