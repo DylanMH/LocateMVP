@@ -835,6 +835,26 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     }
   };
 
+  // These useMemo hooks must be called unconditionally (before any early
+  // return) to satisfy the Rules of Hooks.  When ticket is null we use
+  // safe defaults so the memos still execute.
+  const displayData = useMemo(() => {
+    if (!ticket) return getTicketDisplayData("{}");
+    return getTicketDisplayData(ticket.payloadJson);
+  }, [ticket]);
+
+  const allocatableMinutes = useMemo(() => {
+    if (!ticket) return 0;
+    return getAllocatableMinutes(displayData.payload, ticket.locatorStatus);
+  }, [displayData.payload, ticket]);
+
+  const allocatedMinutesValue = useMemo(() => {
+    return Object.values(customerMarking).reduce((sum, data) => {
+      const mins = parseInt(data.minutes || "0", 10);
+      return sum + (isNaN(mins) ? 0 : mins);
+    }, 0);
+  }, [customerMarking]);
+
   if (!ticket) {
     return (
       <View
@@ -852,10 +872,6 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     );
   }
 
-  const isClosed =
-    isTicketClosed(ticket.status) || isTicketClosed(ticket.locatorStatus);
-  const isReadOnly = !isClockedIn || isClosed; // Read-only when clocked out OR closed
-
   const {
     payload,
     customers,
@@ -865,7 +881,11 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     contactEmail,
     markingInstructions,
     workType,
-  } = useMemo(() => getTicketDisplayData(ticket.payloadJson), [ticket.payloadJson]);
+  } = displayData;
+
+  const isClosed =
+    isTicketClosed(ticket.status) || isTicketClosed(ticket.locatorStatus);
+  const isReadOnly = !isClockedIn || isClosed; // Read-only when clocked out OR closed
 
   // Check if all customers are completed
   const allCustomersCompleted =
@@ -874,18 +894,6 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
       const marking = customerMarking[c.id];
       return marking && marking.completed === true;
     });
-
-  // Time allocation values for the floating card
-  const allocatableMinutes = useMemo(() => {
-    return getAllocatableMinutes(payload, ticket.locatorStatus);
-  }, [payload, ticket.locatorStatus]);
-
-  const allocatedMinutesValue = useMemo(() => {
-    return Object.values(customerMarking).reduce((sum, data) => {
-      const mins = parseInt(data.minutes || "0", 10);
-      return sum + (isNaN(mins) ? 0 : mins);
-    }, 0);
-  }, [customerMarking]);
 
   const remainingMinutes = allocatableMinutes - allocatedMinutesValue;
   const showFloatingTimeCard =

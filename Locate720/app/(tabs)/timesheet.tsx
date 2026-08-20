@@ -99,6 +99,7 @@ function buildTimelineItems(
 
 export default function Timesheet() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [session, setSession] = useState<DaySession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -551,7 +552,6 @@ export default function Timesheet() {
   const isOnLunch = currentBreakType === "lunch";
   const isOnPersonal = currentBreakType === "personal";
 
-  const insets = useSafeAreaInsets();
   const timelineItems = buildTimelineItems(timelineEvents, todaySessions);
 
   const heroColor = isOnBreak
@@ -665,7 +665,7 @@ export default function Timesheet() {
               className="text-xs font-semibold uppercase tracking-wider mb-4"
               style={{ color: colors.muted }}
             >
-              Today's Timeline
+              Today&apos;s Timeline
             </Text>
             {timelineItems.map((item, index) => (
               <View key={index} className="flex-row" style={{ minHeight: 44 }}>
