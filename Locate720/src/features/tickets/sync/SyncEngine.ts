@@ -305,6 +305,21 @@ class SyncEngineImpl {
               );
             }
           } else if (
+            event.type === 'TICKET_STATUS_SET' &&
+            typeof payload.ticketId === 'string'
+          ) {
+            try {
+              const ticket = await ticketsCollection.find(payload.ticketId);
+              await ticket.update((t) => {
+                t.syncState = nextState;
+              });
+            } catch (findErr) {
+              logger.warn(
+                `[SyncEngine] Could not locate ticket ${payload.ticketId} to update sync_state after status ack:`,
+                findErr,
+              );
+            }
+          } else if (
             event.type === 'TICKET_ATTACHMENT_ADDED' &&
             typeof payload.ticketId === 'string' &&
             typeof payload.attachmentId === 'string'
@@ -789,6 +804,22 @@ class SyncEngineImpl {
         return false;
       }
 
+      // Preserve tickets in active workflow states (ENROUTE / ONSITE /
+      // PAUSED) even when they are missing from the server snapshot.
+      // A transient pull race or backend ingestion lag can cause the
+      // ticket to be absent from one snapshot and present in the next;
+      // deleting it here would make it disappear from the board and
+      // reappear on the next pull — the "disappearing ENROUTE/ONSITE"
+      // symptom.  Terminal states (CLOSED/UNABLE) and idle states
+      // (ASSIGNED/PENDING) are safe to reconcile normally.
+      const activeWorkflowStates = ['ENROUTE', 'ONSITE', 'PAUSED'];
+      if (activeWorkflowStates.includes(ticket.locatorStatus)) {
+        logger.log(
+          `[SyncEngine] Preserving local ticket ${ticket.id} in active workflow state ${ticket.locatorStatus} (missing from server snapshot, likely transient)`,
+        );
+        return false;
+      }
+
       return true;
     });
 
@@ -986,15 +1017,24 @@ class SyncEngineImpl {
     const ticketsCollection = database.collections.get<Ticket>('tickets');
     const outboxCollection = database.collections.get<OutboxEvent>('outbox_events');
 
-    // Precompute pending ticket IDs using the indexed ticket_id column
+    // Precompute pending ticket IDs and their event types using the indexed
+    // ticket_id column.  Instead of skipping the entire delta when a ticket
+    // has pending outbox events, we apply a field-aware overlay: non-status
+    // fields from the server delta are still applied (address, due date,
+    // payload metadata, etc.) while local optimistic status and timeline
+    // fields are preserved until the pending event is acked.
     const pendingTicketIds = new Set<string>();
+    const pendingStatusTicketIds = new Set<string>();
     const pendingEvents = await outboxCollection
       .query(Q.where('status', 'PENDING'))
       .fetch();
-    
+
     for (const event of pendingEvents) {
       if (event.ticketId) {
         pendingTicketIds.add(event.ticketId);
+        if (event.type === 'TICKET_STATUS_SET') {
+          pendingStatusTicketIds.add(event.ticketId);
+        }
       }
     }
 
@@ -1002,36 +1042,54 @@ class SyncEngineImpl {
       for (const delta of deltas) {
         logger.log('[SyncEngine] Processing delta for ticket:', delta.id);
 
-        // Check if there are pending outbox events for this ticket using precomputed set
         const hasPending = pendingTicketIds.has(delta.id);
-
-        // Don't overwrite local optimistic changes
-        if (hasPending) {
-          logger.log(`[SyncEngine] Skipping delta for ${delta.id} - has pending outbox`);
-          continue;
-        }
+        const hasPendingStatus = pendingStatusTicketIds.has(delta.id);
 
         try {
           const existing = await ticketsCollection.find(delta.id);
-          
-          // Only update if server version is newer
+
+          // When the ticket has a pending status event we must not let a
+          // stale server row overwrite the optimistic locatorStatus /
+          // timeline.  However, we still want non-status fields (address,
+          // due date, etc.) to converge.  We achieve this by:
+          //   1. Only applying the delta when the server version is newer
+          //      (unchanged guard).
+          //   2. When applying, preserving local locatorStatus, closedAt,
+          //      closedByName, and timeline payload fields if the ticket
+          //      has a pending TICKET_STATUS_SET event.
           if (delta.version > existing.version) {
-            logger.log('[SyncEngine] Updating existing ticket:', delta.id);
+            logger.log('[SyncEngine] Updating existing ticket:', delta.id, hasPendingStatus ? '(pending status overlay)' : '');
+
             await existing.update((ticket) => {
               // Preserve local timeline fields if they exist and server doesn't have them
               let mergedPayload = delta.payloadJson;
               try {
                 const localPayload = JSON.parse(ticket.payloadJson);
                 const serverPayload = JSON.parse(delta.payloadJson);
-                
+
                 // Preserve timeline fields from local if not in server payload
                 const timelineFields = ['onsiteStartedAt', 'onsiteEndedAt', 'enrouteStartedAt', 'enrouteEndedAt', 'pauseEvents', 'closedAt'];
                 let needsMerge = false;
-                
+
                 for (const field of timelineFields) {
                   if (localPayload[field] && !serverPayload[field]) {
                     serverPayload[field] = localPayload[field];
                     needsMerge = true;
+                  }
+                }
+
+                // When there is a pending status event, also preserve
+                // timeline fields that the server DOES have but that
+                // originated from the local optimistic write (the server
+                // simply mirrors them back).  Overwriting with the server
+                // copy is harmless in principle, but preserving the local
+                // copy avoids any chance of a partial mirror race.
+                if (hasPendingStatus) {
+                  for (const field of timelineFields) {
+                    if (localPayload[field]) {
+                      serverPayload[field] = localPayload[field];
+                      needsMerge = true;
+                    }
                   }
                 }
 
@@ -1049,7 +1107,7 @@ class SyncEngineImpl {
                     needsMerge = true;
                   }
                 }
-                
+
                 if (needsMerge) {
                   mergedPayload = JSON.stringify(serverPayload);
                   logger.log('[SyncEngine] Preserved local timeline fields for ticket:', delta.id);
@@ -1057,23 +1115,33 @@ class SyncEngineImpl {
               } catch (e) {
                 logger.warn('[SyncEngine] Failed to merge timeline fields:', e);
               }
-              
+
               ticket.ticketNumber = delta.ticketNumber;
               ticket.ticketType = delta.ticketType;
               ticket.address = delta.address;
               ticket.lat = delta.lat;
               ticket.lng = delta.lng;
               ticket.status = delta.status;
-              ticket.locatorStatus = delta.locatorStatus;
+              // Pending-status overlay: keep the local optimistic
+              // locatorStatus / closedAt / closedByName until the outbox
+              // event is acked.  The server delta for these fields likely
+              // reflects the pre-ack state and would temporarily revert the
+              // ticket to ASSIGNED, causing the "disappearing ENROUTE/ONSITE"
+              // symptom.
+              if (hasPendingStatus) {
+                // preserve ticket.locatorStatus, ticket.closedAt, ticket.closedByName
+              } else {
+                ticket.locatorStatus = delta.locatorStatus;
+                ticket.closedByName = delta.closedByName;
+                ticket.closedAt = delta.closedAt;
+              }
               ticket.assignedTechId = delta.assignedTechId;
               ticket.dueAt = delta.dueAt;
               ticket.originalDueAt = delta.originalDueAt ?? delta.dueAt;
               ticket.updatedAt = delta.updatedAt;
               ticket.version = delta.version;
-              ticket.closedByName = delta.closedByName;
-              ticket.closedAt = delta.closedAt;
               ticket.payloadJson = mergedPayload;
-              ticket.syncState = 'SYNCED';
+              ticket.syncState = hasPending ? 'PENDING' : 'SYNCED';
               // Lineage columns are immutable once set on the server. Only
               // write them if the local row doesn't already have a value.
               if (!ticket.rootTicketId && delta.rootTicketId) ticket.rootTicketId = delta.rootTicketId;
@@ -1113,8 +1181,8 @@ class SyncEngineImpl {
             ticket.externalRootNumber = delta.externalRootNumber || delta.ticketNumber;
           });
           logger.log('[SyncEngine] Created ticket:', delta.id, error ? error : '');
-        } 
-      } 
+        }
+      }
     });
   }
 }

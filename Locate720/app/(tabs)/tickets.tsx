@@ -16,7 +16,7 @@ import Ticket from "../../src/db/models/Ticket";
 import DaySession from "../../src/db/models/DaySession";
 import ClockEvent from "../../src/db/models/ClockEvent";
 import { useAuth } from "../../src/features/auth/AuthContext";
-import { getTodayStartTimestamp, getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
+import { getTodayStartTimestamp, getTodayDateString, getStartOfNextLocalDay } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketCard } from "../../src/features/tickets/components/TicketCard";
 import { CompactTicketCard } from "../../src/features/tickets/components/CompactTicketCard";
 import { FilterChips } from "../../src/features/tickets/components/FilterChips";
@@ -62,6 +62,27 @@ export default function TicketsScreen() {
   const [rescheduleSelected, setRescheduleSelected] = useState<Set<string>>(new Set());
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const currentUserId = user?.id || "";
+
+  // Track the start of the current local day so the Closed tab can filter
+  // to only tickets closed today.  A midnight timer updates this state so
+  // the view rolls over automatically without requiring an app restart.
+  const [dayStartMs, setDayStartMs] = useState(() => getTodayStartTimestamp());
+
+  useEffect(() => {
+    // Set a timer that fires at the next local midnight to refresh the
+    // day boundary.  When it fires, update dayStartMs and schedule the
+    // next midnight timer.
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleMidnightRollover = () => {
+      const msUntilMidnight = getStartOfNextLocalDay() - Date.now();
+      timer = setTimeout(() => {
+        setDayStartMs(getTodayStartTimestamp());
+        scheduleMidnightRollover();
+      }, msUntilMidnight + 500); // +500ms to ensure we're past midnight
+    };
+    scheduleMidnightRollover();
+    return () => clearTimeout(timer);
+  }, []);
 
   // Set current user on SyncEngine when auth user changes
   useEffect(() => {
@@ -193,18 +214,25 @@ export default function TicketsScreen() {
     return () => subscription.unsubscribe();
   }, [user, checkBreakStatus]);
 
-  // Subscribe to tickets observable
+  // Subscribe to tickets observable — scoped to the current tech at the DB
+  // level so the board only loads tickets assigned to this user.  This avoids
+  // loading every ticket in the local cache (including other techs' tickets)
+  // and prevents transient assignment changes from causing board flicker.
   useEffect(() => {
+    if (!currentUserId) return;
     const ticketsCollection = database.collections.get<Ticket>("tickets");
     const subscription = ticketsCollection
-      .query(Q.sortBy("due_at", Q.asc))
+      .query(
+        Q.where("assigned_tech_id", currentUserId),
+        Q.sortBy("due_at", Q.asc),
+      )
       .observe()
       .subscribe((updatedTickets) => {
         setTickets(updatedTickets);
       });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [currentUserId]);
 
   // Pull from backend only when clocked in
   useEffect(() => {
@@ -217,10 +245,14 @@ export default function TicketsScreen() {
   // Refresh when screen comes into focus (e.g., navigating back from detail)
   useFocusEffect(
     useCallback(() => {
+      if (!currentUserId) return;
       // Force immediate re-query on focus to catch any pending DB changes
       const ticketsCollection = database.collections.get<Ticket>("tickets");
       ticketsCollection
-        .query(Q.sortBy("due_at", Q.asc))
+        .query(
+          Q.where("assigned_tech_id", currentUserId),
+          Q.sortBy("due_at", Q.asc),
+        )
         .fetch()
         .then((freshTickets) => {
           setTickets(freshTickets);
@@ -232,7 +264,7 @@ export default function TicketsScreen() {
       }, 180000); // 3 minutes
 
       return () => clearInterval(interval);
-    }, []),
+    }, [currentUserId]),
   );
 
   // App foreground refresh
@@ -281,6 +313,15 @@ export default function TicketsScreen() {
       ticket.locatorStatus !== "CLOSED" && ticket.locatorStatus !== "UNABLE";
     if (statusFilter === "OPEN" && !isOpen) return false;
     if (statusFilter === "CLOSED" && isOpen) return false;
+
+    // Daily closed-ticket view: when viewing the CLOSED tab, only show
+    // tickets closed during the current local calendar day.  Historical
+    // closed tickets remain in the backend and local DB but are hidden
+    // from this daily operational view.  The dayStartMs state updates at
+    // midnight so the view rolls over automatically.
+    if (statusFilter === "CLOSED" && ticket.closedAt != null) {
+      if (ticket.closedAt < dayStartMs) return false;
+    }
 
     // Assigned filter
     if (assignedFilter === "MINE" && ticket.assignedTechId !== currentUserId) {
