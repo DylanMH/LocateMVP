@@ -639,8 +639,41 @@ function RescheduleTab({
   );
   const canReschedule = selected.size > 0 && selectedContractors.size <= 1;
 
+  // When at least one ticket is selected, filter the visible list to only
+  // tickets from the same contractor. This makes it easy to select multiple
+  // tickets for bulk reschedule without accidentally mixing contractors
+  // (which is not allowed). When nothing is selected, show all tickets.
+  const activeContractor = selectedTickets.length > 0
+    ? (parseTicketPayload(selectedTickets[0].payloadJson).contractor || "Unknown")
+    : null;
+  const visibleTickets = activeContractor
+    ? tickets.filter((t) => {
+        const payload = parseTicketPayload(t.payloadJson);
+        return (payload.contractor || "Unknown") === activeContractor;
+      })
+    : tickets;
+
   return (
     <View className="flex-1 px-4 pt-3">
+      {/* Contractor filter indicator */}
+      {activeContractor && (
+        <View
+          className="flex-row items-center justify-between rounded-xl px-4 py-2 mb-3"
+          style={{ backgroundColor: colors.bg }}
+        >
+          <Text className="text-xs" style={{ color: colors.muted }}>
+            Showing only <Text style={{ color: colors.text, fontWeight: "600" }}>{activeContractor}</Text> tickets
+          </Text>
+          <Pressable
+            onPress={onClearSelection}
+            hitSlop={8}
+          >
+            <Text className="text-xs font-semibold" style={{ color: colors.accent }}>
+              Show all
+            </Text>
+          </Pressable>
+        </View>
+      )}
       {/* Selection summary bar */}
       {selected.size > 0 && (
         <View
@@ -683,9 +716,18 @@ function RescheduleTab({
             tickets cannot be rescheduled.
           </Text>
         </View>
+      ) : visibleTickets.length === 0 ? (
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-base font-semibold mb-2" style={{ color: colors.text }}>
+            No other tickets from {activeContractor}
+          </Text>
+          <Text className="text-sm text-center" style={{ color: colors.muted }}>
+            This is the only eligible ticket from this contractor.
+          </Text>
+        </View>
       ) : (
         <FlatList
-          data={tickets}
+          data={visibleTickets}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingBottom: 24 }}
           ItemSeparatorComponent={() => <View className="h-2" />}

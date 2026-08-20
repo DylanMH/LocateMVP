@@ -10,7 +10,7 @@ export type DetailTabKey = "INFO" | "CUSTOMER" | "ATTACHMENTS" | "NOTES" | "HIST
 const TABS: { key: DetailTabKey; label: string }[] = [
   { key: "INFO", label: "Info" },
   { key: "CUSTOMER", label: "Customer" },
-  { key: "ATTACHMENTS", label: "Attachments" },
+  { key: "ATTACHMENTS", label: "Files" },
   { key: "NOTES", label: "Notes" },
   { key: "HISTORY", label: "History" },
 ];
@@ -39,16 +39,19 @@ export function DetailTabs({
               triggerLightHaptic();
               onChange(tab.key);
             }}
-            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
             style={{
               flex: 1,
               paddingVertical: spacing.tight,
+              paddingHorizontal: spacing.xs,
               alignItems: "center",
               borderBottomWidth: 2,
               borderBottomColor: active ? colors.accent : "transparent",
             }}
           >
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
               style={{
                 color: active ? colors.accent : colors.muted,
                 fontSize: typography.metadata,
