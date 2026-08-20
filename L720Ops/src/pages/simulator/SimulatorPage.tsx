@@ -4,12 +4,15 @@ import { BackendService } from "../../services/backendService";
 import type { SimulatorTicket, SimulatorTicketDetail } from "../../types/simulator";
 import { formatTicketType, ticketTypeBadgeClass } from "../../types/ticket";
 import { SimulatorTicketDetailModal } from "../../components/SimulatorTicketDetailModal";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 export function SimulatorPage() {
   const queryClient = useQueryClient();
   const [selectedTicket, setSelectedTicket] = useState<SimulatorTicketDetail | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [areaFilter, setAreaFilter] = useState("");
 
   const {
     data: simulatorTickets,
@@ -17,10 +20,15 @@ export function SimulatorPage() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["simulator-tickets"],
-    queryFn: () => SimulatorService.getTickets(),
-    staleTime: 0, // Disable caching to force fresh data
-    refetchOnWindowFocus: true, // Refetch when window gains focus
+    queryKey: ["simulator-tickets", statusFilter, areaFilter],
+    queryFn: () =>
+      SimulatorService.getTickets({
+        status: statusFilter || undefined,
+        areaId: areaFilter || undefined,
+        limit: 500,
+      }),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const { data: stats } = useQuery({
@@ -30,9 +38,7 @@ export function SimulatorPage() {
 
   const generateTicketsMutation = useMutation({
     mutationFn: () => SimulatorService.generateTestTickets(5),
-    onSuccess: (data) => {
-      console.log("[SimulatorPage] Generated tickets:", data);
-      // Refetch both simulator tickets and stats
+    onSuccess: () => {
       refetch();
       queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
     },
@@ -42,11 +48,38 @@ export function SimulatorPage() {
     },
   });
 
+  const generateTestSetMutation = useMutation({
+    mutationFn: async () => {
+      await SimulatorService.resetDatabase();
+      return SimulatorService.generateTestTickets(300);
+    },
+    onSuccess: (data) => {
+      alert(`Success: Generated ${data.tickets.length} new test tickets (811 DB was reset first).`);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
+    },
+    onError: (error) => {
+      console.error("[SimulatorPage] Failed to generate test set:", error);
+      alert("Failed to generate test set. Please try again.");
+    },
+  });
+
+  const generateLinkedMutation = useMutation({
+    mutationFn: () => SimulatorService.generateLinkedTickets(),
+    onSuccess: (data) => {
+      alert(`Success: Created ${data.created} linked tickets (UPDATE/UPDATE_REMARK).`);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
+    },
+    onError: (error) => {
+      console.error("[SimulatorPage] Failed to generate linked tickets:", error);
+      alert("Failed to generate linked tickets. Please try again.");
+    },
+  });
+
   const resetDatabaseMutation = useMutation({
     mutationFn: () => SimulatorService.resetDatabase(),
     onSuccess: () => {
-      console.log("[SimulatorPage] Database reset successfully");
-      // Refetch both simulator tickets and stats
       refetch();
       queryClient.invalidateQueries({ queryKey: ["simulator-stats"] });
     },
@@ -59,15 +92,13 @@ export function SimulatorPage() {
   const { data: backendStatus } = useQuery({
     queryKey: ["backend-811-status"],
     queryFn: () => BackendService.get811Status(),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 30000,
   });
 
   const pull811TicketsMutation = useMutation({
     mutationFn: () => BackendService.pull811Tickets(),
     onSuccess: (data) => {
-      console.log("[SimulatorPage] Pulled 811 tickets:", data);
       alert(`Success: ${data.pull.ingested} new, ${data.pull.updated} updated tickets. ${data.assignment.assigned} tickets assigned.`);
-      // Refresh backend status
       queryClient.invalidateQueries({ queryKey: ["backend-811-status"] });
     },
     onError: (error) => {
@@ -79,9 +110,7 @@ export function SimulatorPage() {
   const resetBackendTicketsMutation = useMutation({
     mutationFn: () => BackendService.reset811Tickets(),
     onSuccess: (data) => {
-      console.log("[SimulatorPage] Reset backend tickets:", data);
       alert(`Success: Deleted ${data.deleted} tickets from backend.`);
-      // Refresh backend status
       queryClient.invalidateQueries({ queryKey: ["backend-811-status"] });
     },
     onError: (error) => {
@@ -128,6 +157,19 @@ export function SimulatorPage() {
     new Set((simulatorTickets?.tickets || []).map((ticket) => ticket.areaId).filter(Boolean)),
   ).sort();
 
+  // Client-side search filter (on top of server-side status/area filters)
+  const filteredTickets = useMemo(() => {
+    const tickets = simulatorTickets?.tickets || [];
+    if (!searchQuery.trim()) return tickets;
+    const q = searchQuery.toLowerCase();
+    return tickets.filter(
+      (t) =>
+        t.ticketNumber.toLowerCase().includes(q) ||
+        t.areaId.toLowerCase().includes(q) ||
+        t.ticketType.toLowerCase().includes(q),
+    );
+  }, [simulatorTickets, searchQuery]);
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -141,6 +183,32 @@ export function SimulatorPage() {
             {generateTicketsMutation.isPending
               ? "Generating..."
               : "Generate 5 Tickets"}
+          </button>
+          <button
+            onClick={() => {
+              if (
+                confirm(
+                  "This will RESET the 811 database and generate 300 new test tickets. Continue?",
+                )
+              ) {
+                generateTestSetMutation.mutate();
+              }
+            }}
+            disabled={generateTestSetMutation.isPending}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {generateTestSetMutation.isPending
+              ? "Generating 300..."
+              : "Generate Test Set (300)"}
+          </button>
+          <button
+            onClick={() => generateLinkedMutation.mutate()}
+            disabled={generateLinkedMutation.isPending}
+            className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {generateLinkedMutation.isPending
+              ? "Generating..."
+              : "Generate Updates"}
           </button>
           <button
             onClick={() => pull811TicketsMutation.mutate()}
@@ -194,7 +262,7 @@ export function SimulatorPage() {
             <div className="p-4 border-b border-gray-200">
               <h3 className="text-lg font-medium text-gray-900">811 Tickets</h3>
               <div className="text-sm text-gray-500 mt-1">
-                Found {simulatorTickets?.tickets?.length || 0} tickets
+                Found {filteredTickets.length} tickets
               </div>
             </div>
             <div className="p-4 border-b border-gray-200">
@@ -202,9 +270,15 @@ export function SimulatorPage() {
                 <input
                   type="text"
                   placeholder="Search tickets..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                 />
-                <select className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                >
                   <option value="">All Status</option>
                   <option value="NEW">New</option>
                   <option value="SENT_TO_MEMBER">Sent to Member</option>
@@ -212,7 +286,11 @@ export function SimulatorPage() {
                   <option value="RESPONDED">Responded</option>
                   <option value="CLOSED">Closed</option>
                 </select>
-                <select className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500">
+                <select
+                  value={areaFilter}
+                  onChange={(e) => setAreaFilter(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                >
                   <option value="">All Areas</option>
                   {availableAreas.map((area) => (
                     <option key={area} value={area}>
@@ -240,6 +318,9 @@ export function SimulatorPage() {
                       Area
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Seq
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Members
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -248,7 +329,7 @@ export function SimulatorPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {simulatorTickets?.tickets?.map((ticket: SimulatorTicket) => (
+                  {filteredTickets.map((ticket: SimulatorTicket) => (
                     <tr key={ticket.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
@@ -295,24 +376,24 @@ export function SimulatorPage() {
                         {ticket.areaId}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {(ticket as any).sequenceNumber ?? 1}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {ticket.memberCount || 0}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <button 
+                        <button
                           onClick={() => handleViewTicket(ticket.id)}
-                          className="text-primary-600 hover:text-primary-900 mr-3"
+                          className="text-primary-600 hover:text-primary-900"
                         >
                           View
-                        </button>
-                        <button className="text-gray-600 hover:text-gray-900">
-                          Edit
                         </button>
                       </td>
                     </tr>
                   )) || (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="px-6 py-4 text-center text-sm text-gray-500"
                       >
                         No 811 tickets found
@@ -326,12 +407,6 @@ export function SimulatorPage() {
         </div>
 
         <div className="space-y-6">
-          <div className="p-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
-              System Statistics
-            </h3>
-          </div>
-
           <div className="bg-white shadow rounded-lg p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">
               Backend Status
@@ -346,7 +421,7 @@ export function SimulatorPage() {
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Last Sync:</span>
                 <span className="text-sm text-gray-900">
-                  {backendStatus?.status?.lastSyncTime 
+                  {backendStatus?.status?.lastSyncTime
                     ? new Date(backendStatus.status.lastSyncTime).toLocaleString()
                     : "Never"
                   }
@@ -382,29 +457,6 @@ export function SimulatorPage() {
                   No area data available
                 </div>
               )}
-            </div>
-          </div>
-
-          <div className="bg-white shadow rounded-lg p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
-              Quick Actions
-            </h3>
-            <div className="space-y-3">
-              <button className="w-full bg-primary-600 text-white px-4 py-2 rounded-md hover:bg-primary-700">
-                Create New Ticket
-              </button>
-              <button
-                onClick={() => generateTicketsMutation.mutate()}
-                disabled={generateTicketsMutation.isPending}
-                className="w-full bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {generateTicketsMutation.isPending
-                  ? "⏳ Generating..."
-                  : "➕ Generate 5 Test Tickets"}
-              </button>
-              <button className="w-full bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700">
-                Export Data
-              </button>
             </div>
           </div>
         </div>

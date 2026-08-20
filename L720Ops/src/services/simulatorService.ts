@@ -162,6 +162,29 @@ export class SimulatorService {
     return response.json();
   }
 
+  static async generateLinkedTickets(
+    count?: number,
+  ): Promise<{
+    message: string;
+    created: number;
+    linkedTickets: Array<{ id: string; type: string; rootId: string }>;
+  }> {
+    const response = await fetch(
+      `${SIMULATOR_API_BASE_URL}/ops/811/generate-linked`,
+      {
+        method: "POST",
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ count }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to generate linked tickets");
+    }
+
+    return response.json();
+  }
+
   static async getStats(): Promise<SimulatorStats> {
     const response = await fetch(`${SIMULATOR_API_BASE_URL}/ops/811/stats`, {
       headers: this.getAuthHeaders(),

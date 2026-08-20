@@ -129,6 +129,10 @@ export async function opsRoutes(app: FastifyInstance) {
         memberCount: ticket.member_count,
         payloadJson: ticket.payload_json,
         payload: parsePayloadJson(ticket.payload_json),
+        rootTicketId: ticket.root_ticket_id || null,
+        parentTicketId: ticket.parent_ticket_id || null,
+        sequenceNumber: ticket.sequence_number || 1,
+        externalRootNumber: ticket.external_root_number || ticket.ticket_number,
       }));
 
       return reply.send({
@@ -208,6 +212,11 @@ export async function opsRoutes(app: FastifyInstance) {
           }
         },
         payload: payloadData,
+        payloadJson: ticket.payload_json,
+        rootTicketId: ticket.root_ticket_id || null,
+        parentTicketId: ticket.parent_ticket_id || null,
+        sequenceNumber: ticket.sequence_number || 1,
+        externalRootNumber: ticket.external_root_number || ticket.ticket_number,
         members: members.map((member: any) => ({
           ...member,
           customerName: member.company_name,
@@ -620,6 +629,65 @@ export async function opsRoutes(app: FastifyInstance) {
     } catch (error) {
       console.error("[811 OPS] Error generating tickets:", error);
       return reply.code(500).send({ error: "Failed to generate tickets" });
+    }
+  });
+
+  /**
+   * POST /api/ops/811/generate-linked
+   * Generate UPDATE / UPDATE_REMARK linked tickets for existing NORMAL originals.
+   * For each NORMAL original, creates one linked ticket (randomly UPDATE or UPDATE_REMARK).
+   * Optionally limit to a specific count.
+   */
+  app.post("/api/ops/811/generate-linked", async (req, reply) => {
+    try {
+      const { count } = (req.body as { count?: number }) || {};
+
+      // Find NORMAL originals (sequence_number = 1, root_ticket_id = id)
+      const normals = db
+        .prepare(
+          `SELECT id FROM tickets_811 WHERE ticket_type = 'NORMAL' AND sequence_number = 1 ORDER BY RANDOM()`,
+        )
+        .all() as { id: string }[];
+
+      if (normals.length === 0) {
+        return reply.send({
+          message: "No NORMAL originals found to create linked tickets for",
+          created: 0,
+          linkedTickets: [],
+        });
+      }
+
+      const { createLinkedTicket } = await import("../domain/generator.js");
+
+      const toCreate = count && count > 0 ? Math.min(count, normals.length) : normals.length;
+      const created: Array<{ id: string; type: string; rootId: string }> = [];
+
+      for (let i = 0; i < toCreate; i++) {
+        const rootId = normals[i].id;
+        const linkType = Math.random() < 0.5 ? "UPDATE" : "UPDATE_REMARK";
+        try {
+          const newId = createLinkedTicket({
+            rootTicketId: rootId,
+            type: linkType as any,
+            overrides: {},
+          });
+          created.push({ id: newId, type: linkType, rootId });
+        } catch (err: any) {
+          console.error(`[811 OPS] Failed to create linked ticket for ${rootId}:`, err.message);
+        }
+      }
+
+      console.log(`[811 OPS] Generated ${created.length} linked tickets`);
+      await notifyL720BackendOf811Change({ since: Date.now() - 5000 });
+
+      return reply.send({
+        message: `Generated ${created.length} linked tickets (UPDATE/UPDATE_REMARK)`,
+        created: created.length,
+        linkedTickets: created,
+      });
+    } catch (error) {
+      console.error("[811 OPS] Error generating linked tickets:", error);
+      return reply.code(500).send({ error: "Failed to generate linked tickets" });
     }
   });
 

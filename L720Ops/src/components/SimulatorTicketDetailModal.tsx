@@ -27,10 +27,10 @@ export function SimulatorTicketDetailModal({ ticket, isOpen, onClose }: Simulato
   const contactName = (ticket as any).contractor?.contact?.name || payloadData.contactName;
   const contactEmail = (ticket as any).contractor?.contact?.email || payloadData.contactEmail;
   const scope = payloadData.scope;
-  const rootTicketId = payloadData.rootTicketId;
-  const parentTicketId = payloadData.parentTicketId;
-  const sequenceNumber = payloadData.sequenceNumber;
-  const externalRootNumber = payloadData.externalRootNumber;
+  const rootTicketId = (ticket as any).rootTicketId || payloadData.rootTicketId;
+  const parentTicketId = (ticket as any).parentTicketId || payloadData.parentTicketId;
+  const sequenceNumber = (ticket as any).sequenceNumber ?? payloadData.sequenceNumber;
+  const externalRootNumber = (ticket as any).externalRootNumber || payloadData.externalRootNumber;
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
