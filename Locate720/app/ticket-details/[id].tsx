@@ -717,6 +717,7 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<DetailTabKey>("INFO");
   const [showReconcileModal, setShowReconcileModal] = useState(false);
+  const skipReconcileRef = useRef(false);
   const tick = useOnsiteTick(ticket);
   const isClockedIn = useClockedInStatus(user?.id);
   const { customerMarking, setCustomerMarking } = useCustomerMarkingState(ticket);
@@ -766,11 +767,11 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         ticket,
         customerMarking,
       );
-      if (allocationValidation.type === "reconcile") {
+      if (allocationValidation.type === "reconcile" && !skipReconcileRef.current) {
         setShowReconcileModal(true);
         return;
       }
-      if (allocationValidation.type === "invalid") {
+      if (allocationValidation.type === "invalid" && !skipReconcileRef.current) {
         showCustomerTabAlert(
           allocationValidation.title,
           allocationValidation.message,
@@ -778,6 +779,8 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         );
         return;
       }
+      // Clear the skip flag after it's been used
+      skipReconcileRef.current = false;
 
       const currentPayload = parseTicketPayload(ticket.payloadJson);
       const now = Date.now();
@@ -843,15 +846,23 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   // These useMemo hooks must be called unconditionally (before any early
   // return) to satisfy the Rules of Hooks.  When ticket is null we use
   // safe defaults so the memos still execute.
+  // Recompute displayData whenever payloadJson or locatorStatus changes.
+  // WatermelonDB model instances keep the same reference after update(),
+  // so depending on [ticket] alone would NOT recompute when fields change.
+  // We depend on the primitive field values to detect changes.
+  const payloadJson = ticket?.payloadJson ?? "";
+  const locatorStatusRaw = ticket?.locatorStatus ?? "";
+  const ticketVersion = ticket?.version ?? 0;
+
   const displayData = useMemo(() => {
     if (!ticket) return getTicketDisplayData("{}");
     return getTicketDisplayData(ticket.payloadJson);
-  }, [ticket]);
+  }, [ticket, payloadJson, ticketVersion]);
 
   const allocatableMinutes = useMemo(() => {
     if (!ticket) return 0;
     return getAllocatableMinutes(displayData.payload, ticket.locatorStatus);
-  }, [displayData.payload, ticket]);
+  }, [displayData.payload, ticket, locatorStatusRaw, ticketVersion]);
 
   const allocatedMinutesValue = useMemo(() => {
     return Object.values(customerMarking).reduce((sum, data) => {
@@ -1281,6 +1292,10 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         onConfirm={(updatedMarking) => {
           setCustomerMarking(updatedMarking);
           setShowReconcileModal(false);
+          // Set the skip flag so handleStatusChange("CLOSED") doesn't
+          // re-trigger the reconcile modal.  The marking has already
+          // been adjusted by the user.
+          skipReconcileRef.current = true;
           // After updating marking, proceed with close
           setTimeout(() => handleStatusChange("CLOSED"), 100);
         }}
