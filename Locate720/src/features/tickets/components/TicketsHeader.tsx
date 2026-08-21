@@ -209,8 +209,16 @@ export function TicketsHeader({
               autoCapitalize="characters"
               autoCorrect={false}
               returnKeyType="search"
-              // Dismiss search when the user hits the search/done key
-              onBlur={onClearSearch}
+              // When the input loses focus (user taps elsewhere or hits
+              // search/done key), only collapse the search bar if the
+              // query is empty.  If there's an active query, keep the
+              // search results visible so the user can scroll and tap
+              // a result.
+              onBlur={() => {
+                if (!searchQuery.trim()) {
+                  onClearSearch();
+                }
+              }}
             />
             <Pressable
               onPress={onClearSearch}
