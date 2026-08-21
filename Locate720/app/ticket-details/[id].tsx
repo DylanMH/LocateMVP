@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Animated, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import withObservables from "@nozbe/with-observables";
@@ -723,6 +723,9 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   const { customerMarking, setCustomerMarking } = useCustomerMarkingState(ticket);
   const [scrollHandlers, setScrollHandlers] = useState<ScrollHandlers | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const floatingCardAnim = useRef(new Animated.Value(0)).current;
+  const floatingCardVisible = useRef(false);
+  const scrollYRef = useRef(0);
 
   useEffect(() => {
     const showListener = Keyboard.addListener("keyboardDidShow", (e) => {
@@ -912,8 +915,31 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     });
 
   const remainingMinutes = allocatableMinutes - allocatedMinutesValue;
-  const showFloatingTimeCard =
-    tab === "CUSTOMER" && Boolean(payload.onsiteStartedAt) && !isClosed;
+  const isOnsiteActive = Boolean(payload.onsiteStartedAt) && !isClosed;
+  const showFloatingTimeCard = tab === "CUSTOMER" && isOnsiteActive;
+
+  // Show the floating time card only after the user has scrolled down
+  // past 80px. Animate it in/out from the top with a smooth slide.
+  const handleScrollForFloatingCard = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const y = event.nativeEvent.contentOffset.y;
+    scrollYRef.current = y;
+    const shouldShow = y > 80;
+    if (shouldShow && !floatingCardVisible.current) {
+      floatingCardVisible.current = true;
+      Animated.timing(floatingCardAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: false,
+      }).start();
+    } else if (!shouldShow && floatingCardVisible.current) {
+      floatingCardVisible.current = false;
+      Animated.timing(floatingCardAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: false,
+      }).start();
+    }
+  };
 
   // Sticky action bar: visible when ticket is not closed and there are
   // available workflow transitions.  We show the bar even when read-only
@@ -937,25 +963,50 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     >
       <Stack.Screen options={{ title: "Ticket Details" }} />
 
-      {/* Floating Time Allocation Card — stays visible while scrolling the Customer tab */}
+      {/* Floating Time Allocation Card — slides in from the top when
+          the user scrolls down past 80px on the Customer tab while
+          on-site. Hidden at the top of the scroll to avoid redundancy
+          with the inline customers card. */}
       {showFloatingTimeCard && (
-        <TimeAllocationCard
-          allocatableMinutes={allocatableMinutes}
-          allocatedMinutes={allocatedMinutesValue}
-          remainingMinutes={remainingMinutes}
-        />
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            opacity: floatingCardAnim,
+            transform: [{
+              translateY: floatingCardAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-80, 0],
+              }),
+            }],
+          }}
+        >
+          <TimeAllocationCard
+            allocatableMinutes={allocatableMinutes}
+            allocatedMinutes={allocatedMinutesValue}
+            remainingMinutes={remainingMinutes}
+          />
+        </Animated.View>
       )}
 
       <ScrollView
         ref={scrollViewRef}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          if (showFloatingTimeCard) handleScrollForFloatingCard(e);
+        }}
         onScrollBeginDrag={scrollHandlers?.onScrollBeginDrag}
         onScrollEndDrag={scrollHandlers?.onScrollEndDrag}
         onMomentumScrollEnd={scrollHandlers?.onMomentumScrollEnd}
         contentContainerStyle={{
           paddingHorizontal: spacing.screen,
-          paddingTop: showFloatingTimeCard ? spacing.tightSm : spacing.screen,
+          paddingTop: spacing.screen,
           paddingBottom: showStickyActionBar
             ? stickyBarHeight + 20
             : 40 + Math.max(insets.bottom, keyboardHeight),
@@ -1002,37 +1053,6 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
             {customers.length} utilit{customers.length !== 1 ? "ies" : "y"}
           </Text>
         </View>
-
-        {payload.onsiteStartedAt && (
-          <View
-            className="rounded-xl"
-            style={{ backgroundColor: colors.surface, padding: spacing.normal, marginTop: spacing.tightSm }}
-          >
-            <Text
-              className="font-semibold"
-              style={{ color: colors.muted, fontSize: typography.metadata }}
-            >
-              Time on Site
-            </Text>
-            <Text
-              className="font-bold"
-              style={{ color: colors.accent, fontSize: typography.section, marginTop: 4 }}
-            >
-              {(() => {
-                // Force recalculation when tick changes
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const _ = tick;
-                const allocatableMinutes = getAllocatableMinutes(
-                  payload,
-                  ticket.locatorStatus,
-                );
-                const hours = Math.floor(allocatableMinutes / 60);
-                const minutes = allocatableMinutes % 60;
-                return `${hours}h ${minutes}m`;
-              })()}
-            </Text>
-          </View>
-        )}
 
         <DetailTabs value={tab} onChange={setTab} />
 
