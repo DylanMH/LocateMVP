@@ -52,11 +52,10 @@ function buildTimelineItems(
         items.push({ kind: "clock_out", time: event.occurredAt });
         break;
       case "ALLOCATION_CHANGE": {
-        const sess = sessionMap.get(event.sessionId);
         items.push({
           kind: "allocation_change",
           time: event.occurredAt,
-          newAllocation: sess?.allocationType,
+          newAllocation: event.allocationType,
         });
         break;
       }
@@ -390,6 +389,7 @@ export default function Timesheet() {
           e.userId = user.id;
           e.eventType = "ALLOCATION_CHANGE";
           e.occurredAt = now;
+          e.allocationType = newType;
         });
       });
 
@@ -718,7 +718,7 @@ export default function Timesheet() {
                 <View className="flex-1 mb-4">
                   {item.kind === "clock_in" && (
                     <View className="flex-row items-center justify-between">
-                      <View className="flex-1">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
                         <Text
                           className="text-sm font-semibold"
                           style={{ color: colors.text }}
@@ -735,7 +735,7 @@ export default function Timesheet() {
                         )}
                       </View>
                       <Text
-                        className="text-xs font-medium"
+                        className="text-xs font-medium ml-2"
                         style={{ color: colors.muted }}
                       >
                         {formatTime(item.time)}
@@ -745,13 +745,13 @@ export default function Timesheet() {
                   {item.kind === "clock_out" && (
                     <View className="flex-row items-center justify-between">
                       <Text
-                        className="text-sm font-semibold"
-                        style={{ color: colors.danger }}
+                        className="text-sm font-semibold flex-1"
+                        style={{ color: colors.danger, flexShrink: 1 }}
                       >
                         Clocked Out
                       </Text>
                       <Text
-                        className="text-xs font-medium"
+                        className="text-xs font-medium ml-2"
                         style={{ color: colors.muted }}
                       >
                         {formatTime(item.time)}
@@ -760,7 +760,7 @@ export default function Timesheet() {
                   )}
                   {item.kind === "allocation_change" && (
                     <View className="flex-row items-center justify-between">
-                      <View className="flex-1">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
                         <Text
                           className="text-sm font-semibold"
                           style={{ color: colors.text }}
@@ -772,7 +772,7 @@ export default function Timesheet() {
                         </Text>
                       </View>
                       <Text
-                        className="text-xs font-medium"
+                        className="text-xs font-medium ml-2"
                         style={{ color: colors.muted }}
                       >
                         {formatTime(item.time)}
@@ -781,7 +781,7 @@ export default function Timesheet() {
                   )}
                   {item.kind === "lunch" && (
                     <View className="flex-row items-center justify-between">
-                      <View className="flex-1">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
                         <Text
                           className="text-sm font-semibold"
                           style={{ color: colors.accent }}
@@ -805,7 +805,7 @@ export default function Timesheet() {
                         )}
                       </View>
                       <Text
-                        className="text-xs font-medium"
+                        className="text-xs font-medium ml-2"
                         style={{ color: colors.muted }}
                       >
                         {formatTime(item.startTime)}
@@ -815,7 +815,7 @@ export default function Timesheet() {
                   )}
                   {item.kind === "personal" && (
                     <View className="flex-row items-center justify-between">
-                      <View className="flex-1">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
                         <Text
                           className="text-sm font-semibold"
                           style={{ color: colors.accent }}
@@ -839,7 +839,7 @@ export default function Timesheet() {
                         )}
                       </View>
                       <Text
-                        className="text-xs font-medium"
+                        className="text-xs font-medium ml-2"
                         style={{ color: colors.muted }}
                       >
                         {formatTime(item.startTime)}

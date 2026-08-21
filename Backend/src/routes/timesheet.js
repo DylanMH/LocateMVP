@@ -175,9 +175,10 @@ function getStatements() {
         date,
         clock_in_at,
         clock_out_at,
-        session_status
+        session_status,
+        allocation_type
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     updateSessionClockIn: db.prepare(`
       UPDATE day_sessions
@@ -439,6 +440,7 @@ function persistClockEvent(event) {
         clockInAt || null,
         clockOutAt || null,
         status || null,
+        allocationType || null,
       );
     });
   }

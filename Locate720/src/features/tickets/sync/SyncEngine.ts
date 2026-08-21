@@ -987,6 +987,7 @@ class SyncEngineImpl {
             evt.occurredAt = e.occurred_at;
             evt.reason = e.reason || undefined;
             evt.ticketId = e.ticket_id || undefined;
+            evt.allocationType = e.allocation_type || undefined;
           });
         }
       }

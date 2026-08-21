@@ -22,6 +22,7 @@ export default class ClockEvent extends Model {
   @field('occurred_at') occurredAt!: number;
   @field('reason') reason?: string; // For personal time
   @field('ticket_id') ticketId?: string; // For clock out ticket selection
+  @field('allocation_type') allocationType?: string; // For ALLOCATION_CHANGE events
   
   @readonly @date('created_at') createdAt!: Date;
 }

@@ -145,5 +145,19 @@ export default schemaMigrations({
         }),
       ],
     },
+    {
+      // v10: allocation_type on clock_events so the timeline can show
+      // the correct allocation at the time of each ALLOCATION_CHANGE
+      // event, rather than the session's current (mutated) allocation.
+      toVersion: 10,
+      steps: [
+        addColumns({
+          table: 'clock_events',
+          columns: [
+            { name: 'allocation_type', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });
