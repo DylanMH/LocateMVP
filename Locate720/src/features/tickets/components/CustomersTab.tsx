@@ -348,7 +348,18 @@ export function CustomersTab({
   };
 
   const handleScrollEndDrag = () => {
-    // Don't clear immediately — wait for momentum to end
+    // Clear the flag after a short delay.  If momentum scroll follows,
+    // handleMomentumScrollEnd will handle the pending target.  If not
+    // (simple drag without fling), this ensures auto-scroll resumes.
+    setTimeout(() => {
+      isUserScrollingRef.current = false;
+      if (pendingScrollTargetRef.current !== null) {
+        const target = pendingScrollTargetRef.current;
+        pendingScrollTargetRef.current = null;
+        lastAutoScrollTargetRef.current = target;
+        scrollToOffset(target);
+      }
+    }, 150);
   };
 
   const handleMomentumScrollEnd = () => {

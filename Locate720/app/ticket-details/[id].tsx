@@ -907,14 +907,16 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   // Sticky action bar: visible when ticket is not closed and there are
   // available workflow transitions.  We show the bar even when read-only
   // (not clocked in) so the tech can see the workflow — buttons are
-  // disabled in that case via isReadOnly.
+  // disabled in that case via isReadOnly.  Hide the bar when the keyboard
+  // is open so it doesn't block input fields near the bottom of the screen.
   const showStickyActionBar =
     !isClosed &&
+    keyboardHeight === 0 &&
     (canTransitionStatus(ticket.locatorStatus as LocatorStatus, "ENROUTE") ||
       canTransitionStatus(ticket.locatorStatus as LocatorStatus, "ONSITE") ||
       canTransitionStatus(ticket.locatorStatus as LocatorStatus, "PAUSED") ||
       (allCustomersCompleted && ticket.locatorStatus === "ONSITE"));
-  const stickyBarHeight = 56 + Math.max(insets.bottom, keyboardHeight);
+  const stickyBarHeight = 56 + insets.bottom;
 
   return (
     <KeyboardAvoidingView

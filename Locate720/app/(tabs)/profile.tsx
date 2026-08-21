@@ -59,7 +59,11 @@ async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapsh
   const [userTickets, todaySessions] = await Promise.all([
     ticketsCollection.query(Q.where("assigned_tech_id", id)).fetch(),
     sessionsCollection
-      .query(Q.where("user_id", id), Q.where("date", today), Q.sortBy("created_at", Q.desc))
+      .query(
+        Q.where("user_id", id),
+        Q.or(Q.where("date", today), Q.where("status", "ACTIVE")),
+        Q.sortBy("created_at", Q.desc),
+      )
       .fetch(),
   ]);
 

@@ -189,6 +189,10 @@ router.get('/:id/productivity-summary', (req, res) => {
     WHERE user_id = ? AND occurred_at >= ?
   `).get(userId, todayStartMs);
 
+  // Worked-time query: include today's sessions PLUS any ACTIVE session
+  // from a previous day that spans into today (e.g. tech clocked in at
+  // 11 PM and is still working past midnight).  Without this, LPH/FPH
+  // would be 0 when the tech's session date doesn't match today.
   const workedTotals = db.prepare(`
     SELECT
       COALESCE(SUM(
@@ -201,16 +205,18 @@ router.get('/:id/productivity-summary', (req, res) => {
         END
       ), 0) as total_worked_ms
     FROM day_sessions
-    WHERE user_id = ? AND date = ?
+    WHERE user_id = ? AND (date = ? OR (status = 'ACTIVE' AND clock_in_at > 0))
   `).get(Date.now(), userId, todayDate);
 
+  // Active session: look across ALL dates, not just today, so a session
+  // that started yesterday but is still active is correctly reported.
   const activeSession = db.prepare(`
     SELECT id, clock_in_at
     FROM day_sessions
-    WHERE user_id = ? AND date = ? AND status = 'ACTIVE'
+    WHERE user_id = ? AND status = 'ACTIVE'
     ORDER BY clock_in_at DESC
     LIMIT 1
-  `).get(userId, todayDate);
+  `).get(userId);
 
   const totalWorkedMs = workedTotals.total_worked_ms || 0;
   const totalWorkedHours = totalWorkedMs / 3600000;
