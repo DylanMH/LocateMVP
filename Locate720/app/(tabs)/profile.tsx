@@ -363,7 +363,7 @@ export default function ProfileScreen() {
 
         {/* App version */}
         <Text className="text-center text-xs mb-6" style={{ color: colors.muted + "80" }}>
-          Locate720 v{Constants.expoConfig?.version ?? "1.6.0"}
+          Locate720 v{Constants.expoConfig?.version ?? "1.7.0"}
         </Text>
       </ScrollView>
     </View>
