@@ -4,9 +4,11 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
 import { Ionicons } from "@expo/vector-icons";
 
-// Read version from package.json at build time. Constants.expoConfig.version
-// is baked into the dev build and doesn't update without a rebuild.
-import { version as APP_VERSION } from "../../../package.json";
+// App version — single source of truth for the mobile app.
+// Updated here when we bump versions.  We don't read from package.json
+// because Metro can't resolve JSON imports from app/ directory, and
+// Constants.expoConfig.version is baked into the dev build.
+import { APP_VERSION } from "../../src/config/version";
 import { colors } from "../../src/ui/colors";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { database } from "../../src/db/database";
