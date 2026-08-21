@@ -59,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(storedToken);
         setRefreshToken(storedRefreshToken);
         setCurrentUser(userData);
+        SyncEngine.setCurrentUser(userData.id);
         logger.log('[Auth] Loaded stored auth for:', userData.email);
       }
     } catch (error) {
@@ -79,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setRefreshToken(newRefreshToken);
       setUser(userData);
       setCurrentUser(userData);
+      SyncEngine.setCurrentUser(userData.id);
       logger.log('[Auth] User logged in:', userData.email, '(', userData.role, ')');
     } catch (error) {
       logger.error('[Auth] Failed to save auth:', error);

@@ -341,7 +341,13 @@ export default function Timesheet() {
 
       await SyncEngine.queueEvent(clockInEvent);
 
-      SyncEngine.pullTickets(true);
+      // Pull tickets to refresh the board after clock-in. Guard against
+      // the race where SyncEngine.setCurrentUser hasn't run yet.
+      if (user?.id) {
+        SyncEngine.pullTickets(true).catch((e) =>
+          console.warn("[Timesheet] Post-clock-in ticket pull failed:", e),
+        );
+      }
     } catch (error) {
       console.error("[Timesheet] Clock in failed:", error);
     } finally {
