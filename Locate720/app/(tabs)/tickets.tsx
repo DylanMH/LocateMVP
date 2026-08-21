@@ -428,6 +428,7 @@ export default function TicketsScreen() {
           }
         }}
       >
+      <View className="flex-1">
       {view !== "RESCHEDULE" ? (
         <FilterChips
           status={statusFilter}
@@ -619,6 +620,7 @@ export default function TicketsScreen() {
           }
         />
       )}
+      </View>
       </TouchableWithoutFeedback>
       {showRescheduleModal && (
         <RescheduleModal
