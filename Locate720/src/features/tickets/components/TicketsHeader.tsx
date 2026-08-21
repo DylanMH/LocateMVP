@@ -1,23 +1,44 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Pressable, Text, View } from "react-native";
+import {
+  Animated,
+  Pressable,
+  TextInput,
+  Text,
+  View,
+} from "react-native";
+import { useEffect, useRef } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors } from "../../../ui/colors";
+import { radius } from "../../../ui/radius";
+import { typography } from "../../../ui/typography";
+import { logger } from "../../../utils/logger";
 import { SegmentedToggle, type SegmentedToggleOption } from "./SegmentedToggle";
 import { SyncBadge } from "./SyncBadge";
+
+// Width the search input bar animates to when expanded (px).
+const SEARCH_BAR_WIDTH = 220;
 
 export function TicketsHeader({
   userName,
   view,
   onChangeView,
-  onPressSearch,
+  isSearchVisible,
+  searchQuery,
+  onSearchQueryChange,
+  onToggleSearch,
+  onClearSearch,
   onPressFilter,
   filterCount = 0,
 }: {
   userName?: string;
   view: SegmentedToggleOption;
   onChangeView: (next: SegmentedToggleOption) => void;
-  onPressSearch: () => void;
+  isSearchVisible: boolean;
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
+  onToggleSearch: () => void;
+  onClearSearch: () => void;
   onPressFilter: () => void;
   filterCount?: number;
 }) {
@@ -28,6 +49,28 @@ export function TicketsHeader({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  // Animated width for the expanding search bar.  The bar slides out to the
+  // left from the search-icon position, so we animate width from 0 -> full.
+  const widthAnim = useRef(
+    new Animated.Value(isSearchVisible ? SEARCH_BAR_WIDTH : 0),
+  ).current;
+
+  useEffect(() => {
+    Animated.timing(widthAnim, {
+      toValue: isSearchVisible ? SEARCH_BAR_WIDTH : 0,
+      duration: 250,
+      useNativeDriver: false, // width animation requires JS driver
+    }).start(({ finished }) => {
+      if (finished) {
+        logger.log(
+          `[TicketsHeader] search bar ${
+            isSearchVisible ? "expanded" : "collapsed"
+          }`,
+        );
+      }
+    });
+  }, [isSearchVisible, widthAnim]);
 
   return (
     <View className="px-4 pb-3" style={{ paddingTop: insets.top + 12 }}>
@@ -66,6 +109,7 @@ export function TicketsHeader({
       <View className="flex-row items-center justify-between mt-4">
         <SegmentedToggle value={view} onChange={onChangeView} />
         <View className="flex-row items-center ml-3" style={{ gap: 8 }}>
+          {/* Filter button — always visible */}
           <Pressable
             onPress={onPressFilter}
             className="w-11 h-11 rounded-2xl items-center justify-center"
@@ -90,13 +134,63 @@ export function TicketsHeader({
               </View>
             )}
           </Pressable>
-          <Pressable
-            onPress={onPressSearch}
-            className="w-11 h-11 rounded-2xl items-center justify-center"
-            style={{ backgroundColor: colors.surface }}
+
+          {/* Search icon — shown when the search bar is collapsed */}
+          {!isSearchVisible && (
+            <Pressable
+              onPress={onToggleSearch}
+              className="w-11 h-11 rounded-2xl items-center justify-center"
+              style={{ backgroundColor: colors.surface }}
+            >
+              <Ionicons name="search-outline" size={20} color={colors.text} />
+            </Pressable>
+          )}
+
+          {/* Expanding search input bar — slides out to the left.
+              Animated width grows from 0 -> SEARCH_BAR_WIDTH.  Overflow is
+              hidden so the inner content is clipped during the animation. */}
+          <Animated.View
+            style={{
+              width: widthAnim,
+              height: 44,
+              overflow: "hidden",
+            }}
           >
-            <Ionicons name="search" size={20} color={colors.text} />
-          </Pressable>
+            <View
+              className="flex-row items-center px-3 h-11"
+              style={{
+                width: SEARCH_BAR_WIDTH,
+                borderRadius: radius.button,
+                backgroundColor: colors.surface,
+                gap: 6,
+              }}
+            >
+              <Ionicons name="search-outline" size={18} color={colors.muted} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={onSearchQueryChange}
+                placeholder="Search ticket number..."
+                placeholderTextColor={colors.muted}
+                className="flex-1"
+                style={{
+                  color: colors.text,
+                  fontSize: typography.bodySm,
+                  paddingVertical: 0,
+                }}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              <Pressable
+                onPress={onClearSearch}
+                hitSlop={8}
+                className="w-6 h-6 rounded-full items-center justify-center"
+                style={{ backgroundColor: colors.bg }}
+              >
+                <Ionicons name="close" size={14} color={colors.text} />
+              </Pressable>
+            </View>
+          </Animated.View>
         </View>
       </View>
     </View>

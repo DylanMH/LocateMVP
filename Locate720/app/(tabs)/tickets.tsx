@@ -5,7 +5,6 @@ import {
   Text,
   View,
   AppState,
-  Alert,
   Pressable,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -39,6 +38,7 @@ import {
 import { getTicketDisplayData, parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
 import { formatDueDateTime } from "../../src/utils/date";
 import { colors } from "../../src/ui/colors";
+import { logger } from "../../src/utils/logger";
 import type { SegmentedToggleOption } from "../../src/features/tickets/components/SegmentedToggle";
 import type { TicketFilters } from "../../src/features/tickets/types";
 import { NO_FILTERS, countActiveFilters } from "../../src/features/tickets/types";
@@ -67,6 +67,8 @@ export default function TicketsScreen() {
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [filters, setFilters] = useState<TicketFilters>(NO_FILTERS);
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const currentUserId = user?.id || "";
 
   // Track the start of the current local day so the Closed tab can filter
@@ -290,11 +292,22 @@ export default function TicketsScreen() {
     setRefreshing(false);
   };
 
-  const handleSearchPress = useCallback(() => {
-    Alert.alert(
-      "Ticket Search",
-      "Search is planned for a later phase. This button is now in place so the tickets workspace layout is ready for that flow.",
-    );
+  const handleToggleSearch = useCallback(() => {
+    setIsSearchVisible((prev) => {
+      const next = !prev;
+      if (!next) {
+        // Clear the query when collapsing the search bar
+        setSearchQuery("");
+      }
+      logger.log(`[Tickets] search ${next ? "opened" : "closed"}`);
+      return next;
+    });
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery("");
+    setIsSearchVisible(false);
+    logger.log("[Tickets] search cleared and closed");
   }, []);
 
   // Build the list of known contractors from the current ticket set for the
@@ -328,6 +341,10 @@ export default function TicketsScreen() {
 
   const activeFilterCount = countActiveFilters(filters);
 
+  const trimmedQuery = searchQuery.trim();
+  const isSearching = trimmedQuery.length > 0;
+  const queryLower = trimmedQuery.toLowerCase();
+
   const filteredTickets = tickets.filter((ticket) => {
     // If on break, hide all tickets
     if (isOnBreak) {
@@ -342,6 +359,14 @@ export default function TicketsScreen() {
       }
       // Otherwise, hide all tickets when clocked out
       return false;
+    }
+
+    // When a search query is active, search across ALL tickets assigned to
+    // the user (including CLOSED/UNABLE), bypassing the status tab split,
+    // the daily closed-ticket window, and the filter chips.  This lets the
+    // tech look up any ticket by number regardless of its lifecycle state.
+    if (isSearching) {
+      return ticket.ticketNumber.toLowerCase().includes(queryLower);
     }
 
     // When clocked in and working, apply normal filters
@@ -384,7 +409,11 @@ export default function TicketsScreen() {
         userName={user?.name}
         view={view}
         onChangeView={setView}
-        onPressSearch={handleSearchPress}
+        isSearchVisible={isSearchVisible}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onToggleSearch={handleToggleSearch}
+        onClearSearch={handleClearSearch}
         onPressFilter={() => setShowFilterSheet(true)}
         filterCount={activeFilterCount}
       />

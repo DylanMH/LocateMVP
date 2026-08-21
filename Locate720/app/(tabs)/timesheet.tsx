@@ -456,7 +456,7 @@ export default function Timesheet() {
 
   const handleTicketSelectorCancel = () => {
     setShowTicketSelector(false);
-    handleTicketSelected(null);
+    setIsProcessing(false);
   };
 
   // ── Breaks ────────────────────────────────────────────────

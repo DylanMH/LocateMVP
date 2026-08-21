@@ -3,6 +3,7 @@ import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "rea
 import { useFocusEffect, useRouter } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { colors } from "../../src/ui/colors";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { database } from "../../src/db/database";
@@ -359,6 +360,11 @@ export default function ProfileScreen() {
             Sign Out
           </Text>
         </Pressable>
+
+        {/* App version */}
+        <Text className="text-center text-xs mb-6" style={{ color: colors.muted + "80" }}>
+          Locate720 v{Constants.expoConfig?.version ?? "1.6.0"}
+        </Text>
       </ScrollView>
     </View>
   );
