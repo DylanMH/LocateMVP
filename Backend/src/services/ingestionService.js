@@ -5,7 +5,7 @@
 import { resolveTerritoryChainForPoint } from './territoryService.js';
 
 const ELEVEN_SIM_BASE_URL = 'http://localhost:4100';
-const MAX_811_PULL_LIMIT = 500;
+const MAX_811_PULL_LIMIT = 2000;
 
 function getStableAccountNumber(source = {}) {
   return (
@@ -53,7 +53,7 @@ export async function pullTicketsFrom811(db, since = 0, options = {}) {
     console.log(`[Ingestion] Received ${tickets.length} tickets from 811 Simulator`);
 
     if (reconcileMissing && tickets.length === MAX_811_PULL_LIMIT) {
-      const warning = `811 reconcile pulled ${MAX_811_PULL_LIMIT} tickets and may be truncated; missing-ticket reconciliation may be incomplete`;
+      const warning = `811 reconcile pulled ${MAX_811_PULL_LIMIT} tickets and may be truncated; missing-ticket reconciliation SKIPPED to prevent deleting tickets that exist in 811 but were cut off by the limit`;
       console.warn(`[Ingestion] ${warning}`);
       results.warnings.push(warning);
     }
@@ -73,7 +73,14 @@ export async function pullTicketsFrom811(db, since = 0, options = {}) {
       }
     }
 
-    if (reconcileMissing) {
+    // Only run missing-ticket reconciliation if we received the full
+    // dataset.  If the 811 sim returned exactly MAX_811_PULL_LIMIT
+    // tickets, the result is truncated and reconciliation would delete
+    // backend tickets that actually exist in 811 but were cut off by
+    // the LIMIT clause.  This was causing linked tickets (UPDATE/
+    // UPDATE_REMARK) to be deleted from the backend when the 811 sim
+    // had more than 500 tickets.
+    if (reconcileMissing && tickets.length < MAX_811_PULL_LIMIT) {
       results.reconciledRemoved = reconcileMissing811Tickets(db, tickets);
     }
 
