@@ -3,7 +3,10 @@ import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "rea
 import { useFocusEffect, useRouter } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
 import { Ionicons } from "@expo/vector-icons";
-import Constants from "expo-constants";
+
+// Read version from package.json at build time. Constants.expoConfig.version
+// is baked into the dev build and doesn't update without a rebuild.
+import { version as APP_VERSION } from "../../../package.json";
 import { colors } from "../../src/ui/colors";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { database } from "../../src/db/database";
@@ -363,7 +366,7 @@ export default function ProfileScreen() {
 
         {/* App version */}
         <Text className="text-center text-xs mb-6" style={{ color: colors.muted + "80" }}>
-          Locate720 v{Constants.expoConfig?.version ?? "1.7.0"}
+          Locate720 v{APP_VERSION}
         </Text>
       </ScrollView>
     </View>

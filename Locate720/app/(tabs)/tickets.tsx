@@ -6,6 +6,8 @@ import {
   View,
   AppState,
   Pressable,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
@@ -417,6 +419,15 @@ export default function TicketsScreen() {
         onPressFilter={() => setShowFilterSheet(true)}
         filterCount={activeFilterCount}
       />
+      {/* Dismiss search when tapping outside the search input */}
+      <TouchableWithoutFeedback
+        onPress={() => {
+          if (isSearchVisible) {
+            Keyboard.dismiss();
+            handleClearSearch();
+          }
+        }}
+      >
       {view !== "RESCHEDULE" ? (
         <FilterChips
           status={statusFilter}
@@ -608,6 +619,7 @@ export default function TicketsScreen() {
           }
         />
       )}
+      </TouchableWithoutFeedback>
       {showRescheduleModal && (
         <RescheduleModal
           visible={showRescheduleModal}
