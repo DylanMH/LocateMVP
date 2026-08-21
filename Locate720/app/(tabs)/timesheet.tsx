@@ -15,7 +15,7 @@ import {
   getActiveTicketsErrorMessage,
   checkServerActiveSession,
 } from "../../src/features/timesheet/utils/validation";
-import { checkUserBreakStatus, getTodayDateString, getTodayStartTimestamp } from "../../src/features/timesheet/utils/breakStatus";
+import { checkUserBreakStatus, getTodayDateString, getTodayStartTimestamp, getStartOfNextLocalDay } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketSelectorModal } from "../../src/features/timesheet/components/TicketSelectorModal";
 import { ReasonSelectorModal, getAllocationLabel } from "../../src/features/timesheet/components/ReasonSelectorModal";
 import type { BreakType, ClockEventType } from "../../src/features/timesheet/types";
@@ -109,6 +109,24 @@ export default function Timesheet() {
   const [todaySessions, setTodaySessions] = useState<DaySession[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Track the start of the current local day so the timeline resets
+  // visually at midnight.  A midnight timer updates this state so the
+  // subscriptions re-query with the new day boundary.
+  const [dayStartMs, setDayStartMs] = useState(() => getTodayStartTimestamp());
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleMidnightRollover = () => {
+      const msUntilMidnight = getStartOfNextLocalDay() - Date.now();
+      timer = setTimeout(() => {
+        setDayStartMs(getTodayStartTimestamp());
+        scheduleMidnightRollover();
+      }, msUntilMidnight + 500);
+    };
+    scheduleMidnightRollover();
+    return () => clearTimeout(timer);
+  }, []);
+
   // Dynamic duration timer — updates every second while clocked in.
   // Tracks break elapsed time when on break, session elapsed otherwise.
   useEffect(() => {
@@ -168,15 +186,20 @@ export default function Timesheet() {
     SyncEngine.pullTimesheet(true).then(() => loadTodaySession());
   }, [loadTodaySession]);
 
-  // Subscribe to today's clock events (reactive timeline source)
+  // Reload session state when the day boundary rolls over at midnight
+  useEffect(() => {
+    loadTodaySession();
+  }, [dayStartMs, loadTodaySession]);
+
+  // Subscribe to today's clock events (reactive timeline source).
+  // Depends on dayStartMs so the subscription re-queries at midnight.
   useEffect(() => {
     if (!user) return;
-    const todayStart = getTodayStartTimestamp();
     const eventsCollection = database.collections.get<ClockEvent>("clock_events");
     const subscription = eventsCollection
       .query(
         Q.where("user_id", user.id),
-        Q.where("occurred_at", Q.gte(todayStart)),
+        Q.where("occurred_at", Q.gte(dayStartMs)),
         Q.sortBy("occurred_at", Q.asc),
       )
       .observe()
@@ -184,9 +207,10 @@ export default function Timesheet() {
         setTimelineEvents(events);
       });
     return () => subscription.unsubscribe();
-  }, [user]);
+  }, [user, dayStartMs]);
 
-  // Subscribe to today's sessions (for timeline allocation lookup)
+  // Subscribe to today's sessions (for timeline allocation lookup).
+  // Depends on dayStartMs so the subscription re-queries at midnight.
   useEffect(() => {
     if (!user) return;
     const today = getTodayDateString();
