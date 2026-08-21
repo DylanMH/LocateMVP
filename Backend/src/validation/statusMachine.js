@@ -12,6 +12,7 @@ export const TicketStatus = {
 };
 
 export const LocatorStatus = {
+  PENDING: 'PENDING',
   ASSIGNED: 'ASSIGNED',
   ENROUTE: 'ENROUTE',
   ONSITE: 'ONSITE',
@@ -21,6 +22,7 @@ export const LocatorStatus = {
 };
 
 const VALID_TRANSITIONS = {
+  [LocatorStatus.PENDING]: [LocatorStatus.ASSIGNED, LocatorStatus.ENROUTE, LocatorStatus.UNABLE],
   [LocatorStatus.ASSIGNED]: [LocatorStatus.ENROUTE, LocatorStatus.UNABLE],
   [LocatorStatus.ENROUTE]: [LocatorStatus.ONSITE, LocatorStatus.ASSIGNED, LocatorStatus.UNABLE],
   [LocatorStatus.ONSITE]: [LocatorStatus.PAUSED, LocatorStatus.CLOSED, LocatorStatus.UNABLE],

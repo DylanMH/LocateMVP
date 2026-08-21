@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Animated, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import withObservables from "@nozbe/with-observables";
 import { Q } from "@nozbe/watermelondb";
+import { Ionicons } from "@expo/vector-icons";
 
 import { database } from "../../src/db/database";
 import Ticket from "../../src/db/models/Ticket";
@@ -44,8 +45,13 @@ import {
   parseTicketPayload,
 } from "../../src/features/tickets/utils/ticketPayload";
 import { getTicketTypeColor } from "../../src/features/tickets/utils/ticketPresentation";
+import { getDueUrgencyBucket, getDueAccentColorFromTimestamp } from "../../src/features/tickets/domain/dueColor";
 import { colors } from "../../src/ui/colors";
-import { formatDueDateTime } from "../../src/utils/date";
+import { spacing } from "../../src/ui/spacing";
+import { typography } from "../../src/ui/typography";
+import { radius } from "../../src/ui/radius";
+import { shadows } from "../../src/ui/shadows";
+import { formatDueDateTime, formatTime } from "../../src/utils/date";
 import { getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
 import { logger } from "../../src/utils/logger";
 
@@ -530,17 +536,196 @@ interface TicketDetailProps {
   relatedTickets?: Ticket[];
 }
 
+function getDueRemainingLabel(dueAt?: number): string {
+  if (!dueAt) return "";
+  const now = Date.now();
+  const diffMs = dueAt - now;
+  if (diffMs <= 0) return "";
+  const absMinutes = Math.floor(diffMs / 60000);
+  const absHours = Math.floor(absMinutes / 60);
+  const remMinutes = absMinutes % 60;
+  if (absHours > 0) {
+    return `${absHours}h ${remMinutes}m remaining`;
+  }
+  return `${absMinutes}m remaining`;
+}
+
+function getDueLabel(dueAt?: number): string {
+  if (!dueAt) return "No due date";
+  const bucket = getDueUrgencyBucket(dueAt);
+  const now = new Date();
+  const due = new Date(dueAt);
+  const isToday =
+    now.getFullYear() === due.getFullYear() &&
+    now.getMonth() === due.getMonth() &&
+    now.getDate() === due.getDate();
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const isTomorrow =
+    due.getFullYear() === tomorrow.getFullYear() &&
+    due.getMonth() === tomorrow.getMonth() &&
+    due.getDate() === tomorrow.getDate();
+
+  const timeStr = formatTime(dueAt);
+  if (isToday) return `Today · ${timeStr}`;
+  if (isTomorrow) return `Tomorrow · ${timeStr}`;
+  if (bucket === "overdue") return `Overdue · ${formatDueDateTime(dueAt)}`;
+  return formatDueDateTime(dueAt);
+}
+
+function StickyActionBar({
+  locatorStatus,
+  isReadOnly,
+  allCustomersCompleted,
+  bottomInset,
+  onEnroute,
+  onOnsite,
+  onPause,
+  onClose,
+  onCustomerWork,
+}: {
+  locatorStatus: string;
+  isReadOnly: boolean;
+  allCustomersCompleted: boolean;
+  bottomInset: number;
+  onEnroute: () => void;
+  onOnsite: () => void;
+  onPause: () => void;
+  onClose: () => void;
+  onCustomerWork: () => void;
+}) {
+  const canEnroute = canTransitionStatus(locatorStatus as LocatorStatus, "ENROUTE");
+  const canOnsite = canTransitionStatus(locatorStatus as LocatorStatus, "ONSITE");
+  const canPause = canTransitionStatus(locatorStatus as LocatorStatus, "PAUSED");
+
+  // Determine primary + secondary actions based on current state
+  let primaryLabel = "";
+  let primaryIcon: React.ComponentProps<typeof Ionicons>["name"] = "arrow-forward";
+  let primaryOnPress: () => void = () => {};
+  let primaryDisabled = true;
+  let primaryColor: string = colors.primary;
+
+  let secondaryLabel: string | null = null;
+  let secondaryOnPress: (() => void) | null = null;
+  let secondaryDisabled = true;
+
+  if (canEnroute) {
+    primaryLabel = "EN ROUTE";
+    primaryIcon = "navigate";
+    primaryOnPress = onEnroute;
+    primaryDisabled = isReadOnly;
+    primaryColor = colors.accent;
+  } else if (canOnsite) {
+    primaryLabel = "ON SITE";
+    primaryIcon = "locate";
+    primaryOnPress = onOnsite;
+    primaryDisabled = isReadOnly;
+    primaryColor = colors.success;
+  } else if (canPause) {
+    // ONSITE: primary = Pause, secondary = Customer Work (switch to customer tab)
+    primaryLabel = "PAUSE";
+    primaryIcon = "pause";
+    primaryOnPress = onPause;
+    primaryDisabled = isReadOnly;
+    primaryColor = colors.warning;
+    secondaryLabel = "CUSTOMER WORK";
+    secondaryOnPress = onCustomerWork;
+    secondaryDisabled = isReadOnly;
+  } else if (allCustomersCompleted && locatorStatus === "ONSITE") {
+    primaryLabel = "CLOSE TICKET";
+    primaryIcon = "checkmark-circle";
+    primaryOnPress = onClose;
+    primaryDisabled = isReadOnly;
+    primaryColor = colors.success;
+  } else {
+    return null;
+  }
+
+  return (
+    <View
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: colors.surface,
+        borderTopWidth: 1,
+        borderTopColor: colors.bg,
+        paddingBottom: bottomInset,
+        paddingTop: spacing.sm,
+        paddingHorizontal: spacing.screen,
+        ...shadows.bar,
+      }}
+    >
+      <View className="flex-row items-center" style={{ gap: spacing.sm }}>
+        {secondaryLabel && secondaryOnPress && (
+          <Pressable
+            onPress={() => secondaryOnPress()}
+            disabled={secondaryDisabled}
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              borderRadius: radius.button,
+              paddingVertical: 14,
+              backgroundColor: secondaryDisabled ? colors.surface : colors.bg,
+              opacity: secondaryDisabled ? 0.5 : 1,
+              borderWidth: 1,
+              borderColor: colors.muted,
+            }}
+          >
+            <Ionicons name="people" size={18} color={colors.text} />
+            <Text className="font-semibold" style={{ color: colors.text, fontSize: typography.bodySm }}>
+              {secondaryLabel}
+            </Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={primaryOnPress}
+          disabled={primaryDisabled}
+          style={{
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            borderRadius: radius.button,
+            paddingVertical: 14,
+            backgroundColor: primaryDisabled ? colors.surface : primaryColor,
+            opacity: primaryDisabled ? 0.5 : 1,
+          }}
+        >
+          <Ionicons name={primaryIcon} size={20} color={colors.text} />
+          <Text className="font-bold" style={{ color: colors.text, fontSize: typography.body }}>
+            {primaryLabel}
+          </Text>
+        </Pressable>
+      </View>
+      {isReadOnly && (
+        <Text style={{ color: colors.muted, fontSize: typography.caption, textAlign: "center", marginTop: 6 }}>
+          Clock in on the Timesheet tab to change status
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
   const { user } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<DetailTabKey>("INFO");
   const [showReconcileModal, setShowReconcileModal] = useState(false);
+  const skipReconcileRef = useRef(false);
   const tick = useOnsiteTick(ticket);
   const isClockedIn = useClockedInStatus(user?.id);
   const { customerMarking, setCustomerMarking } = useCustomerMarkingState(ticket);
   const [scrollHandlers, setScrollHandlers] = useState<ScrollHandlers | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const floatingCardAnim = useRef(new Animated.Value(0)).current;
+  const floatingCardVisible = useRef(false);
+  const scrollYRef = useRef(0);
 
   useEffect(() => {
     const showListener = Keyboard.addListener("keyboardDidShow", (e) => {
@@ -585,11 +770,11 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         ticket,
         customerMarking,
       );
-      if (allocationValidation.type === "reconcile") {
+      if (allocationValidation.type === "reconcile" && !skipReconcileRef.current) {
         setShowReconcileModal(true);
         return;
       }
-      if (allocationValidation.type === "invalid") {
+      if (allocationValidation.type === "invalid" && !skipReconcileRef.current) {
         showCustomerTabAlert(
           allocationValidation.title,
           allocationValidation.message,
@@ -597,6 +782,8 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         );
         return;
       }
+      // Clear the skip flag after it's been used
+      skipReconcileRef.current = false;
 
       const currentPayload = parseTicketPayload(ticket.payloadJson);
       const now = Date.now();
@@ -659,6 +846,34 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     }
   };
 
+  // These useMemo hooks must be called unconditionally (before any early
+  // return) to satisfy the Rules of Hooks.  When ticket is null we use
+  // safe defaults so the memos still execute.
+  // Recompute displayData whenever payloadJson or locatorStatus changes.
+  // WatermelonDB model instances keep the same reference after update(),
+  // so depending on [ticket] alone would NOT recompute when fields change.
+  // We depend on the primitive field values to detect changes.
+  const payloadJson = ticket?.payloadJson ?? "";
+  const locatorStatusRaw = ticket?.locatorStatus ?? "";
+  const ticketVersion = ticket?.version ?? 0;
+
+  const displayData = useMemo(() => {
+    if (!ticket) return getTicketDisplayData("{}");
+    return getTicketDisplayData(ticket.payloadJson);
+  }, [ticket, payloadJson, ticketVersion]);
+
+  const allocatableMinutes = useMemo(() => {
+    if (!ticket) return 0;
+    return getAllocatableMinutes(displayData.payload, ticket.locatorStatus);
+  }, [displayData.payload, ticket, locatorStatusRaw, ticketVersion]);
+
+  const allocatedMinutesValue = useMemo(() => {
+    return Object.values(customerMarking).reduce((sum, data) => {
+      const mins = parseInt(data.minutes || "0", 10);
+      return sum + (isNaN(mins) ? 0 : mins);
+    }, 0);
+  }, [customerMarking]);
+
   if (!ticket) {
     return (
       <View
@@ -676,10 +891,6 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     );
   }
 
-  const isClosed =
-    isTicketClosed(ticket.status) || isTicketClosed(ticket.locatorStatus);
-  const isReadOnly = !isClockedIn || isClosed; // Read-only when clocked out OR closed
-
   const {
     payload,
     customers,
@@ -689,7 +900,11 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     contactEmail,
     markingInstructions,
     workType,
-  } = useMemo(() => getTicketDisplayData(ticket.payloadJson), [ticket.payloadJson]);
+  } = displayData;
+
+  const isClosed =
+    isTicketClosed(ticket.status) || isTicketClosed(ticket.locatorStatus);
+  const isReadOnly = !isClockedIn || isClosed; // Read-only when clocked out OR closed
 
   // Check if all customers are completed
   const allCustomersCompleted =
@@ -699,21 +914,46 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
       return marking && marking.completed === true;
     });
 
-  // Time allocation values for the floating card
-  const allocatableMinutes = useMemo(() => {
-    return getAllocatableMinutes(payload, ticket.locatorStatus);
-  }, [payload, ticket.locatorStatus]);
-
-  const allocatedMinutesValue = useMemo(() => {
-    return Object.values(customerMarking).reduce((sum, data) => {
-      const mins = parseInt(data.minutes || "0", 10);
-      return sum + (isNaN(mins) ? 0 : mins);
-    }, 0);
-  }, [customerMarking]);
-
   const remainingMinutes = allocatableMinutes - allocatedMinutesValue;
-  const showFloatingTimeCard =
-    tab === "CUSTOMER" && Boolean(payload.onsiteStartedAt) && !isClosed;
+  const isOnsiteActive = Boolean(payload.onsiteStartedAt) && !isClosed;
+  const showFloatingTimeCard = tab === "CUSTOMER" && isOnsiteActive;
+
+  // Show the floating time card only after the user has scrolled down
+  // past 80px. Animate it in/out from the top with a smooth slide.
+  const handleScrollForFloatingCard = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const y = event.nativeEvent.contentOffset.y;
+    scrollYRef.current = y;
+    const shouldShow = y > 80;
+    if (shouldShow && !floatingCardVisible.current) {
+      floatingCardVisible.current = true;
+      Animated.timing(floatingCardAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: false,
+      }).start();
+    } else if (!shouldShow && floatingCardVisible.current) {
+      floatingCardVisible.current = false;
+      Animated.timing(floatingCardAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: false,
+      }).start();
+    }
+  };
+
+  // Sticky action bar: visible when ticket is not closed and there are
+  // available workflow transitions.  We show the bar even when read-only
+  // (not clocked in) so the tech can see the workflow — buttons are
+  // disabled in that case via isReadOnly.  Hide the bar when the keyboard
+  // is open so it doesn't block input fields near the bottom of the screen.
+  const showStickyActionBar =
+    !isClosed &&
+    keyboardHeight === 0 &&
+    (canTransitionStatus(ticket.locatorStatus as LocatorStatus, "ENROUTE") ||
+      canTransitionStatus(ticket.locatorStatus as LocatorStatus, "ONSITE") ||
+      canTransitionStatus(ticket.locatorStatus as LocatorStatus, "PAUSED") ||
+      (allCustomersCompleted && ticket.locatorStatus === "ONSITE"));
+  const stickyBarHeight = 56 + insets.bottom;
 
   return (
     <KeyboardAvoidingView
@@ -723,85 +963,96 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
     >
       <Stack.Screen options={{ title: "Ticket Details" }} />
 
-      {/* Floating Time Allocation Card — stays visible while scrolling the Customer tab */}
+      {/* Floating Time Allocation Card — slides in from the top when
+          the user scrolls down past 80px on the Customer tab while
+          on-site. Hidden at the top of the scroll to avoid redundancy
+          with the inline customers card. */}
       {showFloatingTimeCard && (
-        <TimeAllocationCard
-          allocatableMinutes={allocatableMinutes}
-          allocatedMinutes={allocatedMinutesValue}
-          remainingMinutes={remainingMinutes}
-        />
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            opacity: floatingCardAnim,
+            transform: [{
+              translateY: floatingCardAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-80, 0],
+              }),
+            }],
+          }}
+        >
+          <TimeAllocationCard
+            allocatableMinutes={allocatableMinutes}
+            allocatedMinutes={allocatedMinutesValue}
+            remainingMinutes={remainingMinutes}
+          />
+        </Animated.View>
       )}
 
       <ScrollView
         ref={scrollViewRef}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          if (showFloatingTimeCard) handleScrollForFloatingCard(e);
+        }}
         onScrollBeginDrag={scrollHandlers?.onScrollBeginDrag}
         onScrollEndDrag={scrollHandlers?.onScrollEndDrag}
         onMomentumScrollEnd={scrollHandlers?.onMomentumScrollEnd}
         contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: showFloatingTimeCard ? 8 : 16,
-          paddingBottom: 40 + Math.max(insets.bottom, keyboardHeight),
-          gap: 12,
+          paddingHorizontal: spacing.screen,
+          paddingTop: spacing.screen,
+          paddingBottom: showStickyActionBar
+            ? stickyBarHeight + 20
+            : 40 + Math.max(insets.bottom, keyboardHeight),
+          gap: spacing.normal,
         }}
       >
-        <Text className="text-xl font-bold" style={{ color: colors.text }}>
-          {ticket.ticketNumber}
-        </Text>
+        <View className="flex-row items-center" style={{ gap: spacing.sm, flexWrap: "wrap" }}>
+          <Text style={{ color: colors.text, fontSize: typography.title, fontWeight: typography.weightBold, flexShrink: 1 }}>
+            {ticket.ticketNumber}
+          </Text>
+          {ticket.ticketType === "EMERGENCY" && (
+            <View
+              style={{
+                backgroundColor: "#EF5350",
+                borderRadius: radius.pill,
+                paddingHorizontal: spacing.sm,
+                paddingVertical: 3,
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: typography.caption, fontWeight: typography.weightBold }}>
+                EMERGENCY
+              </Text>
+            </View>
+          )}
+        </View>
 
-        <Text className="text-sm" style={{ color: colors.muted }}>
+        <Text style={{ color: colors.muted, fontSize: typography.bodySm }}>
           {ticket.address}
         </Text>
 
-        <View className="flex-row items-center justify-between mt-3">
+        <View className="flex-row items-center justify-between" style={{ marginTop: spacing.tightSm }}>
           <View
-            className="px-3 py-1 rounded-full"
-            style={{ backgroundColor: getTicketTypeColor(ticket.ticketType) }}
+            style={{ backgroundColor: getTicketTypeColor(ticket.ticketType), borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 4 }}
           >
             <Text
-              className="text-xs font-semibold"
-              style={{ color: colors.bg }}
+              className="font-semibold"
+              style={{ color: colors.bg, fontSize: typography.caption }}
               numberOfLines={1}
             >
               {formatTicketType(ticket.ticketType)}
             </Text>
           </View>
-          <Text className="text-sm" style={{ color: colors.muted }}>
+          <Text style={{ color: colors.muted, fontSize: typography.bodySm }}>
             {customers.length} utilit{customers.length !== 1 ? "ies" : "y"}
           </Text>
         </View>
-
-        {payload.onsiteStartedAt && (
-          <View
-            className="rounded-xl p-3 mt-2"
-            style={{ backgroundColor: colors.surface }}
-          >
-            <Text
-              className="text-xs font-semibold"
-              style={{ color: colors.muted }}
-            >
-              Time on Site
-            </Text>
-            <Text
-              className="text-lg font-bold mt-1"
-              style={{ color: colors.accent }}
-            >
-              {(() => {
-                // Force recalculation when tick changes
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const _ = tick;
-                const allocatableMinutes = getAllocatableMinutes(
-                  payload,
-                  ticket.locatorStatus,
-                );
-                const hours = Math.floor(allocatableMinutes / 60);
-                const minutes = allocatableMinutes % 60;
-                return `${hours}h ${minutes}m`;
-              })()}
-            </Text>
-          </View>
-        )}
 
         <DetailTabs value={tab} onChange={setTab} />
 
@@ -815,140 +1066,108 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                     : "This ticket is closed."}
                 </Text>
               </SectionCard>
-            ) : (
-              <SectionCard title="Status actions">
-                <View
-                  className="flex-row"
-                  style={{ gap: 10, flexWrap: "wrap" }}
-                >
-                  <ActionButton
-                    label="En Route"
-                    active={ticket.locatorStatus === "ENROUTE"}
-                    disabled={
-                      isReadOnly ||
-                      !canTransitionStatus(
-                        ticket.locatorStatus as LocatorStatus,
-                        "ENROUTE",
-                      )
-                    }
-                    onPress={() => handleStatusChange("ENROUTE")}
-                  />
-                  <ActionButton
-                    label="On Site"
-                    active={ticket.locatorStatus === "ONSITE"}
-                    disabled={
-                      isReadOnly ||
-                      !canTransitionStatus(
-                        ticket.locatorStatus as LocatorStatus,
-                        "ONSITE",
-                      )
-                    }
-                    onPress={() => handleStatusChange("ONSITE")}
-                  />
-                  <ActionButton
-                    label="Pause"
-                    active={ticket.locatorStatus === "PAUSED"}
-                    disabled={
-                      isReadOnly ||
-                      !canTransitionStatus(
-                        ticket.locatorStatus as LocatorStatus,
-                        "PAUSED",
-                      )
-                    }
-                    onPress={() => handleStatusChange("PAUSED")}
-                  />
-                </View>
-              </SectionCard>
-            )}
+            ) : null}
 
-            <SectionCard title="Ticket Info">
-              <View style={{ gap: 16 }}>
-                <View>
-                  <Text
-                    className="text-xs font-semibold"
-                    style={{ color: colors.muted }}
-                  >
-                    Due Date/Time
-                  </Text>
-                  <Text className="text-sm mt-1" style={{ color: colors.text }}>
-                    {formatDueDateTime(ticket.dueAt)}
-                  </Text>
-                  {ticket.originalDueAt && ticket.originalDueAt !== ticket.dueAt && (
-                    <Text
-                      className="text-xs mt-1"
-                      style={{ color: colors.muted }}
-                    >
-                      Original: {formatDueDateTime(ticket.originalDueAt)}
-                    </Text>
-                  )}
-                </View>
-
-                <View>
-                  <Text
-                    className="text-xs font-semibold"
-                    style={{ color: colors.muted }}
-                  >
-                    Ticket Number
-                  </Text>
-                  <Text className="text-sm mt-1" style={{ color: colors.text }}>
-                    {ticket.ticketNumber}
-                  </Text>
-                </View>
-
-                <View>
-                  <Text
-                    className="text-xs font-semibold"
-                    style={{ color: colors.muted }}
-                  >
-                    Address
-                  </Text>
-                  <Text className="text-sm mt-1" style={{ color: colors.text }}>
-                    {ticket.address}
-                  </Text>
-                </View>
-              </View>
+            {/* Overview: address + Open Map */}
+            <SectionCard title="Location">
+              <Text style={{ color: colors.text, fontSize: typography.body }}>
+                {ticket.address}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  const encodedAddress = encodeURIComponent(ticket.address);
+                  const primaryUrl =
+                    Platform.OS === "ios"
+                      ? `maps:0,0?q=${encodedAddress}`
+                      : `geo:0,0?q=${encodedAddress}`;
+                  const fallbackUrl = `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+                  Linking.canOpenURL(primaryUrl).then((canOpen) => {
+                    Linking.openURL(canOpen ? primaryUrl : fallbackUrl);
+                  });
+                }}
+                hitSlop={8}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: spacing.tightSm,
+                  backgroundColor: colors.bg,
+                  borderRadius: radius.button,
+                  paddingHorizontal: spacing.normal,
+                  paddingVertical: spacing.tight,
+                  alignSelf: "flex-start",
+                }}
+              >
+                <Ionicons name="map" size={16} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontSize: typography.metadata, fontWeight: typography.weightSemibold }}>
+                  Open Map
+                </Text>
+              </Pressable>
             </SectionCard>
 
-            {workType && (
-              <SectionCard title="Work Details">
-                <View>
-                  <Text
-                    className="text-xs font-semibold"
-                    style={{ color: colors.muted }}
-                  >
-                    Work Type
-                  </Text>
-                  <Text className="text-sm mt-1" style={{ color: colors.text }}>
-                    {workType}
-                  </Text>
-                </View>
-              </SectionCard>
-            )}
+            {/* Due: "Today · 2:40 PM" + "1h 12m remaining" */}
+            <SectionCard title="Due">
+              <Text style={{ color: colors.text, fontSize: typography.body }}>
+                {getDueLabel(ticket.dueAt)}
+              </Text>
+              {(() => {
+                const remainingLabel = getDueRemainingLabel(ticket.dueAt);
+                const urgencyBucket = getDueUrgencyBucket(ticket.dueAt);
+                const urgencyColor = getDueAccentColorFromTimestamp(ticket.dueAt);
+                if (remainingLabel) {
+                  return (
+                    <Text style={{ color: urgencyColor, fontSize: typography.metadata, fontWeight: typography.weightSemibold, marginTop: 4 }}>
+                      {remainingLabel}
+                    </Text>
+                  );
+                }
+                if (urgencyBucket === "overdue") {
+                  return (
+                    <Text style={{ color: urgencyColor, fontSize: typography.metadata, fontWeight: typography.weightBold, marginTop: 4 }}>
+                      OVERDUE
+                    </Text>
+                  );
+                }
+                return null;
+              })()}
+              {ticket.originalDueAt && ticket.originalDueAt !== ticket.dueAt && (
+                <Text
+                  style={{ color: colors.muted, fontSize: typography.metadata, marginTop: 4 }}
+                >
+                  Original: {formatDueDateTime(ticket.originalDueAt)}
+                </Text>
+              )}
+            </SectionCard>
 
-            {(contractor || contactName || contactEmail) && (
-              <SectionCard title="Contact Info">
-                <View style={{ gap: 16 }}>
+            {/* Contractor: name + phone (tappable) + email (tappable) */}
+            {(contractor || contractorPhone || contactName || contactEmail) && (
+              <SectionCard title="Contact">
+                <View style={{ gap: spacing.sectionSm }}>
                   {contractor ? (
                     <View>
                       <Text
-                        className="text-xs font-semibold"
-                        style={{ color: colors.muted }}
+                        className="font-semibold"
+                        style={{ color: colors.muted, fontSize: typography.metadata }}
                       >
                         Contractor
                       </Text>
-                      <Text
-                        className="text-sm mt-1"
-                        style={{ color: colors.text }}
-                      >
+                      <Text style={{ color: colors.text, fontSize: typography.body, marginTop: 4 }}>
                         {contractor}
                       </Text>
                       {contractorPhone ? (
-                        <Text
-                          className="text-sm mt-1"
-                          style={{ color: colors.accent }}
+                        <Pressable
+                          onPress={() => {
+                            const cleanPhone = contractorPhone.replace(/[^0-9]/g, "");
+                            Linking.openURL(`tel:${cleanPhone}`);
+                          }}
+                          hitSlop={8}
+                          style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
                         >
-                          {contractorPhone}
-                        </Text>
+                          <Ionicons name="call" size={14} color={colors.accent} />
+                          <Text style={{ color: colors.accent, fontSize: typography.bodySm, textDecorationLine: "underline" }}>
+                            {contractorPhone}
+                          </Text>
+                        </Pressable>
                       ) : null}
                     </View>
                   ) : null}
@@ -956,15 +1175,12 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                   {contactName ? (
                     <View>
                       <Text
-                        className="text-xs font-semibold"
-                        style={{ color: colors.muted }}
+                        className="font-semibold"
+                        style={{ color: colors.muted, fontSize: typography.metadata }}
                       >
                         Contact Name
                       </Text>
-                      <Text
-                        className="text-sm mt-1"
-                        style={{ color: colors.text }}
-                      >
+                      <Text style={{ color: colors.text, fontSize: typography.body, marginTop: 4 }}>
                         {contactName}
                       </Text>
                     </View>
@@ -973,8 +1189,8 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                   {contactEmail ? (
                     <View>
                       <Text
-                        className="text-xs font-semibold"
-                        style={{ color: colors.muted }}
+                        className="font-semibold"
+                        style={{ color: colors.muted, fontSize: typography.metadata }}
                       >
                         Contact Email
                       </Text>
@@ -987,11 +1203,10 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
                           Linking.openURL(`mailto:${contactEmail}?subject=${subject}&body=${body}`);
                         }}
                         hitSlop={8}
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
                       >
-                        <Text
-                          className="text-sm mt-1"
-                          style={{ color: colors.accent, textDecorationLine: "underline" }}
-                        >
+                        <Ionicons name="mail" size={14} color={colors.accent} />
+                        <Text style={{ color: colors.accent, fontSize: typography.bodySm, textDecorationLine: "underline" }}>
                           {contactEmail}
                         </Text>
                       </Pressable>
@@ -1001,9 +1216,19 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
               </SectionCard>
             )}
 
+            {/* Work Type */}
+            {workType && (
+              <SectionCard title="Work Type">
+                <Text style={{ color: colors.text, fontSize: typography.body }}>
+                  {workType}
+                </Text>
+              </SectionCard>
+            )}
+
+            {/* Marking Instructions */}
             {markingInstructions && (
               <SectionCard title="Marking Instructions">
-                <Text className="text-sm" style={{ color: colors.text }}>
+                <Text style={{ color: colors.text, fontSize: typography.body }}>
                   {markingInstructions}
                 </Text>
               </SectionCard>
@@ -1064,12 +1289,33 @@ function TicketDetailScreen({ ticket, relatedTickets }: TicketDetailProps) {
         )}
       </ScrollView>
 
+      {showStickyActionBar && (
+        <StickyActionBar
+          locatorStatus={ticket.locatorStatus}
+          isReadOnly={isReadOnly}
+          allCustomersCompleted={allCustomersCompleted}
+          bottomInset={Math.max(insets.bottom, keyboardHeight)}
+          onEnroute={() => handleStatusChange("ENROUTE")}
+          onOnsite={() => handleStatusChange("ONSITE")}
+          onPause={() => handleStatusChange("PAUSED")}
+          onClose={() => {
+            triggerSuccessHaptic();
+            handleStatusChange("CLOSED");
+          }}
+          onCustomerWork={() => setTab("CUSTOMER")}
+        />
+      )}
+
       <AllocationReconcileModal
         visible={showReconcileModal}
         onClose={() => setShowReconcileModal(false)}
         onConfirm={(updatedMarking) => {
           setCustomerMarking(updatedMarking);
           setShowReconcileModal(false);
+          // Set the skip flag so handleStatusChange("CLOSED") doesn't
+          // re-trigger the reconcile modal.  The marking has already
+          // been adjusted by the user.
+          skipReconcileRef.current = true;
           // After updating marking, proceed with close
           setTimeout(() => handleStatusChange("CLOSED"), 100);
         }}

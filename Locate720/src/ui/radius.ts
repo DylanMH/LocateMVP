@@ -1,0 +1,16 @@
+export const radius = {
+  card: 16,
+  cardSm: 12,
+  sheet: 24,
+  sheetSm: 20,
+  button: 12,
+  buttonSm: 8,
+  pill: 9999,
+  input: 12,
+  inputSm: 8,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+} as const;

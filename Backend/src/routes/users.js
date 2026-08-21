@@ -4,14 +4,28 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
-function getTodayStartMs() {
+// All users are in US Central Time (Texas).  The server runs in UTC,
+// so we must compute "today" using America/Chicago to match the mobile
+// app's local date.  The mobile app uses toLocaleDateString('en-CA')
+// which produces YYYY-MM-DD in the device's local timezone.
+const CENTRAL_TZ = 'America/Chicago';
+
+function getCentralOffsetMs() {
   const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  return now.getTime();
+  const utcStr = now.toLocaleString('en-US', { timeZone: 'UTC', hour12: false });
+  const centralStr = now.toLocaleString('en-US', { timeZone: CENTRAL_TZ, hour12: false });
+  return new Date(utcStr).getTime() - new Date(centralStr).getTime();
 }
 
 function getTodayDateString() {
-  return new Date().toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA', { timeZone: CENTRAL_TZ });
+}
+
+function getTodayStartMs() {
+  const [y, m, d] = getTodayDateString().split('-').map(Number);
+  // Midnight Central Time in UTC ms = midnight UTC + offset
+  // (offset is positive because UTC is ahead of Central)
+  return Date.UTC(y, m - 1, d, 0, 0, 0) + getCentralOffsetMs();
 }
 
 function formatDuration(ms) {
@@ -189,6 +203,9 @@ router.get('/:id/productivity-summary', (req, res) => {
     WHERE user_id = ? AND occurred_at >= ?
   `).get(userId, todayStartMs);
 
+  // Worked-time query: today's sessions in Central Time.  The timezone-
+  // aware getTodayDateString() ensures "today" matches the mobile app's
+  // local date, so sessions created locally are correctly matched.
   const workedTotals = db.prepare(`
     SELECT
       COALESCE(SUM(
@@ -204,13 +221,15 @@ router.get('/:id/productivity-summary', (req, res) => {
     WHERE user_id = ? AND date = ?
   `).get(Date.now(), userId, todayDate);
 
+  // Active session: look across ALL dates so a session that started
+  // late yesterday and is still active is correctly reported.
   const activeSession = db.prepare(`
     SELECT id, clock_in_at
     FROM day_sessions
-    WHERE user_id = ? AND date = ? AND status = 'ACTIVE'
+    WHERE user_id = ? AND status = 'ACTIVE'
     ORDER BY clock_in_at DESC
     LIMIT 1
-  `).get(userId, todayDate);
+  `).get(userId);
 
   const totalWorkedMs = workedTotals.total_worked_ms || 0;
   const totalWorkedHours = totalWorkedMs / 3600000;

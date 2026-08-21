@@ -1,37 +1,19 @@
 import { Pressable, Text, View } from "react-native";
 
 import { colors } from "../../../ui/colors";
+import { spacing } from "../../../ui/spacing";
+import { typography } from "../../../ui/typography";
 import { triggerLightHaptic } from "../../../utils/haptics";
 
 export type DetailTabKey = "INFO" | "CUSTOMER" | "ATTACHMENTS" | "NOTES" | "HISTORY";
 
-function Tab({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const handlePress = () => {
-    triggerLightHaptic();
-    onPress();
-  };
-
-  return (
-    <Pressable
-      onPress={handlePress}
-      className="px-4 py-2 rounded-lg"
-      style={{ backgroundColor: active ? colors.primary : colors.surface }}
-      hitSlop={10}
-    >
-      <Text className="text-sm font-semibold" style={{ color: colors.text }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
+const TABS: { key: DetailTabKey; label: string }[] = [
+  { key: "INFO", label: "Info" },
+  { key: "CUSTOMER", label: "Customer" },
+  { key: "ATTACHMENTS", label: "Files" },
+  { key: "NOTES", label: "Notes" },
+  { key: "HISTORY", label: "History" },
+];
 
 export function DetailTabs({
   value,
@@ -41,32 +23,46 @@ export function DetailTabs({
   onChange: (next: DetailTabKey) => void;
 }) {
   return (
-    <View className="flex-row" style={{ gap: 10, flexWrap: "wrap" }}>
-      <Tab
-        label="Info"
-        active={value === "INFO"}
-        onPress={() => onChange("INFO")}
-      />
-      <Tab
-        label="Customer"
-        active={value === "CUSTOMER"}
-        onPress={() => onChange("CUSTOMER")}
-      />
-      <Tab
-        label="Attachments"
-        active={value === "ATTACHMENTS"}
-        onPress={() => onChange("ATTACHMENTS")}
-      />
-      <Tab
-        label="Notes"
-        active={value === "NOTES"}
-        onPress={() => onChange("NOTES")}
-      />
-      <Tab
-        label="History"
-        active={value === "HISTORY"}
-        onPress={() => onChange("HISTORY")}
-      />
+    <View
+      style={{
+        flexDirection: "row",
+        borderBottomWidth: 1,
+        borderBottomColor: colors.bg,
+      }}
+    >
+      {TABS.map((tab) => {
+        const active = value === tab.key;
+        return (
+          <Pressable
+            key={tab.key}
+            onPress={() => {
+              triggerLightHaptic();
+              onChange(tab.key);
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+            style={{
+              flex: 1,
+              paddingVertical: spacing.tight,
+              paddingHorizontal: spacing.xs,
+              alignItems: "center",
+              borderBottomWidth: 2,
+              borderBottomColor: active ? colors.accent : "transparent",
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={{
+                color: active ? colors.accent : colors.muted,
+                fontSize: typography.metadata,
+                fontWeight: active ? typography.weightSemibold : typography.weightRegular,
+              }}
+            >
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

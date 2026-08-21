@@ -305,6 +305,21 @@ class SyncEngineImpl {
               );
             }
           } else if (
+            event.type === 'TICKET_STATUS_SET' &&
+            typeof payload.ticketId === 'string'
+          ) {
+            try {
+              const ticket = await ticketsCollection.find(payload.ticketId);
+              await ticket.update((t) => {
+                t.syncState = nextState;
+              });
+            } catch (findErr) {
+              logger.warn(
+                `[SyncEngine] Could not locate ticket ${payload.ticketId} to update sync_state after status ack:`,
+                findErr,
+              );
+            }
+          } else if (
             event.type === 'TICKET_ATTACHMENT_ADDED' &&
             typeof payload.ticketId === 'string' &&
             typeof payload.attachmentId === 'string'
@@ -711,7 +726,7 @@ class SyncEngineImpl {
 
       const data = await response.json();
       validateTicketsResponse(data);
-      logger.log('[SyncEngine] Received', data.tickets.length, 'tickets from backend');
+      logger.log(`[SyncEngine] Received ${data.tickets.length} tickets from backend for user ${sanitizedUserId}`);
 
       const serverTicketIds = new Set<string>(
         (data.tickets || []).map((ticket: any) => ticket.id).filter(Boolean),
@@ -772,13 +787,36 @@ class SyncEngineImpl {
       return;
     }
 
-    const pendingEvents = await outboxCollection
-      .query(Q.where('status', 'PENDING'))
+    // Check both PENDING and recently-SENT events.  PENDING events mean
+    // the ticket has local changes not yet acked by the backend.  Recently-SENT
+    // events (within 60 seconds) cover the race window between the flush
+    // completing and the next pull converging — the server may temporarily
+    // not return the ticket if the backend's 811 re-ingestion or assignment
+    // hasn't caught up yet.
+    const recentEvents = await outboxCollection
+      .query(Q.where('status', Q.oneOf(['PENDING', 'SENT'])))
       .fetch();
-    const pendingTicketIds = new Set(
-      pendingEvents.map((event) => event.ticketId).filter(Boolean) as string[],
-    );
 
+    const pendingTicketIds = new Set<string>();
+    const recentSentTicketIds = new Set<string>();
+    const sixtySecondsAgo = Date.now() - 60000;
+    for (const event of recentEvents) {
+      if (!event.ticketId) continue;
+      if (event.status === 'PENDING') {
+        pendingTicketIds.add(event.ticketId);
+      } else if (event.status === 'SENT' && (event.lastAttemptAt || 0) > sixtySecondsAgo) {
+        recentSentTicketIds.add(event.ticketId);
+      }
+    }
+
+    // The backend query `?assignedTo=userId` returns ALL tickets
+    // assigned to this user.  If a local ticket is missing from that
+    // response, it means the ticket is no longer assigned to this user
+    // (reassigned, deleted, or backend reset).  The only legitimate
+    // reason to preserve a missing ticket is if it has pending outbox
+    // events (the ticket may have been just created/assigned locally
+    // and not yet synced to the backend) or a recently-SENT event
+    // (race window between flush and pull convergence).
     const ticketsToDelete = localTickets.filter((ticket) => {
       if (serverTicketIds.has(ticket.id)) {
         return false;
@@ -789,6 +827,11 @@ class SyncEngineImpl {
         return false;
       }
 
+      if (recentSentTicketIds.has(ticket.id)) {
+        logger.log(`[SyncEngine] Preserving local ticket ${ticket.id} because it has a recently-SENT event (race window)`);
+        return false;
+      }
+
       return true;
     });
 
@@ -796,7 +839,7 @@ class SyncEngineImpl {
       return;
     }
 
-    logger.log(`[SyncEngine] Removing ${ticketsToDelete.length} local tickets missing from backend snapshot`);
+    logger.log(`[SyncEngine] Removing ${ticketsToDelete.length} local tickets missing from backend snapshot (server returned ${serverTicketIds.size} tickets)`);
 
     await database.write(async () => {
       for (const ticket of ticketsToDelete) {
@@ -944,6 +987,7 @@ class SyncEngineImpl {
             evt.occurredAt = e.occurred_at;
             evt.reason = e.reason || undefined;
             evt.ticketId = e.ticket_id || undefined;
+            evt.allocationType = e.allocation_type || undefined;
           });
         }
       }
@@ -986,15 +1030,40 @@ class SyncEngineImpl {
     const ticketsCollection = database.collections.get<Ticket>('tickets');
     const outboxCollection = database.collections.get<OutboxEvent>('outbox_events');
 
-    // Precompute pending ticket IDs using the indexed ticket_id column
+    // Precompute pending ticket IDs and their event types using the indexed
+    // ticket_id column.  Instead of skipping the entire delta when a ticket
+    // has pending outbox events, we apply a field-aware overlay: non-status
+    // fields from the server delta are still applied (address, due date,
+    // payload metadata, etc.) while local optimistic status and timeline
+    // fields are preserved until the pending event is acked.
+    //
+    // We also track recently-SENT status events (within the last 60 seconds).
+    // These are events that the backend has confirmed, but the server delta
+    // in this pull may still reflect a pre-ack state due to a race between
+    // the flush and the pull.  Preserving the local status for a short window
+    // after ack prevents the "status reverts after refresh" symptom.
     const pendingTicketIds = new Set<string>();
-    const pendingEvents = await outboxCollection
-      .query(Q.where('status', 'PENDING'))
+    const pendingStatusTicketIds = new Set<string>();
+    const recentStatusTicketIds = new Set<string>();
+    const recentEvents = await outboxCollection
+      .query(Q.where('status', Q.oneOf(['PENDING', 'SENT'])))
       .fetch();
-    
-    for (const event of pendingEvents) {
+
+    const sixtySecondsAgo = Date.now() - 60000;
+    for (const event of recentEvents) {
       if (event.ticketId) {
-        pendingTicketIds.add(event.ticketId);
+        if (event.status === 'PENDING') {
+          pendingTicketIds.add(event.ticketId);
+          if (event.type === 'TICKET_STATUS_SET') {
+            pendingStatusTicketIds.add(event.ticketId);
+          }
+        } else if (event.status === 'SENT' && event.type === 'TICKET_STATUS_SET') {
+          // Recently SENT status event — preserve local status for a short
+          // window to avoid race conditions with the pull.
+          if ((event.lastAttemptAt || 0) > sixtySecondsAgo) {
+            recentStatusTicketIds.add(event.ticketId);
+          }
+        }
       }
     }
 
@@ -1002,36 +1071,60 @@ class SyncEngineImpl {
       for (const delta of deltas) {
         logger.log('[SyncEngine] Processing delta for ticket:', delta.id);
 
-        // Check if there are pending outbox events for this ticket using precomputed set
         const hasPending = pendingTicketIds.has(delta.id);
-
-        // Don't overwrite local optimistic changes
-        if (hasPending) {
-          logger.log(`[SyncEngine] Skipping delta for ${delta.id} - has pending outbox`);
-          continue;
-        }
+        const hasPendingStatus = pendingStatusTicketIds.has(delta.id);
+        const hasRecentStatus = recentStatusTicketIds.has(delta.id);
+        // Preserve local status if there's a pending OR recently-SENT status
+        // event.  The recent-SENT window covers the race between the flush
+        // completing and the next pull seeing the updated server state.
+        const preserveLocalStatus = hasPendingStatus || hasRecentStatus;
 
         try {
           const existing = await ticketsCollection.find(delta.id);
-          
-          // Only update if server version is newer
+
+          // When the ticket has a pending or recently-acked status event we
+          // must not let a stale server row overwrite the optimistic
+          // locatorStatus / timeline.  However, we still want non-status
+          // fields (address, due date, etc.) to converge.  We achieve this
+          // by:
+          //   1. Only applying the delta when the server version is newer
+          //      (unchanged guard).
+          //   2. When applying, preserving local locatorStatus, closedAt,
+          //      closedByName, and timeline payload fields if the ticket
+          //      has a pending or recently-SENT TICKET_STATUS_SET event.
           if (delta.version > existing.version) {
-            logger.log('[SyncEngine] Updating existing ticket:', delta.id);
+            logger.log('[SyncEngine] Updating existing ticket:', delta.id, preserveLocalStatus ? '(status overlay)' : '');
+
             await existing.update((ticket) => {
               // Preserve local timeline fields if they exist and server doesn't have them
               let mergedPayload = delta.payloadJson;
               try {
                 const localPayload = JSON.parse(ticket.payloadJson);
                 const serverPayload = JSON.parse(delta.payloadJson);
-                
+
                 // Preserve timeline fields from local if not in server payload
                 const timelineFields = ['onsiteStartedAt', 'onsiteEndedAt', 'enrouteStartedAt', 'enrouteEndedAt', 'pauseEvents', 'closedAt'];
                 let needsMerge = false;
-                
+
                 for (const field of timelineFields) {
                   if (localPayload[field] && !serverPayload[field]) {
                     serverPayload[field] = localPayload[field];
                     needsMerge = true;
+                  }
+                }
+
+                // When there is a pending or recently-SENT status event,
+                // also preserve timeline fields that the server DOES have
+                // but that originated from the local optimistic write (the
+                // server simply mirrors them back).  Overwriting with the
+                // server copy is harmless in principle, but preserving the
+                // local copy avoids any chance of a partial mirror race.
+                if (preserveLocalStatus) {
+                  for (const field of timelineFields) {
+                    if (localPayload[field]) {
+                      serverPayload[field] = localPayload[field];
+                      needsMerge = true;
+                    }
                   }
                 }
 
@@ -1049,7 +1142,7 @@ class SyncEngineImpl {
                     needsMerge = true;
                   }
                 }
-                
+
                 if (needsMerge) {
                   mergedPayload = JSON.stringify(serverPayload);
                   logger.log('[SyncEngine] Preserved local timeline fields for ticket:', delta.id);
@@ -1057,23 +1150,34 @@ class SyncEngineImpl {
               } catch (e) {
                 logger.warn('[SyncEngine] Failed to merge timeline fields:', e);
               }
-              
+
               ticket.ticketNumber = delta.ticketNumber;
               ticket.ticketType = delta.ticketType;
               ticket.address = delta.address;
               ticket.lat = delta.lat;
               ticket.lng = delta.lng;
               ticket.status = delta.status;
-              ticket.locatorStatus = delta.locatorStatus;
-              ticket.assignedTechId = delta.assignedTechId;
+              // Status overlay: keep the local optimistic locatorStatus /
+              // closedAt / closedByName / assignedTechId while there is a
+              // pending or recently acked status event.  The server delta for
+              // these fields may reflect a pre-ack state and would temporarily
+              // revert the ticket to ASSIGNED or clear its assignment, causing
+              // the "disappearing ENROUTE/ONSITE" symptom.
+              if (preserveLocalStatus) {
+                // preserve ticket.locatorStatus, ticket.closedAt,
+                // ticket.closedByName, ticket.assignedTechId
+              } else {
+                ticket.locatorStatus = delta.locatorStatus;
+                ticket.closedByName = delta.closedByName;
+                ticket.closedAt = delta.closedAt;
+                ticket.assignedTechId = delta.assignedTechId;
+              }
               ticket.dueAt = delta.dueAt;
               ticket.originalDueAt = delta.originalDueAt ?? delta.dueAt;
               ticket.updatedAt = delta.updatedAt;
               ticket.version = delta.version;
-              ticket.closedByName = delta.closedByName;
-              ticket.closedAt = delta.closedAt;
               ticket.payloadJson = mergedPayload;
-              ticket.syncState = 'SYNCED';
+              ticket.syncState = hasPending ? 'PENDING' : 'SYNCED';
               // Lineage columns are immutable once set on the server. Only
               // write them if the local row doesn't already have a value.
               if (!ticket.rootTicketId && delta.rootTicketId) ticket.rootTicketId = delta.rootTicketId;
@@ -1113,8 +1217,8 @@ class SyncEngineImpl {
             ticket.externalRootNumber = delta.externalRootNumber || delta.ticketNumber;
           });
           logger.log('[SyncEngine] Created ticket:', delta.id, error ? error : '');
-        } 
-      } 
+        }
+      }
     });
   }
 }

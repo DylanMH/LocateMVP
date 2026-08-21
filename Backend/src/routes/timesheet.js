@@ -175,9 +175,10 @@ function getStatements() {
         date,
         clock_in_at,
         clock_out_at,
-        session_status
+        session_status,
+        allocation_type
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     updateSessionClockIn: db.prepare(`
       UPDATE day_sessions
@@ -439,6 +440,7 @@ function persistClockEvent(event) {
         clockInAt || null,
         clockOutAt || null,
         status || null,
+        allocationType || null,
       );
     });
   }
@@ -753,7 +755,8 @@ router.get('/sync', (req, res) => {
   }
 
   const since = lastSyncAt ? Number(lastSyncAt) : 0;
-  const today = new Date().toISOString().split('T')[0];
+  // Use Central Time to match the mobile app's local date
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 
   // Fetch sessions updated since lastSyncAt. If no lastSyncAt, also
   // include today's session and any ACTIVE session regardless of date

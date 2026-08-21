@@ -3,6 +3,12 @@ import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "rea
 import { useFocusEffect, useRouter } from "expo-router";
 import { Q } from "@nozbe/watermelondb";
 import { Ionicons } from "@expo/vector-icons";
+
+// App version — single source of truth for the mobile app.
+// Updated here when we bump versions.  We don't read from package.json
+// because Metro can't resolve JSON imports from app/ directory, and
+// Constants.expoConfig.version is baked into the dev build.
+import { APP_VERSION } from "../../src/config/version";
 import { colors } from "../../src/ui/colors";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { database } from "../../src/db/database";
@@ -59,7 +65,11 @@ async function buildLocalMetricsSnapshot(id: string): Promise<LocalMetricsSnapsh
   const [userTickets, todaySessions] = await Promise.all([
     ticketsCollection.query(Q.where("assigned_tech_id", id)).fetch(),
     sessionsCollection
-      .query(Q.where("user_id", id), Q.where("date", today), Q.sortBy("created_at", Q.desc))
+      .query(
+        Q.where("user_id", id),
+        Q.or(Q.where("date", today), Q.where("status", "ACTIVE")),
+        Q.sortBy("created_at", Q.desc),
+      )
       .fetch(),
   ]);
 
@@ -355,6 +365,11 @@ export default function ProfileScreen() {
             Sign Out
           </Text>
         </Pressable>
+
+        {/* App version */}
+        <Text className="text-center text-xs mb-6" style={{ color: colors.muted + "80" }}>
+          Locate720 v{APP_VERSION}
+        </Text>
       </ScrollView>
     </View>
   );

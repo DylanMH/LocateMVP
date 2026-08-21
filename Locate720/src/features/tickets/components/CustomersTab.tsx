@@ -9,6 +9,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { colors } from "../../../ui/colors";
+import { spacing } from "../../../ui/spacing";
+import { typography } from "../../../ui/typography";
+import { radius } from "../../../ui/radius";
 import { getAllocatableMinutes, type TicketPayload } from "../utils/ticketTime";
 import { formatDuration } from "../../../utils/formatDuration";
 import type { LocatorStatus } from "../domain/statusMachine";
@@ -234,6 +237,7 @@ export function CustomersTab({
   const lastAutoScrollTargetRef = useRef<number | null>(null);
   const pendingScrollTargetRef = useRef<number | null>(null);
   const [tick, setTick] = useState(0);
+  const [expandedCompleted, setExpandedCompleted] = useState<Set<string>>(new Set());
   const isOnsite = locatorStatus === "ONSITE";
   const isClosed =
     ticketStatus === "CLOSED" ||
@@ -344,7 +348,18 @@ export function CustomersTab({
   };
 
   const handleScrollEndDrag = () => {
-    // Don't clear immediately — wait for momentum to end
+    // Clear the flag after a short delay.  If momentum scroll follows,
+    // handleMomentumScrollEnd will handle the pending target.  If not
+    // (simple drag without fling), this ensures auto-scroll resumes.
+    setTimeout(() => {
+      isUserScrollingRef.current = false;
+      if (pendingScrollTargetRef.current !== null) {
+        const target = pendingScrollTargetRef.current;
+        pendingScrollTargetRef.current = null;
+        lastAutoScrollTargetRef.current = target;
+        scrollToOffset(target);
+      }
+    }, 150);
   };
 
   const handleMomentumScrollEnd = () => {
@@ -380,7 +395,63 @@ export function CustomersTab({
         </Text>
       )}
 
-      <View style={{ gap: 12 }}>
+      {/* Customer count + time allocation summary */}
+      {customers.length > 0 && (
+        <View
+          style={{
+            backgroundColor: colors.surface,
+            borderRadius: radius.card,
+            padding: spacing.card,
+            marginBottom: spacing.normal,
+          }}
+        >
+          <View className="flex-row items-center justify-between" style={{ marginBottom: spacing.tightSm }}>
+            <Text className="font-bold" style={{ color: colors.text, fontSize: typography.sectionSm }}>
+              Customers
+            </Text>
+            <Text style={{ color: colors.muted, fontSize: typography.metadata }}>
+              {customers.filter((c) => value[c.id]?.completed === true).length} of {customers.length} complete
+            </Text>
+          </View>
+          {/* Time allocation summary */}
+          {Boolean(payload.onsiteStartedAt) && (
+            <View className="flex-row" style={{ marginTop: spacing.tightSm, gap: spacing.normal }}>
+              <View className="flex-1">
+                <Text style={{ color: colors.muted, fontSize: typography.caption }}>
+                  Onsite
+                </Text>
+                <Text style={{ color: colors.text, fontSize: typography.metadata, fontWeight: typography.weightSemibold }}>
+                  {formatDuration(allocatableMinutes * 60 * 1000)}
+                </Text>
+              </View>
+              <View className="flex-1">
+                <Text style={{ color: colors.muted, fontSize: typography.caption }}>
+                  Allocated
+                </Text>
+                <Text style={{ color: colors.text, fontSize: typography.metadata, fontWeight: typography.weightSemibold }}>
+                  {formatDuration(allocatedMinutes * 60 * 1000)}
+                </Text>
+              </View>
+              <View className="flex-1">
+                <Text style={{ color: colors.muted, fontSize: typography.caption }}>
+                  Remaining
+                </Text>
+                <Text
+                  style={{
+                    color: remainingMinutes < 0 ? colors.danger : colors.accent,
+                    fontSize: typography.metadata,
+                    fontWeight: typography.weightBold,
+                  }}
+                >
+                  {formatDuration(Math.abs(remainingMinutes) * 60 * 1000)}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      <View style={{ gap: spacing.normal }}>
         {customers.map((customer) => {
           const data = value[customer.id] ?? createEmptyCustomerMarking();
           const resultOptions = getResultOptionsForStatus(data.status);
@@ -392,6 +463,8 @@ export function CustomersTab({
             isClosed ||
             !isOnsite ||
             data.completed === true;
+          const isCollapsedCompleted =
+            data.completed === true && !expandedCompleted.has(customer.id);
 
           return (
             <View
@@ -399,38 +472,65 @@ export function CustomersTab({
               onLayout={(event) => {
                 sectionOffsets.current[customer.id] = event.nativeEvent.layout.y;
               }}
-              className="rounded-2xl p-4"
+              className="rounded-2xl"
               style={{
                 backgroundColor: data.completed ? colors.bg : colors.surface,
                 borderLeftWidth: 4,
                 borderLeftColor: getUtilityColor(customer.utility),
-                opacity: data.completed ? 0.6 : 1,
+                padding: spacing.card,
+                opacity: data.completed ? 0.85 : 1,
               }}
             >
-              <View className="flex-row items-center justify-between">
-                <Text
-                  className="text-base font-semibold"
-                  style={{ color: colors.text }}
-                >
-                  {customer.name}
-                </Text>
-                {data.completed && (
-                  <View className="flex-row items-center" style={{ gap: 4 }}>
-                    {data.closedByTechName && (
-                      <Text className="text-[10px]" style={{ color: colors.muted }}>
-                        by {data.closedByTechName}
+              {/* Collapsed completed summary (read-only — completed
+                  customers cannot be edited) */}
+              {isCollapsedCompleted ? (
+                <View>
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-1" style={{ marginRight: spacing.sm }}>
+                      <View className="flex-row items-center" style={{ gap: 6 }}>
+                        <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                        <Text className="font-semibold" style={{ color: colors.text, fontSize: typography.bodySm }}>
+                          {customer.utility === "ELECTRIC" ? "Electric" :
+                           customer.utility === "GAS" ? "Gas" :
+                           customer.utility === "FIBER" ? "Fiber" :
+                           customer.utility === "COPPER" ? "Copper" :
+                           customer.utility === "WATER" ? "Water" :
+                           customer.utility === "SEWER" ? "Sewer" : customer.name} — {formatMarkingStatus(data.status)}
+                        </Text>
+                      </View>
+                      <Text style={{ color: colors.muted, fontSize: typography.metadata, marginTop: 4 }}>
+                        {data.minutes ? `${data.minutes} min` : "0 min"}
+                        {data.footage ? ` · ${data.footage} ft` : ""}
                       </Text>
-                    )}
+                    </View>
+                  </View>
+                </View>
+              ) : (
+                <>
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center flex-1" style={{ gap: 6 }}>
+                  {data.completed && (
                     <Ionicons
                       name="checkmark-circle"
-                      size={24}
+                      size={20}
                       color={colors.success}
                     />
-                  </View>
+                  )}
+                  <Text
+                    className="font-semibold"
+                    style={{ color: colors.text, fontSize: typography.body, flexShrink: 1 }}
+                  >
+                    {customer.name}
+                  </Text>
+                </View>
+                {data.completed && data.closedByTechName && (
+                  <Text style={{ color: colors.muted, fontSize: typography.captionSm }}>
+                    by {data.closedByTechName}
+                  </Text>
                 )}
               </View>
 
-              <Text className="text-xs mt-1" style={{ color: colors.muted }}>
+              <Text style={{ color: colors.muted, fontSize: typography.metadata, marginTop: 4 }}>
                 {`${customer.accountNumber} | ${customer.utility}`}
               </Text>
 
@@ -770,6 +870,8 @@ export function CustomersTab({
                   </Pressable>
                 )}
               </View>
+                </>
+              )}
             </View>
           );
         })}

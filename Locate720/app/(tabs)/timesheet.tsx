@@ -1,6 +1,7 @@
 import { View, Text, Pressable, ScrollView, ActivityIndicator, Alert } from "react-native";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/features/auth/AuthContext";
 import { colors } from "../../src/ui/colors";
 import { database } from "../../src/db/database";
@@ -14,15 +15,87 @@ import {
   getActiveTicketsErrorMessage,
   checkServerActiveSession,
 } from "../../src/features/timesheet/utils/validation";
-import { checkUserBreakStatus, getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
+import { checkUserBreakStatus, getTodayDateString, getTodayStartTimestamp, getStartOfNextLocalDay } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketSelectorModal } from "../../src/features/timesheet/components/TicketSelectorModal";
 import { ReasonSelectorModal, getAllocationLabel } from "../../src/features/timesheet/components/ReasonSelectorModal";
 import type { BreakType, ClockEventType } from "../../src/features/timesheet/types";
 import { Q } from "@nozbe/watermelondb";
 import { formatDuration } from "../../src/utils/formatDuration";
 
+type TimelineItem =
+  | { kind: "clock_in"; time: number; allocation?: string }
+  | { kind: "clock_out"; time: number }
+  | { kind: "allocation_change"; time: number; newAllocation?: string }
+  | { kind: "lunch"; startTime: number; endTime?: number; duration?: number }
+  | { kind: "personal"; startTime: number; endTime?: number; duration?: number };
+
+function buildTimelineItems(
+  events: ClockEvent[],
+  sessions: DaySession[],
+): TimelineItem[] {
+  const sorted = [...events].sort((a, b) => a.occurredAt - b.occurredAt);
+  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  const items: TimelineItem[] = [];
+
+  for (const event of sorted) {
+    switch (event.eventType) {
+      case "CLOCK_IN": {
+        const sess = sessionMap.get(event.sessionId);
+        items.push({
+          kind: "clock_in",
+          time: event.occurredAt,
+          allocation: sess?.clockInReason || sess?.allocationType,
+        });
+        break;
+      }
+      case "CLOCK_OUT":
+        items.push({ kind: "clock_out", time: event.occurredAt });
+        break;
+      case "ALLOCATION_CHANGE": {
+        items.push({
+          kind: "allocation_change",
+          time: event.occurredAt,
+          newAllocation: event.allocationType,
+        });
+        break;
+      }
+      case "LUNCH_START":
+        items.push({ kind: "lunch", startTime: event.occurredAt });
+        break;
+      case "LUNCH_END": {
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          if (it.kind === "lunch" && it.endTime === undefined) {
+            it.endTime = event.occurredAt;
+            it.duration = event.occurredAt - it.startTime;
+            break;
+          }
+        }
+        break;
+      }
+      case "PERSONAL_START":
+        items.push({ kind: "personal", startTime: event.occurredAt });
+        break;
+      case "PERSONAL_END": {
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          if (it.kind === "personal" && it.endTime === undefined) {
+            it.endTime = event.occurredAt;
+            it.duration = event.occurredAt - it.startTime;
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  return items;
+}
+
 export default function Timesheet() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [session, setSession] = useState<DaySession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -32,14 +105,37 @@ export default function Timesheet() {
   const [showReasonSelector, setShowReasonSelector] = useState(false);
   const [showAllocationChanger, setShowAllocationChanger] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [timelineEvents, setTimelineEvents] = useState<ClockEvent[]>([]);
+  const [todaySessions, setTodaySessions] = useState<DaySession[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Track the start of the current local day so the timeline resets
+  // visually at midnight.  A midnight timer updates this state so the
+  // subscriptions re-query with the new day boundary.
+  const [dayStartMs, setDayStartMs] = useState(() => getTodayStartTimestamp());
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleMidnightRollover = () => {
+      const msUntilMidnight = getStartOfNextLocalDay() - Date.now();
+      timer = setTimeout(() => {
+        setDayStartMs(getTodayStartTimestamp());
+        scheduleMidnightRollover();
+      }, msUntilMidnight + 500);
+    };
+    scheduleMidnightRollover();
+    return () => clearTimeout(timer);
+  }, []);
+
   // Dynamic duration timer — updates every second while clocked in.
+  // Tracks break elapsed time when on break, session elapsed otherwise.
   useEffect(() => {
     if (session?.status === "ACTIVE" && session.clockInAt) {
-      setElapsedSec(Math.floor((Date.now() - session.clockInAt) / 1000));
+      const baseTime =
+        currentBreakType && breakStartedAt ? breakStartedAt : session.clockInAt;
+      setElapsedSec(Math.floor((Date.now() - baseTime) / 1000));
       timerRef.current = setInterval(() => {
-        setElapsedSec(Math.floor((Date.now() - session.clockInAt) / 1000));
+        setElapsedSec(Math.floor((Date.now() - baseTime) / 1000));
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -47,7 +143,7 @@ export default function Timesheet() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [session?.status, session?.clockInAt]);
+  }, [session?.status, session?.clockInAt, currentBreakType, breakStartedAt]);
 
   const loadTodaySession = useCallback(async () => {
     if (!user) return;
@@ -90,6 +186,48 @@ export default function Timesheet() {
     SyncEngine.pullTimesheet(true).then(() => loadTodaySession());
   }, [loadTodaySession]);
 
+  // Reload session state when the day boundary rolls over at midnight
+  useEffect(() => {
+    loadTodaySession();
+  }, [dayStartMs, loadTodaySession]);
+
+  // Subscribe to today's clock events (reactive timeline source).
+  // Depends on dayStartMs so the subscription re-queries at midnight.
+  useEffect(() => {
+    if (!user) return;
+    const eventsCollection = database.collections.get<ClockEvent>("clock_events");
+    const subscription = eventsCollection
+      .query(
+        Q.where("user_id", user.id),
+        Q.where("occurred_at", Q.gte(dayStartMs)),
+        Q.sortBy("occurred_at", Q.asc),
+      )
+      .observe()
+      .subscribe((events) => {
+        setTimelineEvents(events);
+      });
+    return () => subscription.unsubscribe();
+  }, [user, dayStartMs]);
+
+  // Subscribe to today's sessions (for timeline allocation lookup).
+  // Depends on dayStartMs so the subscription re-queries at midnight.
+  useEffect(() => {
+    if (!user) return;
+    const today = getTodayDateString();
+    const sessionsCollection = database.collections.get<DaySession>("day_sessions");
+    const subscription = sessionsCollection
+      .query(
+        Q.where("user_id", user.id),
+        Q.where("date", today),
+        Q.sortBy("created_at", Q.asc),
+      )
+      .observe()
+      .subscribe((sessions) => {
+        setTodaySessions(sessions);
+      });
+    return () => subscription.unsubscribe();
+  }, [user]);
+
   // ── Clock In ──────────────────────────────────────────────
   const handleClockInPress = () => {
     setShowReasonSelector(true);
@@ -124,12 +262,29 @@ export default function Timesheet() {
       const now = Date.now();
       const today = getTodayDateString();
 
+      // Pre-generate outbox events so we can use their requestIds as
+      // local ClockEvent IDs. This prevents duplicate timeline entries
+      // when the server echoes back the same event with requestId as ID.
+      const clockInEvent = createClockEvent({
+        sessionId: "", // will be set after session creation
+        userId: user.id,
+        eventType: "CLOCK_IN",
+        occurredAt: now,
+        date: today,
+        clockInAt: now,
+        status: "ACTIVE",
+        clockInReason: reason,
+        allocationType: reason,
+        otherReason: reason === "other" ? otherReason : undefined,
+      });
+
       let newSessionId = "";
       const orphanCloseOuts: Array<{
         sessionId: string;
         clockInAt: number;
         clockOutAt: number;
         date: string;
+        requestId: string;
       }> = [];
 
       await database.write(async () => {
@@ -143,23 +298,37 @@ export default function Timesheet() {
         if (orphaned.length > 0) {
           for (const old of orphaned) {
             const closedAt = old.clockInAt + 1000;
+            const orphanOutbox = createClockEvent({
+              sessionId: old.id,
+              userId: user.id,
+              eventType: "CLOCK_OUT",
+              occurredAt: closedAt,
+              date: old.date,
+              clockInAt: old.clockInAt,
+              clockOutAt: closedAt,
+              status: "CLOCKED_OUT",
+              reason: "AUTO_CLOSE_ORPHAN",
+            });
             orphanCloseOuts.push({
               sessionId: old.id,
               clockInAt: old.clockInAt,
               clockOutAt: closedAt,
               date: old.date,
+              requestId: orphanOutbox.requestId,
             });
             await old.update((s) => {
               s.status = "CLOCKED_OUT";
               s.clockOutAt = closedAt;
             });
             await eventsCollection.create((e) => {
+              e._raw.id = orphanOutbox.requestId;
               e.sessionId = old.id;
               e.userId = user.id;
               e.eventType = "CLOCK_OUT";
               e.occurredAt = closedAt;
               e.reason = "AUTO_CLOSE_ORPHAN";
             });
+            await SyncEngine.queueEvent(orphanOutbox);
           }
         }
 
@@ -178,7 +347,13 @@ export default function Timesheet() {
 
         newSessionId = newSession.id;
 
+        // Update the pre-generated outbox event with the real session ID
+        const updatedPayload = JSON.parse(clockInEvent.payloadJson);
+        updatedPayload.sessionId = newSession.id;
+        clockInEvent.payloadJson = JSON.stringify(updatedPayload);
+
         await eventsCollection.create((e) => {
+          e._raw.id = clockInEvent.requestId;
           e.sessionId = newSession.id;
           e.userId = user.id;
           e.eventType = "CLOCK_IN";
@@ -188,38 +363,15 @@ export default function Timesheet() {
         setSession(newSession);
       });
 
-      // Queue orphan close-outs.
-      for (const orphan of orphanCloseOuts) {
-        const orphanEvent = createClockEvent({
-          sessionId: orphan.sessionId,
-          userId: user.id,
-          eventType: "CLOCK_OUT",
-          occurredAt: orphan.clockOutAt,
-          date: orphan.date,
-          clockInAt: orphan.clockInAt,
-          clockOutAt: orphan.clockOutAt,
-          status: "CLOCKED_OUT",
-          reason: "AUTO_CLOSE_ORPHAN",
-        });
-        await SyncEngine.queueEvent(orphanEvent);
+      await SyncEngine.queueEvent(clockInEvent);
+
+      // Pull tickets to refresh the board after clock-in. Guard against
+      // the race where SyncEngine.setCurrentUser hasn't run yet.
+      if (user?.id) {
+        SyncEngine.pullTickets(true).catch((e) =>
+          console.warn("[Timesheet] Post-clock-in ticket pull failed:", e),
+        );
       }
-
-      // Queue clock-in with reason.
-      const clockEvent = createClockEvent({
-        sessionId: newSessionId,
-        userId: user.id,
-        eventType: "CLOCK_IN",
-        occurredAt: now,
-        date: today,
-        clockInAt: now,
-        status: "ACTIVE",
-        clockInReason: reason,
-        allocationType: reason,
-        otherReason: reason === "other" ? otherReason : undefined,
-      });
-      await SyncEngine.queueEvent(clockEvent);
-
-      SyncEngine.pullTickets(true);
     } catch (error) {
       console.error("[Timesheet] Clock in failed:", error);
     } finally {
@@ -235,16 +387,8 @@ export default function Timesheet() {
     try {
       setIsProcessing(true);
       const now = Date.now();
-      await database.write(async () => {
-        await session.update((s) => {
-          s.allocationType = newType;
-          if (newType === "other" && otherReason) {
-            s.otherReason = otherReason;
-          }
-        });
-      });
 
-      // Queue sync event so backend + ops portal update
+      // Pre-generate the outbox event to get the requestId
       const clockEvent = createClockEvent({
         sessionId: session.id,
         userId: user.id,
@@ -256,6 +400,29 @@ export default function Timesheet() {
         allocationType: newType,
         otherReason: newType === "other" ? otherReason : undefined,
       });
+
+      await database.write(async () => {
+        await session.update((s) => {
+          s.allocationType = newType;
+          if (newType === "other" && otherReason) {
+            s.otherReason = otherReason;
+          }
+        });
+
+        // Create a local ClockEvent so the timeline updates immediately.
+        // Use the outbox requestId as the local ID to prevent duplicates
+        // when the server echoes the event back.
+        const eventsCollection = database.collections.get<ClockEvent>("clock_events");
+        await eventsCollection.create((e) => {
+          e._raw.id = clockEvent.requestId;
+          e.sessionId = session.id;
+          e.userId = user.id;
+          e.eventType = "ALLOCATION_CHANGE";
+          e.occurredAt = now;
+          e.allocationType = newType;
+        });
+      });
+
       await SyncEngine.queueEvent(clockEvent);
 
       // Refresh session state.
@@ -313,7 +480,7 @@ export default function Timesheet() {
 
   const handleTicketSelectorCancel = () => {
     setShowTicketSelector(false);
-    handleTicketSelected(null);
+    setIsProcessing(false);
   };
 
   // ── Breaks ────────────────────────────────────────────────
@@ -338,9 +505,20 @@ export default function Timesheet() {
       const startEventType: ClockEventType =
         breakType === "lunch" ? "LUNCH_START" : "PERSONAL_START";
 
+      const clockEvent = createClockEvent({
+        sessionId: session.id,
+        userId: user.id,
+        eventType: startEventType,
+        occurredAt: now,
+        date: session.date,
+        clockInAt: session.clockInAt,
+        reason: breakType === "personal" ? "PERSONAL_TIME" : undefined,
+      });
+
       await database.write(async () => {
         const eventsCollection = database.collections.get<ClockEvent>("clock_events");
         await eventsCollection.create((e) => {
+          e._raw.id = clockEvent.requestId;
           e.sessionId = session.id;
           e.userId = user.id;
           e.eventType = startEventType;
@@ -352,15 +530,6 @@ export default function Timesheet() {
       setCurrentBreakType(breakType);
       setBreakStartedAt(now);
 
-      const clockEvent = createClockEvent({
-        sessionId: session.id,
-        userId: user.id,
-        eventType: startEventType,
-        occurredAt: now,
-        date: session.date,
-        clockInAt: session.clockInAt,
-        reason: breakType === "personal" ? "PERSONAL_TIME" : undefined,
-      });
       await SyncEngine.queueEvent(clockEvent);
     } catch (error) {
       console.error(`[Timesheet] Start ${breakType} failed:`, error);
@@ -378,9 +547,20 @@ export default function Timesheet() {
       const endEventType: ClockEventType =
         currentBreakType === "lunch" ? "LUNCH_END" : "PERSONAL_END";
 
+      const clockEvent = createClockEvent({
+        sessionId: session.id,
+        userId: user.id,
+        eventType: endEventType,
+        occurredAt: now,
+        date: session.date,
+        clockInAt: session.clockInAt,
+        reason: currentBreakType === "personal" ? "PERSONAL_TIME" : undefined,
+      });
+
       await database.write(async () => {
         const eventsCollection = database.collections.get<ClockEvent>("clock_events");
         await eventsCollection.create((e) => {
+          e._raw.id = clockEvent.requestId;
           e.sessionId = session.id;
           e.userId = user.id;
           e.eventType = endEventType;
@@ -392,15 +572,6 @@ export default function Timesheet() {
       setCurrentBreakType(null);
       setBreakStartedAt(null);
 
-      const clockEvent = createClockEvent({
-        sessionId: session.id,
-        userId: user.id,
-        eventType: endEventType,
-        occurredAt: now,
-        date: session.date,
-        clockInAt: session.clockInAt,
-        reason: currentBreakType === "personal" ? "PERSONAL_TIME" : undefined,
-      });
       await SyncEngine.queueEvent(clockEvent);
     } catch (error) {
       console.error("[Timesheet] End break failed:", error);
@@ -434,9 +605,50 @@ export default function Timesheet() {
   const isOnLunch = currentBreakType === "lunch";
   const isOnPersonal = currentBreakType === "personal";
 
+  const timelineItems = buildTimelineItems(timelineEvents, todaySessions);
+
+  const heroColor = isOnBreak
+    ? colors.accent
+    : isClockedIn
+      ? colors.success
+      : colors.muted;
+  const heroLabel = isOnLunch
+    ? "ON LUNCH"
+    : isOnPersonal
+      ? "ON BREAK"
+      : isClockedIn
+        ? "CLOCKED IN"
+        : isClockedOut
+          ? "CLOCKED OUT"
+          : "NOT CLOCKED IN";
+  const heroSubtitle = isOnBreak && breakStartedAt
+    ? `Started ${formatTime(breakStartedAt)}`
+    : isClockedIn && session?.clockInAt
+      ? `Since ${formatTime(session.clockInAt)}`
+      : isClockedOut && session?.clockOutAt
+        ? `Clocked out at ${formatTime(session.clockOutAt)}`
+        : "Ready to start your day";
+
+  const timelineDotColor = (kind: TimelineItem["kind"]) => {
+    switch (kind) {
+      case "clock_in":
+        return colors.success;
+      case "clock_out":
+        return colors.danger;
+      case "allocation_change":
+        return colors.primary;
+      case "lunch":
+      case "personal":
+        return colors.accent;
+    }
+  };
+
   return (
     <View className="flex-1" style={{ backgroundColor: colors.bg }}>
-      <ScrollView className="flex-1 px-5 pt-6">
+      <ScrollView
+        className="flex-1 px-5 pt-6"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+      >
         {/* Header */}
         <View className="flex-row items-center justify-between mb-5">
           <Text className="text-2xl font-bold" style={{ color: colors.text }}>
@@ -455,143 +667,301 @@ export default function Timesheet() {
           )}
         </View>
 
-        {/* Status Card */}
+        {/* Current State Hero */}
         <View
-          className="rounded-2xl p-5 mb-5"
+          className="rounded-2xl p-6 mb-5"
           style={{
-            backgroundColor: isClockedIn ? colors.success + "15" : colors.surface,
+            backgroundColor: heroColor + "15",
             borderWidth: 1,
-            borderColor: isClockedIn ? colors.success + "30" : "transparent",
+            borderColor: heroColor + "30",
           }}
         >
-          <View className="flex-row items-center justify-between mb-3">
-            <Text className="text-xs font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>
-              Status
-            </Text>
-          </View>
           <Text
-            className="text-2xl font-bold"
-            style={{ color: isClockedIn ? colors.success : isClockedOut ? colors.muted : colors.text }}
+            className="text-sm font-bold uppercase tracking-widest"
+            style={{ color: heroColor }}
           >
-            {isClockedIn ? "On the Clock" : isClockedOut ? "Clocked Out" : "Not Clocked In"}
+            {heroLabel}
           </Text>
-          {isClockedIn && session?.allocationType && (
-            <Pressable
-              onPress={() => setShowAllocationChanger(true)}
-              className="mt-3 flex-row items-center justify-between rounded-xl p-3"
-              style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.primary + "40" }}
+          {isClockedIn && !isOnBreak && session?.allocationType && (
+            <Text
+              className="text-xl font-semibold mt-2"
+              style={{ color: colors.text }}
             >
-              <View className="flex-1 mr-2">
-                <Text className="text-[11px] font-medium uppercase tracking-wider" style={{ color: colors.muted }}>
-                  Active Work Allocation
-                </Text>
-                <Text className="text-sm font-bold mt-0.5" style={{ color: colors.text }}>
-                  {getAllocationLabel(session.allocationType)}
-                </Text>
-              </View>
-              <View className="flex-row items-center rounded-lg px-2.5 py-1.5" style={{ backgroundColor: colors.primary + "20", gap: 4 }}>
-                <Text className="text-xs font-semibold" style={{ color: colors.primary }}>
-                  Change
-                </Text>
-                <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
-              </View>
-            </Pressable>
+              {getAllocationLabel(session.allocationType as AllocationType)}
+            </Text>
           )}
-          {isClockedIn && session?.otherReason && (
-            <Text className="text-xs mt-2 italic" style={{ color: colors.muted }}>
+          {isClockedIn && !isOnBreak && session?.otherReason && (
+            <Text className="text-xs mt-1 italic" style={{ color: colors.muted }}>
               &ldquo;{session.otherReason}&rdquo;
             </Text>
           )}
-        </View>
-
-        {/* Live Duration */}
-        {isClockedIn && (
-          <View className="rounded-2xl p-5 mb-5 items-center" style={{ backgroundColor: colors.surface }}>
-            <Text className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: colors.muted }}>
-              Elapsed
-            </Text>
-            <Text className="text-3xl font-bold" style={{ color: colors.success }}>
+          {isClockedIn && (
+            <Text
+              className="text-4xl font-bold mt-2"
+              style={{ color: heroColor }}
+            >
               {formatDuration(elapsedSec * 1000, { includeSeconds: true })}
             </Text>
-          </View>
-        )}
+          )}
+          <Text className="text-sm mt-2" style={{ color: colors.muted }}>
+            {heroSubtitle}
+          </Text>
+        </View>
 
-        {/* Session Details */}
-        {session && (
-          <View className="rounded-2xl p-5 mb-5" style={{ backgroundColor: colors.surface }}>
-            <Text className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: colors.muted }}>
-              Today's Session
-            </Text>
-
-            <View className="flex-row justify-between mb-2.5">
-              <Text style={{ color: colors.text }}>Clock In</Text>
-              <Text className="font-semibold" style={{ color: colors.accent }}>
-                {formatTime(session.clockInAt)}
-              </Text>
-            </View>
-
-            {session.clockOutAt && (
-              <View className="flex-row justify-between mb-2.5">
-                <Text style={{ color: colors.text }}>Clock Out</Text>
-                <Text className="font-semibold" style={{ color: colors.accent }}>
-                  {formatTime(session.clockOutAt)}
-                </Text>
-              </View>
-            )}
-
-            {session.clockInReason && (
-              <View className="flex-row justify-between mb-2.5">
-                <Text style={{ color: colors.text }}>Reason</Text>
-                <Text className="font-semibold" style={{ color: colors.primary }}>
-                  {getAllocationLabel(session.clockInReason)}
-                </Text>
-              </View>
-            )}
-
-            {isOnBreak && breakStartedAt && (
-              <View className="flex-row justify-between mb-2.5">
-                <Text style={{ color: colors.text }}>
-                  {isOnLunch ? "Lunch" : "Personal"} started
-                </Text>
-                <Text className="font-semibold" style={{ color: colors.accent }}>
-                  {formatTime(breakStartedAt)}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Break Section */}
-        {isClockedIn && (
+        {/* Today's Timeline */}
+        {timelineItems.length > 0 && (
           <View
             className="rounded-2xl p-5 mb-5"
+            style={{ backgroundColor: colors.surface }}
+          >
+            <Text
+              className="text-xs font-semibold uppercase tracking-wider mb-4"
+              style={{ color: colors.muted }}
+            >
+              Today&apos;s Timeline
+            </Text>
+            {timelineItems.map((item, index) => (
+              <View key={index} className="flex-row" style={{ minHeight: 44 }}>
+                {/* Timeline rail */}
+                <View className="items-center mr-3" style={{ width: 20 }}>
+                  <View
+                    className="rounded-full"
+                    style={{
+                      width: 10,
+                      height: 10,
+                      backgroundColor: timelineDotColor(item.kind),
+                      marginTop: 5,
+                    }}
+                  />
+                  {index < timelineItems.length - 1 && (
+                    <View
+                      style={{
+                        width: 2,
+                        flex: 1,
+                        backgroundColor: colors.muted + "30",
+                        marginTop: 2,
+                      }}
+                    />
+                  )}
+                </View>
+                {/* Content */}
+                <View className="flex-1 mb-4">
+                  {item.kind === "clock_in" && (
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
+                        <Text
+                          className="text-sm font-semibold"
+                          style={{ color: colors.text }}
+                        >
+                          Clocked In
+                        </Text>
+                        {item.allocation && (
+                          <Text
+                            className="text-xs mt-0.5"
+                            style={{ color: colors.primary }}
+                          >
+                            {getAllocationLabel(item.allocation as AllocationType)}
+                          </Text>
+                        )}
+                      </View>
+                      <Text
+                        className="text-xs font-medium ml-2"
+                        style={{ color: colors.muted }}
+                      >
+                        {formatTime(item.time)}
+                      </Text>
+                    </View>
+                  )}
+                  {item.kind === "clock_out" && (
+                    <View className="flex-row items-center justify-between">
+                      <Text
+                        className="text-sm font-semibold flex-1"
+                        style={{ color: colors.danger, flexShrink: 1 }}
+                      >
+                        Clocked Out
+                      </Text>
+                      <Text
+                        className="text-xs font-medium ml-2"
+                        style={{ color: colors.muted }}
+                      >
+                        {formatTime(item.time)}
+                      </Text>
+                    </View>
+                  )}
+                  {item.kind === "allocation_change" && (
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
+                        <Text
+                          className="text-sm font-semibold"
+                          style={{ color: colors.text }}
+                        >
+                          Switched to{" "}
+                          {item.newAllocation
+                            ? getAllocationLabel(item.newAllocation as AllocationType)
+                            : "New Allocation"}
+                        </Text>
+                      </View>
+                      <Text
+                        className="text-xs font-medium ml-2"
+                        style={{ color: colors.muted }}
+                      >
+                        {formatTime(item.time)}
+                      </Text>
+                    </View>
+                  )}
+                  {item.kind === "lunch" && (
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
+                        <Text
+                          className="text-sm font-semibold"
+                          style={{ color: colors.accent }}
+                        >
+                          Lunch
+                        </Text>
+                        {item.duration !== undefined ? (
+                          <Text
+                            className="text-xs mt-0.5"
+                            style={{ color: colors.muted }}
+                          >
+                            {formatDuration(item.duration)}
+                          </Text>
+                        ) : (
+                          <Text
+                            className="text-xs mt-0.5 italic"
+                            style={{ color: colors.accent }}
+                          >
+                            In progress...
+                          </Text>
+                        )}
+                      </View>
+                      <Text
+                        className="text-xs font-medium ml-2"
+                        style={{ color: colors.muted }}
+                      >
+                        {formatTime(item.startTime)}
+                        {item.endTime ? ` – ${formatTime(item.endTime)}` : ""}
+                      </Text>
+                    </View>
+                  )}
+                  {item.kind === "personal" && (
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-1" style={{ flexShrink: 1 }}>
+                        <Text
+                          className="text-sm font-semibold"
+                          style={{ color: colors.accent }}
+                        >
+                          Personal Time
+                        </Text>
+                        {item.duration !== undefined ? (
+                          <Text
+                            className="text-xs mt-0.5"
+                            style={{ color: colors.muted }}
+                          >
+                            {formatDuration(item.duration)}
+                          </Text>
+                        ) : (
+                          <Text
+                            className="text-xs mt-0.5 italic"
+                            style={{ color: colors.accent }}
+                          >
+                            In progress...
+                          </Text>
+                        )}
+                      </View>
+                      <Text
+                        className="text-xs font-medium ml-2"
+                        style={{ color: colors.muted }}
+                      >
+                        {formatTime(item.startTime)}
+                        {item.endTime ? ` – ${formatTime(item.endTime)}` : ""}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Secondary Controls — Change Allocation */}
+        {isClockedIn && !isOnBreak && session?.allocationType && (
+          <Pressable
+            onPress={() => setShowAllocationChanger(true)}
+            disabled={isProcessing}
+            className="rounded-xl px-4 py-3 mb-3 flex-row items-center justify-between"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.primary + "40",
+              opacity: isProcessing ? 0.5 : 1,
+              minHeight: 48,
+            }}
+          >
+            <View className="flex-1 mr-2">
+              <Text
+                className="text-[11px] font-medium uppercase tracking-wider"
+                style={{ color: colors.muted }}
+              >
+                Active Work Allocation
+              </Text>
+              <Text
+                className="text-sm font-bold mt-0.5"
+                style={{ color: colors.text }}
+              >
+                {getAllocationLabel(session.allocationType as AllocationType)}
+              </Text>
+            </View>
+            <View
+              className="flex-row items-center rounded-lg px-2.5 py-1.5"
+              style={{ backgroundColor: colors.primary + "20", gap: 4 }}
+            >
+              <Text className="text-xs font-semibold" style={{ color: colors.primary }}>
+                Change
+              </Text>
+              <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
+            </View>
+          </Pressable>
+        )}
+
+        {/* Secondary Controls — Lunch / Break */}
+        {isClockedIn && (
+          <View
+            className="rounded-2xl p-5 mb-3"
             style={{
               backgroundColor: isOnBreak ? colors.accent + "15" : colors.surface,
               borderWidth: 1,
               borderColor: isOnBreak ? colors.accent + "30" : "transparent",
             }}
           >
-            <Text className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: colors.muted }}>
+            <Text
+              className="text-xs font-semibold uppercase tracking-wider mb-3"
+              style={{ color: colors.muted }}
+            >
               Breaks
             </Text>
 
             {isOnBreak ? (
-              <>
-                <Pressable
-                  onPress={handleEndBreak}
-                  disabled={isProcessing}
-                  className="rounded-xl px-4 py-3"
-                  style={{ backgroundColor: colors.success, opacity: isProcessing ? 0.5 : 1 }}
-                >
-                  {isProcessing ? (
-                    <ActivityIndicator color={colors.text} />
-                  ) : (
-                    <Text className="font-semibold text-center" style={{ color: colors.text }}>
-                      End {isOnLunch ? "Lunch" : "Personal Time"}
-                    </Text>
-                  )}
-                </Pressable>
-              </>
+              <Pressable
+                onPress={handleEndBreak}
+                disabled={isProcessing}
+                className="rounded-xl px-4 py-3"
+                style={{
+                  backgroundColor: colors.success,
+                  opacity: isProcessing ? 0.5 : 1,
+                  minHeight: 48,
+                }}
+              >
+                {isProcessing ? (
+                  <ActivityIndicator color={colors.text} />
+                ) : (
+                  <Text
+                    className="font-semibold text-center"
+                    style={{ color: colors.text }}
+                  >
+                    End {isOnLunch ? "Lunch" : "Personal Time"}
+                  </Text>
+                )}
+              </Pressable>
             ) : (
               <>
                 <Text className="text-xs mb-3" style={{ color: colors.muted }}>
@@ -602,9 +972,16 @@ export default function Timesheet() {
                     onPress={() => handleStartBreak("lunch")}
                     disabled={isProcessing}
                     className="flex-1 rounded-xl px-4 py-3"
-                    style={{ backgroundColor: colors.accent, opacity: isProcessing ? 0.5 : 1 }}
+                    style={{
+                      backgroundColor: colors.accent,
+                      opacity: isProcessing ? 0.5 : 1,
+                      minHeight: 48,
+                    }}
                   >
-                    <Text className="font-semibold text-center text-sm" style={{ color: colors.text }}>
+                    <Text
+                      className="font-semibold text-center text-sm"
+                      style={{ color: colors.text }}
+                    >
                       Lunch
                     </Text>
                   </Pressable>
@@ -612,9 +989,16 @@ export default function Timesheet() {
                     onPress={() => handleStartBreak("personal")}
                     disabled={isProcessing}
                     className="flex-1 rounded-xl px-4 py-3"
-                    style={{ backgroundColor: colors.primary, opacity: isProcessing ? 0.5 : 1 }}
+                    style={{
+                      backgroundColor: colors.primary,
+                      opacity: isProcessing ? 0.5 : 1,
+                      minHeight: 48,
+                    }}
                   >
-                    <Text className="font-semibold text-center text-sm" style={{ color: colors.text }}>
+                    <Text
+                      className="font-semibold text-center text-sm"
+                      style={{ color: colors.text }}
+                    >
                       Personal
                     </Text>
                   </Pressable>
@@ -624,22 +1008,29 @@ export default function Timesheet() {
           </View>
         )}
 
-        {/* Clock In / Out Button */}
+        {/* Primary Control — Clock In / Out */}
         <Pressable
           onPress={isClockedIn ? handleClockOut : handleClockInPress}
           disabled={isProcessing || isOnBreak}
-          className="rounded-2xl px-5 py-4 mb-4"
+          className="rounded-2xl px-5 py-5 mb-4"
           style={{
             backgroundColor: isClockedIn ? colors.danger : colors.success,
             opacity: isProcessing || isOnBreak ? 0.5 : 1,
-            minHeight: 48,
+            minHeight: 56,
           }}
         >
           {isProcessing ? (
             <ActivityIndicator color={colors.text} />
           ) : (
-            <Text className="text-lg font-bold text-center" style={{ color: colors.text }}>
-              {isClockedIn ? "Clock Out" : isClockedOut ? "Clock In (New Session)" : "Clock In"}
+            <Text
+              className="text-xl font-bold text-center"
+              style={{ color: colors.text }}
+            >
+              {isClockedIn
+                ? "Clock Out"
+                : isClockedOut
+                  ? "Clock In (New Session)"
+                  : "Clock In"}
             </Text>
           )}
         </Pressable>

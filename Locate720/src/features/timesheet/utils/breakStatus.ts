@@ -124,3 +124,14 @@ export function getTodayDateString(): string {
 export function getTodayStartTimestamp(): number {
   return new Date().setHours(0, 0, 0, 0);
 }
+
+/**
+ * Get start of the next local day in milliseconds (tomorrow 00:00:00.000).
+ * Used for the closed-ticket daily boundary:
+ *   startOfLocalDay <= closedAt < startOfNextLocalDay
+ */
+export function getStartOfNextLocalDay(): number {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.setHours(0, 0, 0, 0);
+}

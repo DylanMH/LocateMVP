@@ -5,7 +5,6 @@ import {
   Text,
   View,
   AppState,
-  Alert,
   Pressable,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -16,16 +15,18 @@ import Ticket from "../../src/db/models/Ticket";
 import DaySession from "../../src/db/models/DaySession";
 import ClockEvent from "../../src/db/models/ClockEvent";
 import { useAuth } from "../../src/features/auth/AuthContext";
-import { getTodayStartTimestamp, getTodayDateString } from "../../src/features/timesheet/utils/breakStatus";
+import { getTodayStartTimestamp, getTodayDateString, getStartOfNextLocalDay } from "../../src/features/timesheet/utils/breakStatus";
 import { TicketCard } from "../../src/features/tickets/components/TicketCard";
 import { CompactTicketCard } from "../../src/features/tickets/components/CompactTicketCard";
 import { FilterChips } from "../../src/features/tickets/components/FilterChips";
+import { FilterBottomSheet } from "../../src/features/tickets/components/FilterBottomSheet";
 import { TicketsHeader } from "../../src/features/tickets/components/TicketsHeader";
 import { TicketMapView } from "../../src/features/tickets/components/TicketMapView";
 import { RescheduleModal } from "../../src/features/tickets/components/RescheduleModal";
 import { SyncEngine } from "../../src/features/tickets/sync/SyncEngine";
 import { sortTickets } from "../../src/features/tickets/utils/ticketSorting";
 import { isTicketClosed } from "../../src/features/tickets/domain/statusMachine";
+import { matchesFilters } from "../../src/features/tickets/domain/filterPredicate";
 import {
   getDueUrgencyBucket,
   getDueAccentColorFromTimestamp,
@@ -37,7 +38,10 @@ import {
 import { getTicketDisplayData, parseTicketPayload } from "../../src/features/tickets/utils/ticketPayload";
 import { formatDueDateTime } from "../../src/utils/date";
 import { colors } from "../../src/ui/colors";
+import { logger } from "../../src/utils/logger";
 import type { SegmentedToggleOption } from "../../src/features/tickets/components/SegmentedToggle";
+import type { TicketFilters } from "../../src/features/tickets/types";
+import { NO_FILTERS, countActiveFilters } from "../../src/features/tickets/types";
 
 type TicketViewStatusFilter = "OPEN" | "CLOSED";
 type TicketAssignedFilter = "MINE" | "ALL";
@@ -61,7 +65,32 @@ export default function TicketsScreen() {
   const [clockOutTicketId, setClockOutTicketId] = useState<string | null>(null);
   const [rescheduleSelected, setRescheduleSelected] = useState<Set<string>>(new Set());
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [filters, setFilters] = useState<TicketFilters>(NO_FILTERS);
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const currentUserId = user?.id || "";
+
+  // Track the start of the current local day so the Closed tab can filter
+  // to only tickets closed today.  A midnight timer updates this state so
+  // the view rolls over automatically without requiring an app restart.
+  const [dayStartMs, setDayStartMs] = useState(() => getTodayStartTimestamp());
+
+  useEffect(() => {
+    // Set a timer that fires at the next local midnight to refresh the
+    // day boundary.  When it fires, update dayStartMs and schedule the
+    // next midnight timer.
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleMidnightRollover = () => {
+      const msUntilMidnight = getStartOfNextLocalDay() - Date.now();
+      timer = setTimeout(() => {
+        setDayStartMs(getTodayStartTimestamp());
+        scheduleMidnightRollover();
+      }, msUntilMidnight + 500); // +500ms to ensure we're past midnight
+    };
+    scheduleMidnightRollover();
+    return () => clearTimeout(timer);
+  }, []);
 
   // Set current user on SyncEngine when auth user changes
   useEffect(() => {
@@ -193,18 +222,25 @@ export default function TicketsScreen() {
     return () => subscription.unsubscribe();
   }, [user, checkBreakStatus]);
 
-  // Subscribe to tickets observable
+  // Subscribe to tickets observable — scoped to the current tech at the DB
+  // level so the board only loads tickets assigned to this user.  This avoids
+  // loading every ticket in the local cache (including other techs' tickets)
+  // and prevents transient assignment changes from causing board flicker.
   useEffect(() => {
+    if (!currentUserId) return;
     const ticketsCollection = database.collections.get<Ticket>("tickets");
     const subscription = ticketsCollection
-      .query(Q.sortBy("due_at", Q.asc))
+      .query(
+        Q.where("assigned_tech_id", currentUserId),
+        Q.sortBy("due_at", Q.asc),
+      )
       .observe()
       .subscribe((updatedTickets) => {
         setTickets(updatedTickets);
       });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [currentUserId]);
 
   // Pull from backend only when clocked in
   useEffect(() => {
@@ -217,10 +253,14 @@ export default function TicketsScreen() {
   // Refresh when screen comes into focus (e.g., navigating back from detail)
   useFocusEffect(
     useCallback(() => {
+      if (!currentUserId) return;
       // Force immediate re-query on focus to catch any pending DB changes
       const ticketsCollection = database.collections.get<Ticket>("tickets");
       ticketsCollection
-        .query(Q.sortBy("due_at", Q.asc))
+        .query(
+          Q.where("assigned_tech_id", currentUserId),
+          Q.sortBy("due_at", Q.asc),
+        )
         .fetch()
         .then((freshTickets) => {
           setTickets(freshTickets);
@@ -232,7 +272,7 @@ export default function TicketsScreen() {
       }, 180000); // 3 minutes
 
       return () => clearInterval(interval);
-    }, []),
+    }, [currentUserId]),
   );
 
   // App foreground refresh
@@ -252,12 +292,58 @@ export default function TicketsScreen() {
     setRefreshing(false);
   };
 
-  const handleSearchPress = useCallback(() => {
-    Alert.alert(
-      "Ticket Search",
-      "Search is planned for a later phase. This button is now in place so the tickets workspace layout is ready for that flow.",
-    );
+  const handleToggleSearch = useCallback(() => {
+    setIsSearchVisible((prev) => {
+      const next = !prev;
+      if (!next) {
+        // Clear the query when collapsing the search bar
+        setSearchQuery("");
+      }
+      logger.log(`[Tickets] search ${next ? "opened" : "closed"}`);
+      return next;
+    });
   }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery("");
+    setIsSearchVisible(false);
+    logger.log("[Tickets] search cleared and closed");
+  }, []);
+
+  // Build the list of known contractors from the current ticket set for the
+  // filter bottom sheet.  Memoized so we don't re-parse every payload on
+  // every render (plan §55).
+  const contractorOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const ticket of tickets) {
+      const display = getTicketDisplayData(ticket.payloadJson);
+      if (display.contractor) {
+        set.add(display.contractor);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [tickets]);
+
+  const handleRemoveFilter = useCallback((key: keyof TicketFilters) => {
+    setFilters((prev) => {
+      if (key === "contractor") return { ...prev, contractor: null };
+      if (key === "due") return { ...prev, due: "ALL" };
+      if (key === "rescheduled") return { ...prev, rescheduled: "ALL" };
+      if (key === "emergency") return { ...prev, emergency: false };
+      if (key === "noResponse") return { ...prev, noResponse: false };
+      return prev;
+    });
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setFilters(NO_FILTERS);
+  }, []);
+
+  const activeFilterCount = countActiveFilters(filters);
+
+  const trimmedQuery = searchQuery.trim();
+  const isSearching = trimmedQuery.length > 0;
+  const queryLower = trimmedQuery.toLowerCase();
 
   const filteredTickets = tickets.filter((ticket) => {
     // If on break, hide all tickets
@@ -275,6 +361,14 @@ export default function TicketsScreen() {
       return false;
     }
 
+    // When a search query is active, search across ALL tickets assigned to
+    // the user (including CLOSED/UNABLE), bypassing the status tab split,
+    // the daily closed-ticket window, and the filter chips.  This lets the
+    // tech look up any ticket by number regardless of its lifecycle state.
+    if (isSearching) {
+      return ticket.ticketNumber.toLowerCase().includes(queryLower);
+    }
+
     // When clocked in and working, apply normal filters
     // Status filter - check locatorStatus for ticket lifecycle state
     const isOpen =
@@ -282,8 +376,24 @@ export default function TicketsScreen() {
     if (statusFilter === "OPEN" && !isOpen) return false;
     if (statusFilter === "CLOSED" && isOpen) return false;
 
+    // Daily closed-ticket view: when viewing the CLOSED tab, only show
+    // tickets closed during the current local calendar day.  Historical
+    // closed tickets remain in the backend and local DB but are hidden
+    // from this daily operational view.  The dayStartMs state updates at
+    // midnight so the view rolls over automatically.
+    if (statusFilter === "CLOSED" && ticket.closedAt != null) {
+      if (ticket.closedAt < dayStartMs) return false;
+    }
+
     // Assigned filter
     if (assignedFilter === "MINE" && ticket.assignedTechId !== currentUserId) {
+      return false;
+    }
+
+    // Apply technician-selected filters (plan §24 step 3).
+    // Filters only apply to the OPEN tab — the CLOSED tab is a daily
+    // operational view and should not be further filtered.
+    if (statusFilter === "OPEN" && !matchesFilters(ticket, filters)) {
       return false;
     }
 
@@ -299,7 +409,13 @@ export default function TicketsScreen() {
         userName={user?.name}
         view={view}
         onChangeView={setView}
-        onPressSearch={handleSearchPress}
+        isSearchVisible={isSearchVisible}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onToggleSearch={handleToggleSearch}
+        onClearSearch={handleClearSearch}
+        onPressFilter={() => setShowFilterSheet(true)}
+        filterCount={activeFilterCount}
       />
       {view !== "RESCHEDULE" ? (
         <FilterChips
@@ -307,8 +423,18 @@ export default function TicketsScreen() {
           onChangeStatus={setStatusFilter}
           assigned={assignedFilter}
           onChangeAssigned={setAssignedFilter}
+          filters={filters}
+          onRemoveFilter={handleRemoveFilter}
+          onClearAllFilters={handleClearAllFilters}
         />
       ) : null}
+      <FilterBottomSheet
+        visible={showFilterSheet}
+        filters={filters}
+        contractors={contractorOptions}
+        onApply={setFilters}
+        onClose={() => setShowFilterSheet(false)}
+      />
 
       {view === "MAP" ? (
         <TicketMapView
@@ -435,6 +561,33 @@ export default function TicketsScreen() {
                     </>
                   )}
                 </>
+              ) : activeFilterCount > 0 ? (
+                <>
+                  <Text
+                    className="text-base font-semibold"
+                    style={{ color: colors.text }}
+                  >
+                    No tickets match your filters.
+                  </Text>
+                  <Text
+                    className="text-sm mt-2"
+                    style={{ color: colors.muted }}
+                  >
+                    Try clearing some filters to see more tickets.
+                  </Text>
+                  <Pressable
+                    onPress={handleClearAllFilters}
+                    className="mt-4 px-4 py-2.5 rounded-xl self-start"
+                    style={{ backgroundColor: colors.surface }}
+                  >
+                    <Text
+                      className="text-sm font-semibold"
+                      style={{ color: colors.accent }}
+                    >
+                      Clear all filters
+                    </Text>
+                  </Pressable>
+                </>
               ) : (
                 <>
                   <Text
@@ -515,8 +668,41 @@ function RescheduleTab({
   );
   const canReschedule = selected.size > 0 && selectedContractors.size <= 1;
 
+  // When at least one ticket is selected, filter the visible list to only
+  // tickets from the same contractor. This makes it easy to select multiple
+  // tickets for bulk reschedule without accidentally mixing contractors
+  // (which is not allowed). When nothing is selected, show all tickets.
+  const activeContractor = selectedTickets.length > 0
+    ? (parseTicketPayload(selectedTickets[0].payloadJson).contractor || "Unknown")
+    : null;
+  const visibleTickets = activeContractor
+    ? tickets.filter((t) => {
+        const payload = parseTicketPayload(t.payloadJson);
+        return (payload.contractor || "Unknown") === activeContractor;
+      })
+    : tickets;
+
   return (
     <View className="flex-1 px-4 pt-3">
+      {/* Contractor filter indicator */}
+      {activeContractor && (
+        <View
+          className="flex-row items-center justify-between rounded-xl px-4 py-2 mb-3"
+          style={{ backgroundColor: colors.bg }}
+        >
+          <Text className="text-xs" style={{ color: colors.muted }}>
+            Showing only <Text style={{ color: colors.text, fontWeight: "600" }}>{activeContractor}</Text> tickets
+          </Text>
+          <Pressable
+            onPress={onClearSelection}
+            hitSlop={8}
+          >
+            <Text className="text-xs font-semibold" style={{ color: colors.accent }}>
+              Show all
+            </Text>
+          </Pressable>
+        </View>
+      )}
       {/* Selection summary bar */}
       {selected.size > 0 && (
         <View
@@ -559,9 +745,18 @@ function RescheduleTab({
             tickets cannot be rescheduled.
           </Text>
         </View>
+      ) : visibleTickets.length === 0 ? (
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-base font-semibold mb-2" style={{ color: colors.text }}>
+            No other tickets from {activeContractor}
+          </Text>
+          <Text className="text-sm text-center" style={{ color: colors.muted }}>
+            This is the only eligible ticket from this contractor.
+          </Text>
+        </View>
       ) : (
         <FlatList
-          data={tickets}
+          data={visibleTickets}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingBottom: 24 }}
           ItemSeparatorComponent={() => <View className="h-2" />}

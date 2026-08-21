@@ -2,7 +2,7 @@
   "expo": {
     "name": "Locate720",
     "slug": "Locate720",
-    "version": "1.0.1",
+    "version": "1.7.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "locate720",
@@ -22,7 +22,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.locate720.app",
-      "versionCode": 3,
+      "versionCode": 4,
       "usesCleartextTraffic": true,
       "permissions": [
         "ACCESS_COARSE_LOCATION",

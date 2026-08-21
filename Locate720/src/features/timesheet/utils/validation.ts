@@ -138,9 +138,41 @@ export async function closeActiveSession(
     }
   }
 
+  // Pre-generate outbox events so we can use their requestIds as
+  // local ClockEvent IDs, preventing duplicate timeline entries when
+  // the server echoes back the same event.
+  if (endedBreakType) {
+    queuedEvents.push(
+      createClockEvent({
+        sessionId: activeSession.id,
+        userId,
+        eventType: endedBreakType === 'personal' ? 'PERSONAL_END' : 'LUNCH_END',
+        occurredAt: now,
+        date: activeSession.date,
+        clockInAt: activeSession.clockInAt,
+        reason: endedBreakType === 'personal' ? 'PERSONAL_TIME' : undefined,
+      }),
+    );
+  }
+
+  const clockOutEvent = createClockEvent({
+    sessionId: activeSession.id,
+    userId,
+    eventType: 'CLOCK_OUT',
+    occurredAt: now,
+    date: activeSession.date,
+    clockInAt: activeSession.clockInAt,
+    clockOutAt: now,
+    status: 'CLOCKED_OUT',
+    ticketId: ticketId || undefined,
+  });
+  queuedEvents.push(clockOutEvent);
+
   await database.write(async () => {
     if (endedBreakType) {
+      const breakEvent = queuedEvents[0];
       await eventsCollection.create((event) => {
+        event._raw.id = breakEvent.requestId;
         event.sessionId = activeSession.id;
         event.userId = userId;
         event.eventType = endedBreakType === 'personal' ? 'PERSONAL_END' : 'LUNCH_END';
@@ -149,18 +181,6 @@ export async function closeActiveSession(
           event.reason = 'PERSONAL_TIME';
         }
       });
-
-      queuedEvents.push(
-        createClockEvent({
-          sessionId: activeSession.id,
-          userId,
-          eventType: endedBreakType === 'personal' ? 'PERSONAL_END' : 'LUNCH_END',
-          occurredAt: now,
-          date: activeSession.date,
-          clockInAt: activeSession.clockInAt,
-          reason: endedBreakType === 'personal' ? 'PERSONAL_TIME' : undefined,
-        }),
-      );
     }
 
     await activeSession.update((session) => {
@@ -170,6 +190,7 @@ export async function closeActiveSession(
     });
 
     await eventsCollection.create((event) => {
+      event._raw.id = clockOutEvent.requestId;
       event.sessionId = activeSession.id;
       event.userId = userId;
       event.eventType = 'CLOCK_OUT';
@@ -177,20 +198,6 @@ export async function closeActiveSession(
       event.ticketId = ticketId || undefined;
     });
   });
-
-  queuedEvents.push(
-    createClockEvent({
-      sessionId: activeSession.id,
-      userId,
-      eventType: 'CLOCK_OUT',
-      occurredAt: now,
-      date: activeSession.date,
-      clockInAt: activeSession.clockInAt,
-      clockOutAt: now,
-      status: 'CLOCKED_OUT',
-      ticketId: ticketId || undefined,
-    }),
-  );
 
   for (const event of queuedEvents) {
     await SyncEngine.queueEvent(event);

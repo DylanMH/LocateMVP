@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS clock_events (
   clock_in_at INTEGER,
   clock_out_at INTEGER,
   session_status TEXT CHECK (session_status IN ('ACTIVE', 'CLOCKED_OUT')),
+  allocation_type TEXT,
   created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
   FOREIGN KEY (session_id) REFERENCES day_sessions(id),
   FOREIGN KEY (user_id) REFERENCES users(id),
@@ -406,6 +407,9 @@ ensureColumnExists("outbox_811_events", "external_ticket_id", "ALTER TABLE outbo
   tx();
   db.pragma('foreign_keys = ON');
 })();
+
+// clock_events — allocation_type column for ALLOCATION_CHANGE events
+ensureColumnExists("clock_events", "allocation_type", "ALTER TABLE clock_events ADD COLUMN allocation_type TEXT");
 
 // Area bounding box migrations
 ensureColumnExists("areas", "bbox_north", "ALTER TABLE areas ADD COLUMN bbox_north REAL");

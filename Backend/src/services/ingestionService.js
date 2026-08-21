@@ -5,7 +5,7 @@
 import { resolveTerritoryChainForPoint } from './territoryService.js';
 
 const ELEVEN_SIM_BASE_URL = 'http://localhost:4100';
-const MAX_811_PULL_LIMIT = 500;
+const MAX_811_PULL_LIMIT = 2000;
 
 function getStableAccountNumber(source = {}) {
   return (
@@ -53,7 +53,7 @@ export async function pullTicketsFrom811(db, since = 0, options = {}) {
     console.log(`[Ingestion] Received ${tickets.length} tickets from 811 Simulator`);
 
     if (reconcileMissing && tickets.length === MAX_811_PULL_LIMIT) {
-      const warning = `811 reconcile pulled ${MAX_811_PULL_LIMIT} tickets and may be truncated; missing-ticket reconciliation may be incomplete`;
+      const warning = `811 reconcile pulled ${MAX_811_PULL_LIMIT} tickets and may be truncated; missing-ticket reconciliation SKIPPED to prevent deleting tickets that exist in 811 but were cut off by the limit`;
       console.warn(`[Ingestion] ${warning}`);
       results.warnings.push(warning);
     }
@@ -73,7 +73,14 @@ export async function pullTicketsFrom811(db, since = 0, options = {}) {
       }
     }
 
-    if (reconcileMissing) {
+    // Only run missing-ticket reconciliation if we received the full
+    // dataset.  If the 811 sim returned exactly MAX_811_PULL_LIMIT
+    // tickets, the result is truncated and reconciliation would delete
+    // backend tickets that actually exist in 811 but were cut off by
+    // the LIMIT clause.  This was causing linked tickets (UPDATE/
+    // UPDATE_REMARK) to be deleted from the backend when the 811 sim
+    // had more than 500 tickets.
+    if (reconcileMissing && tickets.length < MAX_811_PULL_LIMIT) {
       results.reconciledRemoved = reconcileMissing811Tickets(db, tickets);
     }
 
@@ -138,16 +145,39 @@ function reconcileMissing811Tickets(db, current811Tickets) {
   const activeExternalIds = new Set(current811Tickets.map((ticket) => ticket.id));
 
   const existing811Tickets = db.prepare(`
-    SELECT id, ticket_number, external_ticket_id
+    SELECT id, ticket_number, external_ticket_id, locator_status
     FROM tickets
     WHERE source = '811' AND external_ticket_id IS NOT NULL
   `).all();
+
+  // States where the tech's device holds the source of truth and the
+  // ticket must NOT be deleted by 811 reconciliation, even if the 811
+  // simulator no longer returns it.  This prevents linked tickets
+  // (UPDATE/UPDATE_REMARK) from being deleted while a tech is actively
+  // working them.
+  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED", "CLOSED", "UNABLE"]);
 
   let removedCount = 0;
 
   const tx = db.transaction(() => {
     for (const ticket of existing811Tickets) {
       if (activeExternalIds.has(ticket.external_ticket_id)) {
+        continue;
+      }
+
+      // Never delete tickets that are in an active field-work state or
+      // have pending local changes (recent mobile-sourced events).
+      if (activeStates.has(ticket.locator_status)) {
+        console.log(
+          `[Ingestion] Preserving active ticket ${ticket.ticket_number} (${ticket.id}, locator_status=${ticket.locator_status}) during 811 reconcile`,
+        );
+        continue;
+      }
+
+      if (hasPendingLocalChanges(db, ticket.id)) {
+        console.log(
+          `[Ingestion] Preserving ticket ${ticket.ticket_number} (${ticket.id}) with pending local changes during 811 reconcile`,
+        );
         continue;
       }
 
@@ -206,15 +236,15 @@ export async function upsert811Ticket(db, ticket811) {
     // the due date (detected by comparing incoming due_at to original_due_at;
     // if they differ, the simulator has revised it and we accept the new value).
     const updateStmt = db.prepare(`
-      UPDATE tickets 
+      UPDATE tickets
       SET ticket_number = ?, ticket_type = ?, address = ?, lat = ?, lng = ?,
           due_at = CASE
             WHEN original_due_at IS NOT NULL AND ? = original_due_at THEN due_at
             ELSE ?
           END,
           original_due_at = COALESCE(original_due_at, ?),
-          payload_json = ?, last_811_sync_at = ?, 
-          updated_at = ?, version = version + 1,
+          payload_json = ?, last_811_sync_at = ?,
+          updated_at = ?,
           root_ticket_id = COALESCE(root_ticket_id, ?),
           parent_ticket_id = COALESCE(parent_ticket_id, ?),
           sequence_number = COALESCE(sequence_number, ?),
@@ -541,8 +571,12 @@ function hasPendingLocalChanges(db, ticketId) {
   ).get(ticketId);
   if (!ticket) return false;
 
-  // Active field-work states: tech is working this ticket on their device.
-  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED"]);
+  // States where the tech's device holds the source of truth and 811
+  // re-ingestion must NOT overwrite any field.  CLOSED/UNABLE are included
+  // because the closure data (closedByName, closedAt, customerMarkings)
+  // originates from the mobile and must be preserved permanently — not just
+  // for the 5-minute recent-event window.
+  const activeStates = new Set(["ENROUTE", "ONSITE", "PAUSED", "CLOSED", "UNABLE"]);
   if (activeStates.has(ticket.locator_status)) return true;
 
   // Check for recent mobile-sourced events (last 5 minutes).
