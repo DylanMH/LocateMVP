@@ -19,6 +19,7 @@ import { TerritoriesPage } from "./pages/territories/TerritoriesPage";
 import { CustomersPage } from "./pages/customers/CustomersPage";
 import { CustomerDetailPage } from "./pages/customers/CustomerDetailPage";
 import { DataQualityPage } from "./pages/dataquality/DataQualityPage";
+import { TeamsPage } from "./pages/teams/TeamsPage";
 
 // Create a client
 const queryClient = new QueryClient({
@@ -54,6 +55,7 @@ function App() {
                       <Route path="/territories" element={<TerritoriesPage />} />
                       <Route path="/customers" element={<CustomersPage />} />
                       <Route path="/customers/:id" element={<CustomerDetailPage />} />
+                      <Route path="/teams" element={<TeamsPage />} />
                       <Route path="/data-quality" element={<DataQualityPage />} />
                       <Route path="/simulator" element={<SimulatorPage />} />
                     </Routes>

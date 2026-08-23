@@ -19,8 +19,8 @@ assert(emptyResult.issueCount === 0, 'returns zero issues for a clean database')
 assert(Object.keys(emptyResult.byType).length === 0, 'returns empty issue counts for a clean database');
 
 const rows = [
-  { id: 'ticket-1', ticket_number: 'T-1', status: 'CLOSED', locator_status: 'CLOSED', assigned_tech_id: null, payload_json: JSON.stringify({ customers: [{ id: 'customer-1' }], customerMarkings: {} }) },
-  { id: 'ticket-2', ticket_number: 'T-2', status: 'OPEN', locator_status: 'ASSIGNED', assigned_tech_id: null, payload_json: '{}' },
+  { id: 'ticket-1', ticket_number: 'T-1', status: 'CLOSED', locator_status: 'CLOSED', assigned_tech_id: null, payload_json: JSON.stringify({ customers: [{ id: 'customer-1' }], customerMarkings: {} }), due_at: null, closed_at: null },
+  { id: 'ticket-2', ticket_number: 'T-2', status: 'OPEN', locator_status: 'ASSIGNED', assigned_tech_id: null, payload_json: '{}', due_at: null, closed_at: null },
 ];
 let queryIndex = 0;
 const fakeDb = {
@@ -33,10 +33,13 @@ const fakeDb = {
   }),
 };
 const result = runDataQualityChecks(fakeDb);
-assert(result.issueCount === 3, 'detects closed timestamp, customer outcome, and unassigned ticket issues');
+assert(result.issueCount === 4, 'detects closed timestamp, customer outcome, unassigned ticket, and missing due_at issues');
 assert(result.byType.COMPLETED_MISSING_CLOSED_AT === 1, 'counts missing closed timestamp');
 assert(result.byType.COMPLETED_CUSTOMER_MISSING_STATUS === 1, 'counts missing customer outcome');
 assert(result.byType.TICKET_WITHOUT_TECH === 1, 'counts active ticket without technician');
+assert(result.byType.ACTIVE_TICKET_MISSING_DUE_AT === 1, 'counts active ticket without due_at');
+assert(result.bySeverity && result.bySeverity.ERROR === 2, 'provides bySeverity breakdown');
+assert(result.byEntityType && result.byEntityType.TICKET === 4, 'provides byEntityType breakdown');
 
 console.log(`\nPassed: ${passed}`);
 console.log(`Failed: ${failed}`);

@@ -344,6 +344,110 @@ export function getTechIdsUnderUser(db, userId, role) {
 }
 
 /**
+ * Return the user IDs of all TECH/TRAINEE/TRAINER users assigned to any
+ * TECH_TERRITORY in the subtree under the given territory. This works for
+ * any territory type (DISTRICT, AREA, SUPERVISOR_TERRITORY, TECH_TERRITORY).
+ *
+ * Returns [] if the territory has no descendant tech territories or no
+ * active techs are assigned.
+ */
+export function getTechIdsUnderTerritory(db, territoryId) {
+  if (!territoryId) return [];
+
+  const techTerritoryIds = [];
+  function collectDescendants(tid) {
+    const children = db.prepare(`
+      SELECT id, type FROM territories WHERE parent_territory_id = ? AND active = 1
+    `).all(tid);
+    for (const c of children) {
+      if (c.type === 'TECH_TERRITORY') techTerritoryIds.push(c.id);
+      else collectDescendants(c.id);
+    }
+  }
+
+  // If the territory itself is a TECH_TERRITORY, include it directly.
+  const self = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(territoryId);
+  if (self?.type === 'TECH_TERRITORY') {
+    techTerritoryIds.push(territoryId);
+  } else {
+    collectDescendants(territoryId);
+  }
+
+  if (techTerritoryIds.length === 0) return [];
+
+  const ph = techTerritoryIds.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT DISTINCT u.id
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id IN (${ph})
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.role IN ('TECH','TRAINEE','TRAINER')
+      AND u.is_active = 1
+  `).all(...techTerritoryIds, Date.now()).map((r) => r.id);
+}
+
+/**
+ * Return the supervisor user assigned to a SUPERVISOR_TERRITORY via an
+ * OWNER or MANAGER assignment. Returns null if no supervisor is assigned.
+ */
+export function getSupervisorForTerritory(db, supervisorTerritoryId) {
+  if (!supervisorTerritoryId) return null;
+  const row = db.prepare(`
+    SELECT u.id, u.name, u.email
+    FROM users u
+    JOIN user_territory_assignments uta ON uta.user_id = u.id
+    WHERE uta.territory_id = ?
+      AND uta.assignment_type IN ('OWNER','MANAGER')
+      AND (uta.end_date IS NULL OR uta.end_date > ?)
+      AND u.is_active = 1
+      AND u.role = 'SUPERVISOR'
+    LIMIT 1
+  `).get(supervisorTerritoryId, Date.now());
+  return row || null;
+}
+
+/**
+ * Return all supervisor territories that are direct children of the given
+ * area territory. Returns [] if the territory is not an AREA or has no
+ * supervisor children.
+ */
+export function getSupervisorTerritoriesInArea(db, areaTerritoryId) {
+  if (!areaTerritoryId) return [];
+  return db.prepare(`
+    SELECT id, code, name FROM territories
+    WHERE type = 'SUPERVISOR_TERRITORY' AND parent_territory_id = ? AND active = 1
+    ORDER BY name
+  `).all(areaTerritoryId);
+}
+
+/**
+ * Return all area territories that are direct children of the given
+ * district territory. Returns [] if the territory is not a DISTRICT or
+ * has no area children.
+ */
+export function getAreaTerritoriesInDistrict(db, districtTerritoryId) {
+  if (!districtTerritoryId) return [];
+  return db.prepare(`
+    SELECT id, code, name FROM territories
+    WHERE type = 'AREA' AND parent_territory_id = ? AND active = 1
+    ORDER BY name
+  `).all(districtTerritoryId);
+}
+
+/**
+ * Return all active district territories. Used by district-manager views
+ * that show all districts.
+ */
+export function getAllDistrictTerritories(db) {
+  return db.prepare(`
+    SELECT id, code, name FROM territories
+    WHERE type = 'DISTRICT' AND active = 1
+    ORDER BY name
+  `).all();
+}
+
+/**
  * Pick a tech to assign a new ticket to, scoped to a specific tech territory.
  * Uses least-open-ticket load balancing, same policy as the legacy
  * assignmentService. Returns null if no tech is assigned to that territory.

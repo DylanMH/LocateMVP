@@ -20,8 +20,17 @@ import { canViewTimesheet, requirePermission } from "../utils/permissions.js";
 import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.js";
 import { summarizeTicketMetrics } from "../services/analytics/ticketMetrics.js";
 import { computeTeamMetrics } from "../services/analytics/teamMetrics.js";
-import { summarizeCustomerMetrics } from "../services/analytics/customerMetrics.js";
+import { summarizeCustomerMetrics, summarizeCustomerBreakdowns } from "../services/analytics/customerMetrics.js";
+import { computeSupervisorMetrics, computePerTechMetrics } from "../services/analytics/supervisorMetrics.js";
+import { computeAreaMetrics } from "../services/analytics/areaMetrics.js";
+import { computeDistrictMetrics } from "../services/analytics/districtMetrics.js";
 import { runDataQualityChecks } from "../services/dataQualityService.js";
+import {
+  getSupervisorTerritoriesInArea,
+  getAreaTerritoriesInDistrict,
+  getAllDistrictTerritories,
+  getTechIdsUnderTerritory,
+} from "../services/territoryService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -2093,10 +2102,285 @@ router.get("/tickets/export.csv", authenticateToken, (req, res) => {
 router.get("/data-quality", authenticateToken, requirePermission('ops.viewOrganization'), (req, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 250, 1), 1000);
-    res.json({ generatedAt: new Date().toISOString(), ...runDataQualityChecks(db, limit) });
+    const { severity, entityType, offset } = req.query;
+    const result = runDataQualityChecks(db, limit, {
+      severity: severity || undefined,
+      entityType: entityType || undefined,
+      offset: Math.max(Number(offset) || 0, 0),
+    });
+    res.json({ generatedAt: new Date().toISOString(), ...result });
   } catch (error) {
     console.error("[OPS Data Quality] Error running checks:", error);
     res.status(500).json({ error: "Failed to run data-quality checks" });
+  }
+});
+
+// ---------- hierarchy comparison analytics ----------
+
+/**
+ * GET /api/ops/supervisors
+ * Returns supervisor territories within the caller's scope with summary
+ * metrics for each. Used by area/district manager comparison views.
+ */
+router.get("/supervisors", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const range = resolveRange(req);
+    const role = req.user.role;
+    const dir = getUserDirectTerritories(db, req.user.id);
+
+    // Determine which supervisor territories are in scope
+    let supervisorTerritoryIds = [];
+
+    if (role === 'DISTRICT_MANAGER') {
+      // All supervisor territories in all districts
+      const districts = dir.DISTRICT.length > 0 ? dir.DISTRICT : getAllDistrictTerritories(db).map(d => d.id);
+      for (const dId of districts) {
+        const areas = getAreaTerritoriesInDistrict(db, dId);
+        for (const a of areas) {
+          supervisorTerritoryIds.push(...getSupervisorTerritoriesInArea(db, a.id).map(s => s.id));
+        }
+      }
+    } else if (role === 'AREA_MANAGER') {
+      for (const aId of dir.AREA) {
+        supervisorTerritoryIds.push(...getSupervisorTerritoriesInArea(db, aId).map(s => s.id));
+      }
+    } else if (role === 'SUPERVISOR') {
+      supervisorTerritoryIds = dir.SUPERVISOR_TERRITORY;
+    }
+
+    const supervisors = supervisorTerritoryIds.map((stId) => {
+      const sm = computeSupervisorMetrics(db, stId, range.startMs, range.endMs);
+      const terr = db.prepare(`SELECT id, code, name FROM territories WHERE id = ?`).get(stId);
+      return {
+        territoryId: terr?.id || stId,
+        territoryCode: terr?.code || null,
+        territoryName: terr?.name || null,
+        supervisor: sm.supervisor,
+        techCount: sm.aggregate.techCount,
+        completed: sm.aggregate.completed,
+        fullyClear: sm.aggregate.fullyClear,
+        fullyMarked: sm.aggregate.fullyMarked,
+        mixed: sm.aggregate.mixed,
+        markedFootage: sm.aggregate.markedFootage,
+        cotp: sm.aggregate.cotp,
+        cotpNumerator: sm.aggregate.cotpNumerator,
+        cotpDenominator: sm.aggregate.cotpDenominator,
+        clearRate: sm.aggregate.completed > 0
+          ? { value: (sm.aggregate.fullyClear / sm.aggregate.completed) * 100, numerator: sm.aggregate.fullyClear, denominator: sm.aggregate.completed }
+          : { value: null, numerator: 0, denominator: 0 },
+        workedHours: sm.aggregate.workedHours,
+        ticketsPerHour: sm.aggregate.ticketsPerHour,
+        openBacklog: sm.aggregate.openBacklog,
+        overdue: sm.aggregate.overdue,
+      };
+    });
+
+    res.json({
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      supervisors,
+    });
+  } catch (error) {
+    console.error("[OPS Hierarchy] Error fetching supervisors:", error);
+    res.status(500).json({ error: "Failed to fetch supervisor comparison" });
+  }
+});
+
+/**
+ * GET /api/ops/supervisors/:id/metrics
+ * Returns a single supervisor's team aggregate plus per-tech child summaries.
+ * Authorization: the supervisor territory must be within the caller's scope.
+ */
+router.get("/supervisors/:id/metrics", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const { id: territoryId } = req.params;
+    const range = resolveRange(req);
+
+    // Authorization: check the territory is within scope
+    const terr = db.prepare(`SELECT id, type, parent_territory_id FROM territories WHERE id = ?`).get(territoryId);
+    if (!terr || terr.type !== 'SUPERVISOR_TERRITORY') {
+      return res.status(404).json({ error: "Supervisor territory not found" });
+    }
+
+    const role = req.user.role;
+    const dir = getUserDirectTerritories(db, req.user.id);
+    if (role !== 'DISTRICT_MANAGER') {
+      if (role === 'AREA_MANAGER') {
+        const inScope = getSupervisorTerritoriesInArea(db, terr.parent_territory_id).some(s => s.id === territoryId)
+          && dir.AREA.includes(terr.parent_territory_id);
+        if (!inScope) return res.status(403).json({ error: "Supervisor outside your area scope" });
+      } else if (role === 'SUPERVISOR') {
+        if (!dir.SUPERVISOR_TERRITORY.includes(territoryId)) {
+          return res.status(403).json({ error: "Supervisor outside your scope" });
+        }
+      }
+    }
+
+    const result = computeSupervisorMetrics(db, territoryId, range.startMs, range.endMs);
+    res.json({
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      ...result,
+    });
+  } catch (error) {
+    console.error("[OPS Hierarchy] Error fetching supervisor metrics:", error);
+    res.status(500).json({ error: "Failed to fetch supervisor metrics" });
+  }
+});
+
+/**
+ * GET /api/ops/areas/:id/metrics
+ * Returns area aggregate plus per-supervisor comparison rows.
+ */
+router.get("/areas/:id/metrics", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const { id: territoryId } = req.params;
+    const range = resolveRange(req);
+
+    const terr = db.prepare(`SELECT id, type, parent_territory_id FROM territories WHERE id = ?`).get(territoryId);
+    if (!terr || terr.type !== 'AREA') {
+      return res.status(404).json({ error: "Area territory not found" });
+    }
+
+    // Authorization
+    const role = req.user.role;
+    const dir = getUserDirectTerritories(db, req.user.id);
+    if (role !== 'DISTRICT_MANAGER') {
+      if (role === 'AREA_MANAGER' && !dir.AREA.includes(territoryId)) {
+        return res.status(403).json({ error: "Area outside your scope" });
+      } else if (role === 'SUPERVISOR') {
+        // Supervisors can only see the area containing their supervisor territory
+        const supAreas = dir.SUPERVISOR_TERRITORY.map(stId => {
+          const st = db.prepare(`SELECT parent_territory_id FROM territories WHERE id = ?`).get(stId);
+          return st?.parent_territory_id;
+        });
+        if (!supAreas.includes(territoryId)) {
+          return res.status(403).json({ error: "Area outside your scope" });
+        }
+      }
+    }
+
+    const result = computeAreaMetrics(db, territoryId, range.startMs, range.endMs);
+    res.json({
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      ...result,
+    });
+  } catch (error) {
+    console.error("[OPS Hierarchy] Error fetching area metrics:", error);
+    res.status(500).json({ error: "Failed to fetch area metrics" });
+  }
+});
+
+/**
+ * GET /api/ops/districts
+ * Returns all districts (for district manager overview).
+ */
+router.get("/districts", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const districts = getAllDistrictTerritories(db);
+    res.json({ districts });
+  } catch (error) {
+    console.error("[OPS Hierarchy] Error fetching districts:", error);
+    res.status(500).json({ error: "Failed to fetch districts" });
+  }
+});
+
+/**
+ * GET /api/ops/districts/:id/metrics
+ * Returns district aggregate plus per-area comparison rows.
+ * Authorization: district manager scope only.
+ */
+router.get("/districts/:id/metrics", authenticateToken, requirePermission('ops.viewOrganization'), (req, res) => {
+  try {
+    const { id: territoryId } = req.params;
+    const range = resolveRange(req);
+
+    const terr = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(territoryId);
+    if (!terr || terr.type !== 'DISTRICT') {
+      return res.status(404).json({ error: "District territory not found" });
+    }
+
+    const result = computeDistrictMetrics(db, territoryId, range.startMs, range.endMs);
+    res.json({
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      ...result,
+    });
+  } catch (error) {
+    console.error("[OPS Hierarchy] Error fetching district metrics:", error);
+    res.status(500).json({ error: "Failed to fetch district metrics" });
+  }
+});
+
+/**
+ * GET /api/ops/teams/:id/metrics
+ * Generic team metrics endpoint. Accepts a territory ID of any type and
+ * returns the aggregate plus child summaries appropriate to that level.
+ */
+router.get("/teams/:id/metrics", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const { id: territoryId } = req.params;
+    const range = resolveRange(req);
+
+    const terr = db.prepare(`SELECT id, type FROM territories WHERE id = ?`).get(territoryId);
+    if (!terr) return res.status(404).json({ error: "Territory not found" });
+
+    if (terr.type === 'SUPERVISOR_TERRITORY') {
+      const result = computeSupervisorMetrics(db, territoryId, range.startMs, range.endMs);
+      return res.json({
+        range: { startMs: range.startMs, endMs: range.endMs, rangeKey: range.rangeKey, label: range.label },
+        level: 'SUPERVISOR',
+        ...result,
+      });
+    }
+    if (terr.type === 'AREA') {
+      const result = computeAreaMetrics(db, territoryId, range.startMs, range.endMs);
+      return res.json({
+        range: { startMs: range.startMs, endMs: range.endMs, rangeKey: range.rangeKey, label: range.label },
+        level: 'AREA',
+        ...result,
+      });
+    }
+    if (terr.type === 'DISTRICT') {
+      const result = computeDistrictMetrics(db, territoryId, range.startMs, range.endMs);
+      return res.json({
+        range: { startMs: range.startMs, endMs: range.endMs, rangeKey: range.rangeKey, label: range.label },
+        level: 'DISTRICT',
+        ...result,
+      });
+    }
+    if (terr.type === 'TECH_TERRITORY') {
+      // Return per-tech metrics for a single tech territory
+      const techIds = getTechIdsUnderTerritory(db, territoryId);
+      const techs = computePerTechMetrics(db, techIds, range.startMs, range.endMs);
+      return res.json({
+        range: { startMs: range.startMs, endMs: range.endMs, rangeKey: range.rangeKey, label: range.label },
+        level: 'TECH_TERRITORY',
+        techs,
+      });
+    }
+
+    res.status(400).json({ error: "Unknown territory type" });
+  } catch (error) {
+    console.error("[OPS Hierarchy] Error fetching team metrics:", error);
+    res.status(500).json({ error: "Failed to fetch team metrics" });
   }
 });
 
@@ -2125,7 +2409,7 @@ router.get("/customers", authenticateToken, requirePermission('ops.viewTeam'), (
     const pageOffset = Math.max(Number(offset) || 0, 0);
     const rows = db.prepare(`
       SELECT c.id, c.code, c.display_name as displayName, c.utility_type as utilityType,
-             c.active, c.territory_id as territoryId
+             c.active, c.territory_id as territoryId, c.contracted_locator_id as contractedLocatorId
       FROM customers c
       ${where}
       ORDER BY c.display_name ASC
@@ -2186,16 +2470,21 @@ router.get("/customers/:id/metrics", authenticateToken, requirePermission('ops.v
     const range = resolveRange(req);
     const techIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
     if (techIds.length === 0) {
-      return res.json({ customer, range, metrics: summarizeCustomerMetrics([], customer) });
+      return res.json({
+        customer,
+        range,
+        metrics: summarizeCustomerMetrics([], customer),
+        breakdowns: summarizeCustomerBreakdowns([], customer, db),
+      });
     }
 
     const placeholders = techIds.map(() => '?').join(',');
+    // Include both closed and open tickets so we can count open tickets
     const tickets = db.prepare(`
       SELECT * FROM tickets
       WHERE assigned_tech_id IN (${placeholders})
-        AND closed_at IS NOT NULL
-        AND closed_at >= ?
-        AND closed_at < ?
+        AND created_at >= ?
+        AND created_at < ?
       ORDER BY closed_at ASC
     `).all(...techIds, range.startMs, range.endMs);
 
@@ -2208,6 +2497,7 @@ router.get("/customers/:id/metrics", authenticateToken, requirePermission('ops.v
         label: range.label,
       },
       metrics: summarizeCustomerMetrics(tickets, customer),
+      breakdowns: summarizeCustomerBreakdowns(tickets, customer, db),
     });
   } catch (error) {
     console.error("[OPS Customers] Error fetching customer metrics:", error);

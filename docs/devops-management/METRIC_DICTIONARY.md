@@ -82,3 +82,70 @@ Every aggregate response should include:
 - `generatedAt`
 
 Ambiguous averages must be named with their denominator, such as `clearTicketsPerWorkday`, `clearTicketsPerTech`, or `clearTicketsPerTechWorkday`.
+
+## Hierarchy Rollup Metrics
+
+The following metrics are computed at every hierarchy level (supervisor, area, district) and exposed via the comparison APIs:
+
+| Metric | Formula | Source |
+|---|---|---|
+| techCount | Count of active TECH/TRAINER/TRAINEE users assigned to descendant tech territories | `users`, `user_territory_assignments` |
+| completed | Sum of completed tickets for all scoped techs in range | `tickets.closed_at` |
+| fullyClear | Sum of fully clear tickets for all scoped techs in range | ticket payload |
+| fullyMarked | Sum of fully marked tickets for all scoped techs in range | ticket payload |
+| mixed | Sum of mixed tickets for all scoped techs in range | ticket payload |
+| markedFootage | Sum of marked footage for all scoped techs in range | ticket payload |
+| cotp | `sum(cotpNumerator) / sum(cotpDenominator) * 100` | derived |
+| clearRate | `sum(fullyClear) / sum(completed) * 100` | derived |
+| openBacklog | Count of active tickets assigned to scoped techs | `tickets.locator_status` |
+| overdue | Count of open tickets with `due_at < now` | `tickets.due_at` |
+| workedHours | Sum of worked session durations clipped to range | `day_sessions` |
+| ticketsPerHour | `completed / workedHours` | derived |
+| footagePerHour | `markedFootage / workedHours` | derived |
+
+### Hierarchy Comparison Endpoints
+
+- `GET /api/ops/supervisors` — supervisor comparison rows within caller's scope
+- `GET /api/ops/supervisors/:id/metrics` — single supervisor aggregate + per-tech child summaries
+- `GET /api/ops/areas/:id/metrics` — area aggregate + per-supervisor comparison rows
+- `GET /api/ops/districts/:id/metrics` — district aggregate + per-area comparison rows
+- `GET /api/ops/teams/:id/metrics` — generic team metrics by territory ID (any level)
+
+## Customer Breakdown Metrics
+
+Customer metrics support breakdowns by technician, supervisor, area, date, and ticket type. Each breakdown row includes:
+
+- `ticketCount` — total tickets for that customer in the group
+- `completed`, `fullyClear`, `fullyMarked`, `mixed` — outcome counts
+- `markedFootage` — sum of marked footage
+- `cotp`, `cotpNumerator`, `cotpDenominator` — COTP values
+- `clearRate` — `fullyClear / completed * 100` with numerator/denominator (where applicable)
+
+Additional customer-level metrics:
+
+| Metric | Formula | Source |
+|---|---|---|
+| openTickets | Count of customer tickets in active locator states | `tickets.locator_status` |
+| clearRate | `fullyClear / completed * 100` | derived |
+| averageMinutesPerTicket | Sum of customer minutes / completed ticket count | ticket payload |
+| averageOnsiteMinutes | Sum of onsite durations / completed ticket count | ticket payload |
+| emergencyTickets | Count of customer tickets with `ticket_type = EMERGENCY` | `tickets.ticket_type` |
+| rescheduleCount | Count of customer tickets where `original_due_at != due_at` | `tickets.original_due_at`, `tickets.due_at` |
+
+## Data Quality Rules
+
+| Rule | Severity | Entity | Description |
+|---|---|---|---|
+| `COMPLETED_MISSING_CLOSED_AT` | ERROR | TICKET | Ticket status is CLOSED but `closed_at` is null |
+| `TICKET_WITHOUT_TECH` | WARN | TICKET | Active ticket has no assigned technician |
+| `COMPLETED_CUSTOMER_MISSING_STATUS` | ERROR | TICKET | Closed ticket customer has no outcome |
+| `MARKED_CUSTOMER_MISSING_FOOTAGE` | WARN | TICKET | Marked customer has zero footage |
+| `OVERDUE_COMPLETION` | WARN | TICKET | Ticket was completed after its due date |
+| `ACTIVE_TICKET_MISSING_DUE_AT` | WARN | TICKET | Active ticket has no due date |
+| `DUPLICATE_ACTIVE_SESSIONS` | ERROR | USER | User has multiple active day sessions |
+| `OVERLAPPING_TIMESHEET_SESSIONS` | ERROR | USER | Two sessions overlap in time |
+| `STALE_OPEN_SESSION` | WARN | USER | Session has been open for over 24 hours |
+| `TECH_WITHOUT_SUPERVISOR` | WARN | USER | Tech has no supervisor assignment |
+| `SUPERVISOR_WITHOUT_AREA_MANAGER` | WARN | USER | Supervisor has no area/territory assignment |
+| `AREA_MANAGER_WITHOUT_AREA` | WARN | USER | Area manager has no area assignment |
+| `CUSTOMER_WITHOUT_UTILITY_TYPE` | ERROR | CUSTOMER | Active customer has no utility type |

@@ -229,12 +229,17 @@ export const OpsService = {
   },
 
   // Customers
-  getDataQuality(limit = 250) {
+  getDataQuality(params?: QueryParams & { severity?: string; entityType?: string; offset?: number }) {
     return opsFetch<{
       generatedAt: string;
       issueCount: number;
+      returnedCount: number;
       truncated: boolean;
+      offset: number;
+      limit: number;
       byType: Record<string, number>;
+      bySeverity: Record<string, number>;
+      byEntityType: Record<string, number>;
       issues: Array<{
         type: string;
         severity: string;
@@ -242,7 +247,7 @@ export const OpsService = {
         entityId: string;
         message: string;
       }>;
-    }>("/ops/data-quality", { limit });
+    }>("/ops/data-quality", params);
   },
   getCustomerCatalog(params?: QueryParams) {
     return opsFetch<{
@@ -253,6 +258,7 @@ export const OpsService = {
         utilityType: string;
         active: boolean | number;
         territoryId: string | null;
+        contractedLocatorId: string | null;
       }>;
       pagination: { limit: number; offset: number; total: number };
     }>("/ops/customers", params);
@@ -273,7 +279,20 @@ export const OpsService = {
         cotpNumerator: number;
         cotpDenominator: number;
         overdueCompletions: number;
+        openTickets: number;
+        clearRate: { value: number | null; numerator: number; denominator: number };
         averageFootagePerMarkedTicket: number | null;
+        averageMinutesPerTicket: number | null;
+        averageOnsiteMinutes: number | null;
+        emergencyTickets: number;
+        rescheduleCount: number;
+      };
+      breakdowns: {
+        byTechnician: Array<CustomerBreakdownRow>;
+        bySupervisor: Array<CustomerBreakdownRow>;
+        byArea: Array<CustomerBreakdownRow>;
+        byDate: Array<CustomerBreakdownRow>;
+        byTicketType: Array<CustomerBreakdownRow>;
       };
     }>(`/ops/customers/${id}/metrics`, range);
   },
@@ -309,4 +328,140 @@ export const OpsService = {
       center: { lat: number; lng: number };
     }>("/ops/map", params);
   },
+
+  // ---------- hierarchy comparison analytics ----------
+  getSupervisors(range: QueryParams) {
+    return opsFetch<{
+      range: RangeSummary;
+      supervisors: Array<HierarchyComparisonRow>;
+    }>("/ops/supervisors", range);
+  },
+  getSupervisorMetrics(territoryId: string, range: QueryParams) {
+    return opsFetch<{
+      range: RangeSummary;
+      supervisor: { id: string; name: string; email: string } | null;
+      aggregate: HierarchyAggregate;
+      techs: Array<TechMetricsRow>;
+    }>(`/ops/supervisors/${territoryId}/metrics`, range);
+  },
+  getAreaMetrics(territoryId: string, range: QueryParams) {
+    return opsFetch<{
+      range: RangeSummary;
+      area: { id: string; code: string; name: string } | null;
+      aggregate: HierarchyAggregate;
+      supervisors: Array<HierarchyComparisonRow>;
+    }>(`/ops/areas/${territoryId}/metrics`, range);
+  },
+  getDistricts() {
+    return opsFetch<{
+      districts: Array<{ id: string; code: string; name: string }>;
+    }>("/ops/districts");
+  },
+  getDistrictMetrics(territoryId: string, range: QueryParams) {
+    return opsFetch<{
+      range: RangeSummary;
+      district: { id: string; code: string; name: string } | null;
+      aggregate: HierarchyAggregate;
+      areas: Array<HierarchyComparisonRow>;
+    }>(`/ops/districts/${territoryId}/metrics`, range);
+  },
+  getTeamMetricsByTerritory(territoryId: string, range: QueryParams) {
+    return opsFetch<{
+      range: RangeSummary;
+      level: "SUPERVISOR" | "AREA" | "DISTRICT" | "TECH_TERRITORY";
+      supervisor?: { id: string; name: string; email: string } | null;
+      area?: { id: string; code: string; name: string } | null;
+      district?: { id: string; code: string; name: string } | null;
+      aggregate?: HierarchyAggregate;
+      techs?: Array<TechMetricsRow>;
+      supervisors?: Array<HierarchyComparisonRow>;
+      areas?: Array<HierarchyComparisonRow>;
+    }>(`/ops/teams/${territoryId}/metrics`, range);
+  },
 };
+
+// ---------- shared hierarchy types ----------
+
+export interface HierarchyAggregate {
+  techCount: number;
+  completed: number;
+  fullyClear: number;
+  fullyMarked: number;
+  mixed: number;
+  markedTickets: number;
+  markedFootage: number;
+  cotp: number | null;
+  cotpNumerator: number;
+  cotpDenominator: number;
+  openBacklog: number;
+  overdue: number;
+  workedMs: number;
+  workedHours: number;
+  ticketsPerHour: number | null;
+  footagePerHour: number | null;
+}
+
+export interface HierarchyComparisonRow {
+  territoryId: string;
+  territoryCode: string | null;
+  territoryName: string | null;
+  supervisor?: { id: string; name: string; email: string } | null;
+  techCount: number;
+  completed: number;
+  fullyClear: number;
+  fullyMarked: number;
+  mixed: number;
+  markedFootage: number;
+  cotp: number | null;
+  cotpNumerator: number;
+  cotpDenominator: number;
+  clearRate: { value: number | null; numerator: number; denominator: number };
+  workedHours: number;
+  ticketsPerHour: number | null;
+  openBacklog: number;
+  overdue: number;
+}
+
+export interface TechMetricsRow {
+  techId: string;
+  techName: string;
+  techEmail: string;
+  role: string;
+  openBacklog: number;
+  overdue: number;
+  completed: number;
+  fullyClear: number;
+  fullyMarked: number;
+  mixed: number;
+  markedTickets: number;
+  markedFootage: number;
+  cotp: number | null;
+  cotpNumerator: number;
+  cotpDenominator: number;
+  clearRate: { value: number | null; numerator: number; denominator: number };
+  workedMs: number;
+  workedHours: number;
+  ticketsPerHour: number | null;
+  footagePerHour: number | null;
+}
+
+export interface CustomerBreakdownRow {
+  techId?: string;
+  techName?: string;
+  supervisorId?: string;
+  supervisorName?: string;
+  areaId?: string;
+  areaName?: string;
+  date?: string;
+  ticketType?: string;
+  ticketCount: number;
+  completed: number;
+  fullyClear: number;
+  fullyMarked: number;
+  mixed: number;
+  markedFootage: number;
+  cotp: number | null;
+  cotpNumerator: number;
+  cotpDenominator: number;
+  clearRate?: { value: number | null; numerator: number; denominator: number };
+}

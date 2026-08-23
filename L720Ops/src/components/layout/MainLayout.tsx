@@ -15,6 +15,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: "📊" },
     { name: "Field Employees", href: "/techs", icon: "👷" },
+    { name: "Teams", href: "/teams", icon: "👥" },
     { name: "Tickets", href: "/map", icon: "📋" },
     { name: "Territories", href: "/territories", icon: "🏛️" },
     { name: "Customers", href: "/customers", icon: "C" },

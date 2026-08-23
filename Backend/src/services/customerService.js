@@ -28,6 +28,7 @@ export function ensureCustomerSchema(db) {
       utility_type TEXT NOT NULL CHECK (utility_type IN ('FIBER', 'COPPER', 'ELECTRIC', 'GAS', 'WATER', 'SEWER')),
       active INTEGER NOT NULL DEFAULT 1,
       territory_id TEXT,
+      contracted_locator_id TEXT,
       created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
       updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
       FOREIGN KEY (territory_id) REFERENCES territories(id)
@@ -36,6 +37,12 @@ export function ensureCustomerSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_customers_active ON customers(active);
     CREATE INDEX IF NOT EXISTS idx_customers_territory ON customers(territory_id);
   `);
+
+  // Additive migration: contracted_locator_id column
+  const cols = db.prepare(`PRAGMA table_info(customers)`).all();
+  if (!cols.some((c) => c.name === 'contracted_locator_id')) {
+    db.exec(`ALTER TABLE customers ADD COLUMN contracted_locator_id TEXT`);
+  }
 }
 
 export function seedSyntheticCustomers(db) {

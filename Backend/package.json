@@ -18,7 +18,11 @@
     "test:team-metrics": "node tests/teamMetrics.test.js",
     "test:customer-metrics": "node tests/customerMetrics.test.js",
     "test:customer-catalog": "node tests/customerCatalog.test.js",
-    "test:data-quality": "node tests/dataQuality.test.js"
+    "test:data-quality": "node tests/dataQuality.test.js",
+    "test:supervisor-metrics": "node tests/supervisorMetrics.test.js",
+    "test:area-metrics": "node tests/areaMetrics.test.js",
+    "test:district-metrics": "node tests/districtMetrics.test.js",
+    "test:customer-breakdowns": "node tests/customerBreakdowns.test.js"
   },
   "keywords": [
     "811",
