@@ -89,6 +89,10 @@ export function TechDetailPage() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const { state: range, setRange, toQuery, queryKey } = useRange("day");
+  const [timelineDate, setTimelineDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
 
   const techQuery = useQuery({
     queryKey: ["ops", "techs", "detail", id, queryKey],
@@ -108,6 +112,13 @@ export function TechDetailPage() {
     queryKey: ["ops", "timesheet", id, queryKey],
     queryFn: () => OpsService.getTechTimesheet(id, toQuery()),
     enabled: Boolean(id),
+    refetchInterval: 60000,
+  });
+
+  const timelineQuery = useQuery({
+    queryKey: ["ops", "timesheet-timeline", id, timelineDate],
+    queryFn: () => OpsService.getTechDailyTimesheet(id, timelineDate),
+    enabled: Boolean(id && timelineDate),
     refetchInterval: 60000,
   });
 
@@ -950,6 +961,55 @@ export function TechDetailPage() {
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Daily Timeline</h3>
+                <p className="text-xs text-gray-500">Timesheet and ticket events in chronological order</p>
+              </div>
+              <input
+                type="date"
+                value={timelineDate}
+                onChange={(event) => setTimelineDate(event.target.value)}
+                className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-800"
+              />
+            </div>
+            {timelineQuery.isLoading ? (
+              <div className="flex justify-center py-8"><Spinner /></div>
+            ) : timelineQuery.data?.timeline.length === 0 ? (
+              <div className="text-sm text-gray-500 text-center py-8">No events for this date.</div>
+            ) : (
+              <div className="px-5 py-4">
+                {timelineQuery.data && (
+                  <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="rounded bg-gray-50 p-2"><div className="text-gray-500">Sessions</div><div className="font-semibold text-gray-900">{timelineQuery.data.summary.sessionCount}</div></div>
+                    <div className="rounded bg-gray-50 p-2"><div className="text-gray-500">Worked</div><div className="font-semibold text-gray-900">{formatDuration(timelineQuery.data.summary.workedMs)}</div></div>
+                    <div className="rounded bg-gray-50 p-2"><div className="text-gray-500">Productive</div><div className="font-semibold text-gray-900">{formatDuration(timelineQuery.data.summary.productiveMs)}</div></div>
+                    <div className="rounded bg-gray-50 p-2"><div className="text-gray-500">Events</div><div className="font-semibold text-gray-900">{timelineQuery.data.timeline.length}</div></div>
+                  </div>
+                )}
+                <div className="space-y-3">
+                  {timelineQuery.data?.timeline.map((event, index) => (
+                    <div key={`${event.id}-${event.occurredAt}-${index}`} className="relative flex items-start gap-3 pl-1">
+                      <div className="w-16 shrink-0 text-xs font-mono text-gray-500 pt-0.5">
+                        {new Date(event.occurredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                      <div className="h-2.5 w-2.5 mt-1 rounded-full bg-blue-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-900">
+                          {event.stream === "TICKET" ? (event.newLocatorStatus || event.type).replace(/_/g, " ") : event.type.replace(/_/g, " ")}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {event.ticketNumber || event.allocationType || (event.stream === "TICKET" ? "Ticket activity" : "Timesheet activity")}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

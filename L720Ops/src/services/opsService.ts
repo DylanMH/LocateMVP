@@ -125,6 +125,32 @@ export const OpsService = {
       };
     }>(`/ops/techs/${id}/timesheet`, range);
   },
+  getTechDailyTimesheet(id: string, date: string) {
+    return opsFetch<{
+      tech: { id: string; name: string; role: string };
+      date: string;
+      summary: {
+        sessionCount: number;
+        workedMs: number;
+        lunchMs: number;
+        personalMs: number;
+        productiveMs: number;
+        allocationBreakdown: Array<{ type: string; ms: number }>;
+      };
+      sessions: Array<Record<string, unknown>>;
+      timeline: Array<{
+        id: string;
+        type: string;
+        stream: "TIMESHEET" | "TICKET";
+        occurredAt: number;
+        ticketId?: string | null;
+        ticketNumber?: string | null;
+        allocationType?: string | null;
+        oldLocatorStatus?: string | null;
+        newLocatorStatus?: string | null;
+      }>;
+    }>(`/ops/techs/${id}/timesheet/${date}`);
+  },
   updateTech(id: string, body: { areaId?: string | null; supervisorId?: string | null }) {
     return opsFetch<{ ok: boolean; userId: string }>(`/ops/techs/${id}`, undefined, {
       method: "PUT",

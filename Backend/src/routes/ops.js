@@ -16,7 +16,7 @@ import {
   getTechIdsUnderUser,
 } from "../services/territoryService.js";
 import { computeDueUrgency, DUE_URGENCY } from "../utils/dueUrgency.js";
-import { requirePermission } from "../utils/permissions.js";
+import { canViewTimesheet, requirePermission } from "../utils/permissions.js";
 import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.js";
 import { summarizeTicketMetrics } from "../services/analytics/ticketMetrics.js";
 import { computeTeamMetrics } from "../services/analytics/teamMetrics.js";
@@ -1111,6 +1111,88 @@ router.get("/techs/:id/tickets", authenticateToken, (req, res) => {
   } catch (error) {
     console.error("[OPS Techs] Error fetching tech tickets:", error);
     res.status(500).json({ error: "Failed to fetch tech tickets" });
+  }
+});
+
+router.get("/techs/:id/timesheet/:date", authenticateToken, (req, res) => {
+  try {
+    const { id, date } = req.params;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "Date must be YYYY-MM-DD" });
+    }
+    const target = db.prepare("SELECT id, name, role FROM users WHERE id = ?").get(id);
+    if (!target) return res.status(404).json({ error: "User not found" });
+    if (!canViewTimesheet(req.user, id, db)) {
+      return res.status(403).json({ error: "Access denied — timesheet outside your scope" });
+    }
+
+    const startMs = new Date(`${date}T00:00:00`).getTime();
+    const endMs = new Date(`${date}T23:59:59.999`).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      return res.status(400).json({ error: "Invalid date" });
+    }
+
+    const sessions = db.prepare(
+      `SELECT * FROM day_sessions WHERE user_id = ? AND date = ? ORDER BY clock_in_at ASC`,
+    ).all(id, date);
+    const timeline = [];
+    let workedMs = 0;
+    let lunchMs = 0;
+    let personalMs = 0;
+    const allocationTotals = new Map();
+
+    for (const session of sessions) {
+      const breaks = db.prepare(
+        "SELECT * FROM break_segments WHERE session_id = ? ORDER BY started_at ASC",
+      ).all(session.id);
+      const allocations = db.prepare(
+        "SELECT * FROM allocation_segments WHERE session_id = ? ORDER BY started_at ASC",
+      ).all(session.id);
+      const effectiveEnd = session.clock_out_at || Math.min(Date.now(), endMs);
+      workedMs += Math.max(0, effectiveEnd - (session.clock_in_at || effectiveEnd));
+      for (const segment of breaks) {
+        const duration = Math.max(0, (segment.ended_at || effectiveEnd) - segment.started_at);
+        if (segment.break_type === "LUNCH") lunchMs += duration;
+        if (segment.break_type === "PERSONAL") personalMs += duration;
+      }
+      for (const allocation of allocations) {
+        const duration = Math.max(0, (allocation.ended_at || effectiveEnd) - allocation.started_at);
+        allocationTotals.set(allocation.allocation_type, (allocationTotals.get(allocation.allocation_type) || 0) + duration);
+      }
+      timeline.push(...db.prepare(
+        `SELECT id, event_type as type, occurred_at as occurredAt, reason, ticket_id as ticketId,
+                allocation_type as allocationType, session_id as sessionId
+         FROM clock_events WHERE session_id = ? ORDER BY occurred_at ASC`,
+      ).all(session.id).map((event) => ({ ...event, stream: "TIMESHEET" })));
+    }
+
+    timeline.push(...db.prepare(
+      `SELECT e.id, e.event_type as type, e.created_at as occurredAt, e.ticket_id as ticketId,
+              e.old_locator_status as oldLocatorStatus, e.new_locator_status as newLocatorStatus,
+              t.ticket_number as ticketNumber
+       FROM ticket_events e JOIN tickets t ON t.id = e.ticket_id
+       WHERE t.assigned_tech_id = ? AND e.created_at >= ? AND e.created_at <= ?
+       ORDER BY e.created_at ASC`,
+    ).all(id, startMs, endMs).map((event) => ({ ...event, stream: "TICKET" })));
+    timeline.sort((a, b) => a.occurredAt - b.occurredAt);
+
+    res.json({
+      tech: target,
+      date,
+      summary: {
+        sessionCount: sessions.length,
+        workedMs,
+        lunchMs,
+        personalMs,
+        productiveMs: Math.max(0, workedMs - lunchMs - personalMs),
+        allocationBreakdown: Array.from(allocationTotals, ([type, ms]) => ({ type, ms })),
+      },
+      sessions,
+      timeline,
+    });
+  } catch (error) {
+    console.error("[OPS Techs] Error fetching daily timesheet:", error);
+    res.status(500).json({ error: "Failed to fetch daily timesheet" });
   }
 });
 
