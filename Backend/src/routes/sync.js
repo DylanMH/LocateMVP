@@ -20,6 +20,7 @@ import {
 } from "../services/idempotencyService.js";
 import { emitOpsEvent } from "../utils/opsEventBus.js";
 import { buildTicketVisibilityFilter } from "../services/territoryService.js";
+import { resolveCustomerFrom811 } from "../services/customerService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -65,6 +66,7 @@ function getSyncStatements() {
         ticket_id,
         user_id,
         customer_id,
+        catalog_customer_id,
         customer_name,
         utility_type,
         minutes_delta,
@@ -73,7 +75,7 @@ function getSyncStatements() {
         source_event_type,
         occurred_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     insertTicketEvent: db.prepare(`
       INSERT INTO ticket_events (
@@ -163,12 +165,20 @@ function recordUtilityProductionDeltas({
     }
 
     const customer = customerLookup.get(customerId);
+    const catalogCustomerId = customer?.catalogCustomerId
+      || resolveCustomerFrom811(db, {
+        utilityType: customer?.utility || customer?.utilityType,
+        memberCode: customer?.memberCode,
+        companyName: customer?.name,
+      })?.id
+      || null;
     insertProductionLedgerEntry.run(
       `${requestId}:${customerId}`,
       requestId,
       ticketId,
       userId || null,
       customerId,
+      catalogCustomerId,
       customer?.name || null,
       customer?.utility || null,
       minutesDelta,

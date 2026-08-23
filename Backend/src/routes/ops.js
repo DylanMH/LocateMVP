@@ -2054,6 +2054,7 @@ router.get("/customers/summary", authenticateToken, (req, res) => {
     const rows = db
       .prepare(
         `SELECT
+           catalog_customer_id as catalogCustomerId,
            customer_name as customerName,
            utility_type as utilityType,
            COALESCE(SUM(footage_delta), 0) as footage,
@@ -2062,7 +2063,7 @@ router.get("/customers/summary", authenticateToken, (req, res) => {
            COUNT(DISTINCT ticket_id) as ticketCount
          FROM utility_production_ledger
          WHERE occurred_at >= ? AND occurred_at <= ?
-         GROUP BY customer_name, utility_type
+         GROUP BY catalog_customer_id, customer_name, utility_type
          ORDER BY footage DESC`,
       )
       .all(range.startMs, range.endMs);

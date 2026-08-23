@@ -259,6 +259,7 @@ export interface ActivityRow {
 }
 
 export interface CustomerSummaryRow {
+  catalogCustomerId?: string | null;
   customerName: string | null;
   utilityType: string | null;
   footage: number;

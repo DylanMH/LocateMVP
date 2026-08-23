@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS utility_production_ledger (
   ticket_id TEXT NOT NULL,
   user_id TEXT,
   customer_id TEXT NOT NULL,
+  catalog_customer_id TEXT,
   customer_name TEXT,
   utility_type TEXT,
   minutes_delta INTEGER NOT NULL DEFAULT 0,
@@ -362,6 +363,13 @@ ensureColumnExists(
   "last_login_at",
   "ALTER TABLE users ADD COLUMN last_login_at INTEGER",
 );
+
+ensureColumnExists(
+  "utility_production_ledger",
+  "catalog_customer_id",
+  "ALTER TABLE utility_production_ledger ADD COLUMN catalog_customer_id TEXT",
+);
+db.exec("CREATE INDEX IF NOT EXISTS idx_utility_production_catalog_customer ON utility_production_ledger(catalog_customer_id)");
 
 // Day session allocation columns (clock-in reason tracking).
 ensureColumnExists("day_sessions", "clock_in_reason", "ALTER TABLE day_sessions ADD COLUMN clock_in_reason TEXT");

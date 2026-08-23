@@ -3,6 +3,7 @@
  */
 
 import { resolveTerritoryChainForPoint } from './territoryService.js';
+import { resolveCustomerFrom811 } from './customerService.js';
 
 const ELEVEN_SIM_BASE_URL = 'http://localhost:4100';
 const MAX_811_PULL_LIMIT = 2000;
@@ -212,7 +213,7 @@ export async function upsert811Ticket(db, ticket811) {
 
   // Map 811 ticket to L720 ticket structure
   const existingPayload = existing?.payload_json ? JSON.parse(existing.payload_json || '{}') : {};
-  const l720Ticket = map811TicketToL720(ticket811, existingPayload);
+  const l720Ticket = map811TicketToL720(db, ticket811, existingPayload);
 
   // Resolve lineage (see docs/linked-tickets-architecture.md).
   // 811 IDs are external; we need to map them to local L720 ticket ids.
@@ -476,7 +477,26 @@ function adoptOrphanedChildren(db, newLocalId, ticket811) {
  * @param {Object} existingPayload - Existing payload from L720 database
  * @returns {Object} - L720 ticket object
  */
-function map811TicketToL720(ticket811, existingPayload = {}) {
+function mapSourceCustomer(db, customer) {
+  const utilityType = customer.utility || customer.utilityType || customer.utility_type || '';
+  const companyName = customer.name || customer.customerName || customer.companyName || customer.company_name || '';
+  const catalogCustomer = resolveCustomerFrom811(db, {
+    utilityType,
+    memberCode: customer.memberCode || customer.member_code,
+    companyName,
+  });
+
+  return {
+    id: customer.id,
+    name: companyName,
+    utility: utilityType,
+    accountNumber: getStableAccountNumber(customer),
+    memberCode: customer.memberCode || customer.member_code || null,
+    catalogCustomerId: catalogCustomer?.id || null,
+  };
+}
+
+function map811TicketToL720(db, ticket811, existingPayload = {}) {
   let parsedPayload = {};
   if (ticket811.payload && typeof ticket811.payload === 'object') {
     parsedPayload = ticket811.payload;
@@ -493,20 +513,10 @@ function map811TicketToL720(ticket811, existingPayload = {}) {
   
   if (parsedPayload.customers && Array.isArray(parsedPayload.customers)) {
     // Map 811 payload customers to L720 customer format
-    customers = parsedPayload.customers.map(customer => ({
-      id: customer.id,
-      name: customer.name,
-      utility: customer.utility,
-      accountNumber: getStableAccountNumber(customer)
-    }));
+    customers = parsedPayload.customers.map(customer => mapSourceCustomer(db, customer));
   } else if (ticket811.members) {
     // Map 811 members to customers
-    customers = ticket811.members.map(member => ({
-      id: member.id,
-      name: member.customerName || member.companyName || member.company_name || member.utility || member.utilityType || member.utility_type,
-      utility: member.utility || member.utilityType || member.utility_type,
-      accountNumber: getStableAccountNumber(member)
-    }));
+    customers = ticket811.members.map(member => mapSourceCustomer(db, member));
   }
 
   const preservedCustomerMarking = existingPayload.customerMarkings || existingPayload.customerMarking || {};

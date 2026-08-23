@@ -16,7 +16,8 @@
     "test:permissions": "node tests/permissions.test.js",
     "test:ticket-metrics": "node tests/ticketMetrics.test.js",
     "test:team-metrics": "node tests/teamMetrics.test.js",
-    "test:customer-metrics": "node tests/customerMetrics.test.js"
+    "test:customer-metrics": "node tests/customerMetrics.test.js",
+    "test:customer-catalog": "node tests/customerCatalog.test.js"
   },
   "keywords": [
     "811",
