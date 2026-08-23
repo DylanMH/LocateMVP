@@ -6,7 +6,7 @@ import {
   markEventProcessed,
 } from '../services/idempotencyService.js';
 import { emitOpsEvent } from '../utils/opsEventBus.js';
-import { hasRoleLevel, ROLES } from '../utils/permissions.js';
+import { canViewTimesheet, hasRoleLevel, ROLES } from '../utils/permissions.js';
 
 const router = express.Router();
 
@@ -48,32 +48,7 @@ function getUserFromRequest(req) {
 /**
  * Check if viewer can access target user's timesheet data
  */
-function canViewTimesheet(viewer, targetUserId) {
-  if (!viewer) return false;
 
-  // Self access
-  if (viewer.id === targetUserId) return true;
-
-  // District Manager can view all
-  if (viewer.role === ROLES.DISTRICT_MANAGER) return true;
-
-  // Area manager can view users in their area
-  if (viewer.role === ROLES.AREA_MANAGER) {
-    const targetUser = db.prepare('SELECT area_id FROM users WHERE id = ?').get(targetUserId);
-    return targetUser && targetUser.area_id === viewer.area_id;
-  }
-
-  // Supervisor can view their direct reports (and reports of reports)
-  if (viewer.role === ROLES.SUPERVISOR) {
-    // Check if targetUser is in the supervisor's chain
-    const targetUser = db.prepare('SELECT supervisor_id, area_id FROM users WHERE id = ?').get(targetUserId);
-    if (!targetUser) return false;
-    // Direct report or same area
-    return targetUser.supervisor_id === viewer.id || targetUser.area_id === viewer.area_id;
-  }
-
-  return false;
-}
 
 const validClockEventTypes = new Set([
   'CLOCK_IN',
@@ -620,7 +595,7 @@ router.get('/sessions', (req, res) => {
   }
 
   // Permission check
-  if (viewer && !canViewTimesheet(viewer, userId)) {
+  if (viewer && !canViewTimesheet(viewer, userId, db)) {
     return res.status(403).json({ error: 'Access denied - you cannot view this timesheet' });
   }
 
@@ -665,7 +640,7 @@ router.get('/summary', (req, res) => {
   }
 
   // Permission check
-  if (viewer && !canViewTimesheet(viewer, userId)) {
+  if (viewer && !canViewTimesheet(viewer, userId, db)) {
     return res.status(403).json({ error: 'Access denied - you cannot view this timesheet' });
   }
 
@@ -750,7 +725,7 @@ router.get('/sync', (req, res) => {
   }
 
   // Permission check (self or supervisor+)
-  if (viewer && !canViewTimesheet(viewer, userId)) {
+  if (viewer && !canViewTimesheet(viewer, userId, db)) {
     return res.status(403).json({ error: 'Access denied' });
   }
 

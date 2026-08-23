@@ -13,7 +13,11 @@
  * - District Manager: Full system access
  */
 
-import { canUserSeeTicket, buildTicketVisibilityFilter } from '../services/territoryService.js';
+import {
+  canUserSeeTicket,
+  buildTicketVisibilityFilter,
+  getTechIdsUnderUser,
+} from '../services/territoryService.js';
 
 export const ROLES = {
   TRAINEE: 'TRAINEE',
@@ -89,22 +93,11 @@ export function canCloseTicket(user, ticket) {
 /**
  * Check if user can view timesheet data for target user
  */
-export function canViewTimesheet(viewer, targetUserId) {
-  if (!viewer) return false;
-
-  // Self access
+export function canViewTimesheet(viewer, targetUserId, db) {
+  if (!viewer || !targetUserId || !db) return false;
   if (viewer.id === targetUserId) return true;
-
-  // District Manager can view all
   if (viewer.role === ROLES.DISTRICT_MANAGER) return true;
-
-  // Area manager can view all in their area
-  // (Requires fetching target user's area)
-
-  // Supervisor can view their direct reports
-  // (Requires checking supervisor_id chain)
-
-  return false;
+  return getTechIdsUnderUser(db, viewer.id, viewer.role).includes(targetUserId);
 }
 
 /**

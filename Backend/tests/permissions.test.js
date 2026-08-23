@@ -9,6 +9,7 @@ import {
   hasRoleLevel,
   canViewTicket,
   canCloseTicket,
+  canViewTimesheet,
 } from '../src/utils/permissions.js';
 
 let passed = 0;
@@ -85,6 +86,13 @@ assert(canCloseTicket(techUser, ownTicket) === true, 'TECH can close own ticket'
 assert(canCloseTicket(techUser, otherTicket) === false, 'TECH cannot close other ticket');
 assert(canCloseTicket({ id: 'trainee-1', role: ROLES.TRAINEE }, ownTicket) === false, 'TRAINEE cannot close tickets');
 assert(canCloseTicket(districtManagerUser, ownTicket) === true, 'DISTRICT_MANAGER can close any ticket (no db needed for DISTRICT_MANAGER)');
+
+// ── Timesheet scope ────────────────────────────────────────
+const db = { prepare: () => ({ all: () => [] }) };
+assert(canViewTimesheet(techUser, 'tech-1', db) === true, 'TECH can view own timesheet');
+assert(canViewTimesheet(techUser, 'tech-2', db) === false, 'TECH cannot view another timesheet');
+assert(canViewTimesheet(supervisorUser, 'tech-1', db) === false, 'SUPERVISOR without territory cannot view timesheet');
+assert(canViewTimesheet(null, 'tech-1', db) === false, 'missing viewer cannot view timesheet');
 
 // ── Results ────────────────────────────────────────────────
 console.log('\n=== Results ===');
