@@ -18,6 +18,7 @@ import {
 import { computeDueUrgency, DUE_URGENCY } from "../utils/dueUrgency.js";
 import { requirePermission } from "../utils/permissions.js";
 import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.js";
+import { summarizeTicketMetrics } from "../services/analytics/ticketMetrics.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -971,6 +972,45 @@ router.get("/techs/:id", authenticateToken, (req, res) => {
   } catch (error) {
     console.error("[OPS Techs] Error fetching tech detail:", error);
     res.status(500).json({ error: "Failed to fetch technician detail" });
+  }
+});
+
+router.get("/techs/:id/metrics", authenticateToken, (req, res) => {
+  try {
+    const { id } = req.params;
+    const target = db.prepare(
+      "SELECT id, name, role FROM users WHERE id = ? AND is_active = 1",
+    ).get(id);
+    if (!target) return res.status(404).json({ error: "Technician not found" });
+
+    const visibleTechIds = getTechIdsUnderUser(db, req.user?.id, req.user?.role);
+    if (!visibleTechIds.includes(id)) {
+      return res.status(403).json({ error: "Access denied — technician outside your scope" });
+    }
+
+    const range = resolveRange(req);
+    const tickets = db.prepare(
+      `SELECT * FROM tickets
+       WHERE assigned_tech_id = ?
+         AND closed_at IS NOT NULL
+         AND closed_at >= ?
+         AND closed_at < ?
+       ORDER BY closed_at ASC`,
+    ).all(id, range.startMs, range.endMs);
+
+    res.json({
+      tech: target,
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      metrics: summarizeTicketMetrics(tickets),
+    });
+  } catch (error) {
+    console.error("[OPS Techs] Error fetching technician metrics:", error);
+    res.status(500).json({ error: "Failed to fetch technician metrics" });
   }
 });
 
