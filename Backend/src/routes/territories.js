@@ -376,7 +376,53 @@ router.get('/', authenticateToken, (req, res) => {
   const asTree = req.query.tree === '1' || req.query.tree === 'true';
   const whereActive = includeInactive ? '1=1' : 'active = 1';
 
-  const rows = db.prepare(`SELECT * FROM territories WHERE ${whereActive} ORDER BY type, name`).all();
+  let rows = db.prepare(`SELECT * FROM territories WHERE ${whereActive} ORDER BY type, name`).all();
+
+  // Role-based scoping: non-district-managers only see their subtree
+  const role = req.user?.role;
+  if (role && role !== 'DISTRICT_MANAGER') {
+    // Find the caller's territory assignments
+    const assignments = db.prepare(`
+      SELECT t.id, t.type, t.parent_territory_id
+      FROM user_territory_assignments uta
+      JOIN territories t ON t.id = uta.territory_id
+      WHERE uta.user_id = ? AND t.active = 1
+    `).all(req.user.id);
+
+    if (assignments.length === 0) {
+      // No territory assignments — return empty
+      return res.json(asTree ? { tree: [] } : { territories: [] });
+    }
+
+    // Collect the set of visible territory IDs:
+    // For each assigned territory, include it and all descendants.
+    const visibleIds = new Set();
+    const allById = new Map(rows.map((r) => [r.id, r]));
+    function addDescendants(territoryId) {
+      if (visibleIds.has(territoryId)) return;
+      visibleIds.add(territoryId);
+      for (const r of rows) {
+        if (r.parent_territory_id === territoryId) {
+          addDescendants(r.id);
+        }
+      }
+    }
+    // Also climb up to include ancestors so the tree has proper roots
+    function addAncestors(territoryId) {
+      const r = allById.get(territoryId);
+      if (!r) return;
+      if (r.parent_territory_id && allById.has(r.parent_territory_id)) {
+        visibleIds.add(r.parent_territory_id);
+        addAncestors(r.parent_territory_id);
+      }
+    }
+    for (const a of assignments) {
+      addDescendants(a.id);
+      addAncestors(a.id);
+    }
+
+    rows = rows.filter((r) => visibleIds.has(r.id));
+  }
 
   // Attach assignment counts + first-user-per-OWNER for convenience
   const ownerRows = db.prepare(`

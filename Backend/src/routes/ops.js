@@ -667,9 +667,14 @@ router.get("/dashboard/stats", authenticateToken, (req, res) => {
   try {
     const { startMs, endMs, rangeKey, label } = resolveRange(req);
 
-    const techs = db
-      .prepare("SELECT id FROM users WHERE role IN ('TRAINEE','TRAINER','TECH') AND is_active = 1")
-      .all();
+    // Scope techs to the caller's territory hierarchy
+    const scopedTechIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    const isScoped = scopedTechIds.length > 0;
+    const techPh = isScoped ? scopedTechIds.map(() => "?").join(",") : null;
+
+    const techs = isScoped
+      ? db.prepare(`SELECT id FROM users WHERE id IN (${techPh}) AND is_active = 1`).all(...scopedTechIds)
+      : [];
 
     let clockedIn = 0;
     let onLunch = 0;
@@ -681,58 +686,77 @@ router.get("/dashboard/stats", authenticateToken, (req, res) => {
       else if (state.clockStatus === "ON_PERSONAL") onPersonal += 1;
     }
 
-    const ticketsByStatus = db
-      .prepare(
-        `SELECT
-           SUM(CASE WHEN locator_status = 'ASSIGNED' THEN 1 ELSE 0 END) as assigned,
-           SUM(CASE WHEN locator_status = 'ENROUTE' THEN 1 ELSE 0 END) as enroute,
-           SUM(CASE WHEN locator_status = 'ONSITE' THEN 1 ELSE 0 END) as onsite,
-           SUM(CASE WHEN locator_status = 'PAUSED' THEN 1 ELSE 0 END) as paused,
-           SUM(CASE WHEN locator_status = 'CLOSED' THEN 1 ELSE 0 END) as closed,
-           SUM(CASE WHEN locator_status = 'UNABLE' THEN 1 ELSE 0 END) as unable,
-           SUM(CASE WHEN assigned_tech_id IS NULL AND locator_status NOT IN ('CLOSED','UNABLE') THEN 1 ELSE 0 END) as unassigned,
-           COUNT(*) as total
-         FROM tickets`,
-      )
-      .get();
+    // Ticket stats scoped to visible techs
+    let ticketsByStatus, inRange;
+    if (isScoped) {
+      ticketsByStatus = db
+        .prepare(
+          `SELECT
+             SUM(CASE WHEN locator_status = 'ASSIGNED' THEN 1 ELSE 0 END) as assigned,
+             SUM(CASE WHEN locator_status = 'ENROUTE' THEN 1 ELSE 0 END) as enroute,
+             SUM(CASE WHEN locator_status = 'ONSITE' THEN 1 ELSE 0 END) as onsite,
+             SUM(CASE WHEN locator_status = 'PAUSED' THEN 1 ELSE 0 END) as paused,
+             SUM(CASE WHEN locator_status = 'CLOSED' THEN 1 ELSE 0 END) as closed,
+             SUM(CASE WHEN locator_status = 'UNABLE' THEN 1 ELSE 0 END) as unable,
+             SUM(CASE WHEN assigned_tech_id IS NULL AND locator_status NOT IN ('CLOSED','UNABLE') THEN 1 ELSE 0 END) as unassigned,
+             COUNT(*) as total
+           FROM tickets WHERE assigned_tech_id IN (${techPh})`,
+        )
+        .get(...scopedTechIds);
 
-    const inRange = db
-      .prepare(
-        `SELECT
-           SUM(CASE WHEN created_at >= ? AND created_at <= ? THEN 1 ELSE 0 END) as created,
-           SUM(CASE WHEN closed_at IS NOT NULL AND closed_at >= ? AND closed_at <= ? THEN 1 ELSE 0 END) as closed
-         FROM tickets`,
-      )
-      .get(startMs, endMs, startMs, endMs);
+      inRange = db
+        .prepare(
+          `SELECT
+             SUM(CASE WHEN created_at >= ? AND created_at <= ? THEN 1 ELSE 0 END) as created,
+             SUM(CASE WHEN closed_at IS NOT NULL AND closed_at >= ? AND closed_at <= ? THEN 1 ELSE 0 END) as closed
+           FROM tickets WHERE assigned_tech_id IN (${techPh})`,
+        )
+        .get(startMs, endMs, startMs, endMs, ...scopedTechIds);
+    } else {
+      ticketsByStatus = { assigned: 0, enroute: 0, onsite: 0, paused: 0, closed: 0, unable: 0, unassigned: 0, total: 0 };
+      inRange = { created: 0, closed: 0 };
+    }
 
-    const productionRange = db
-      .prepare(
-        `SELECT
-           COALESCE(SUM(footage_delta), 0) as footage,
-           COALESCE(SUM(completed_delta), 0) as locates_closed,
-           COALESCE(SUM(minutes_delta), 0) as utility_minutes
-         FROM utility_production_ledger
-         WHERE occurred_at >= ? AND occurred_at <= ?`,
-      )
-      .get(startMs, endMs);
+    // Production scoped to visible techs
+    let productionRange;
+    if (isScoped) {
+      productionRange = db
+        .prepare(
+          `SELECT
+             COALESCE(SUM(footage_delta), 0) as footage,
+             COALESCE(SUM(completed_delta), 0) as locates_closed,
+             COALESCE(SUM(minutes_delta), 0) as utility_minutes
+           FROM utility_production_ledger
+           WHERE occurred_at >= ? AND occurred_at <= ? AND user_id IN (${techPh})`,
+        )
+        .get(startMs, endMs, ...scopedTechIds);
+    } else {
+      productionRange = { footage: 0, locates_closed: 0, utility_minutes: 0 };
+    }
 
-    const areas = db
-      .prepare(
-        `SELECT
-           u.area_id as areaId,
-           COUNT(DISTINCT u.id) as techs,
-           SUM(CASE WHEN t.locator_status NOT IN ('CLOSED','UNABLE') AND t.id IS NOT NULL THEN 1 ELSE 0 END) as openTickets,
-           SUM(CASE WHEN t.closed_at IS NOT NULL AND t.closed_at >= ? AND t.closed_at <= ? THEN 1 ELSE 0 END) as closedInRange
-         FROM users u
-         LEFT JOIN tickets t ON t.assigned_tech_id = u.id
-         WHERE u.role IN ('TRAINEE','TRAINER','TECH') AND u.is_active = 1 AND u.area_id IS NOT NULL
-         GROUP BY u.area_id
-         ORDER BY u.area_id`,
-      )
-      .all(startMs, endMs);
+    // Areas scoped to visible techs
+    let areas;
+    if (isScoped) {
+      areas = db
+        .prepare(
+          `SELECT
+             u.area_id as areaId,
+             COUNT(DISTINCT u.id) as techs,
+             SUM(CASE WHEN t.locator_status NOT IN ('CLOSED','UNABLE') AND t.id IS NOT NULL THEN 1 ELSE 0 END) as openTickets,
+             SUM(CASE WHEN t.closed_at IS NOT NULL AND t.closed_at >= ? AND t.closed_at <= ? THEN 1 ELSE 0 END) as closedInRange
+           FROM users u
+           LEFT JOIN tickets t ON t.assigned_tech_id = u.id
+           WHERE u.id IN (${techPh}) AND u.is_active = 1 AND u.area_id IS NOT NULL
+           GROUP BY u.area_id
+           ORDER BY u.area_id`,
+        )
+        .all(startMs, endMs, ...scopedTechIds);
+    } else {
+      areas = [];
+    }
 
     const productiveHours = (() => {
-      // Org-wide productive hours = sum of worked - lunch - personal in range
+      if (!isScoped) return 0;
       const w = db
         .prepare(
           `SELECT COALESCE(SUM(
@@ -745,18 +769,20 @@ router.get("/dashboard/stats", authenticateToken, (req, res) => {
              END
            ), 0) as worked_ms
            FROM day_sessions
-           WHERE (clock_in_at IS NOT NULL AND clock_in_at <= ?)
+           WHERE user_id IN (${techPh})
+             AND (clock_in_at IS NOT NULL AND clock_in_at <= ?)
              AND (clock_out_at IS NULL OR clock_out_at >= ?)`,
         )
-        .get(endMs, startMs, endMs, startMs, endMs, startMs);
+        .get(endMs, startMs, endMs, startMs, ...scopedTechIds, endMs, startMs);
       const b = db
         .prepare(
           `SELECT COALESCE(SUM(COALESCE(MIN(ended_at, ?), ?) - MAX(started_at, ?)), 0) as break_ms
            FROM break_segments
-           WHERE started_at <= ?
+           WHERE user_id IN (${techPh})
+             AND started_at <= ?
              AND (ended_at IS NULL OR ended_at >= ?)`,
         )
-        .get(endMs, endMs, startMs, endMs, startMs);
+        .get(endMs, endMs, startMs, ...scopedTechIds, endMs, startMs);
       return Math.max(0, (w.worked_ms || 0) - (b.break_ms || 0)) / 3600000;
     })();
 
@@ -767,6 +793,13 @@ router.get("/dashboard/stats", authenticateToken, (req, res) => {
 
     res.json({
       range: { startMs, endMs, rangeKey, label },
+      scope: {
+        role: req.user.role,
+        techCount: techs.length,
+        label: req.user.role === 'DISTRICT_MANAGER' ? 'District-wide'
+          : req.user.role === 'AREA_MANAGER' ? 'Your area'
+          : 'Your team',
+      },
       techs: {
         total: techs.length,
         clockedIn,
@@ -805,11 +838,16 @@ router.get("/dashboard/stats", authenticateToken, (req, res) => {
 
 router.get("/dashboard/tech-status", authenticateToken, (req, res) => {
   try {
+    // Scope to caller's territory
+    const scopedTechIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    if (scopedTechIds.length === 0) return res.json([]);
+
+    const ph = scopedTechIds.map(() => "?").join(",");
     const techs = db
       .prepare(
-        "SELECT id, name, email, area_id FROM users WHERE role IN ('TRAINEE','TRAINER','TECH') AND is_active = 1 ORDER BY name ASC",
+        `SELECT id, name, email, area_id FROM users WHERE id IN (${ph}) AND is_active = 1 ORDER BY name ASC`,
       )
-      .all();
+      .all(...scopedTechIds);
 
     const out = techs.map((tech) => {
       const clock = getLiveClockState(tech.id);
@@ -845,16 +883,22 @@ router.get("/dashboard/tech-status", authenticateToken, (req, res) => {
 router.get("/dashboard/activity", authenticateToken, (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    // Scope to caller's territory - only show events for tickets assigned to scoped techs
+    const scopedTechIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    if (scopedTechIds.length === 0) return res.json([]);
+
+    const ph = scopedTechIds.map(() => "?").join(",");
     const events = db
       .prepare(
         `SELECT te.*, t.ticket_number, u.name as user_name
          FROM ticket_events te
          LEFT JOIN tickets t ON t.id = te.ticket_id
          LEFT JOIN users u ON u.id = te.user_id
+         WHERE t.assigned_tech_id IN (${ph})
          ORDER BY te.created_at DESC
          LIMIT ?`,
       )
-      .all(limit);
+      .all(...scopedTechIds, limit);
 
     res.json(
       events.map((e) => ({
@@ -885,8 +929,19 @@ router.get("/techs", authenticateToken, (req, res) => {
     const { area, status, search } = req.query;
     const range = resolveRange(req);
 
-    let query = "SELECT id, name, email, role, area_id, supervisor_id, created_at FROM users WHERE role IN ('TRAINEE', 'TRAINER', 'TECH', 'SUPERVISOR', 'AREA_MANAGER', 'DISTRICT_MANAGER') AND is_active = 1";
-    const params = [];
+    // Scope to caller's territory - supervisors see their techs, area managers
+    // see techs in their area, district managers see all techs.
+    const scopedTechIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    if (scopedTechIds.length === 0) {
+      return res.json({
+        range: { startMs: range.startMs, endMs: range.endMs, rangeKey: range.rangeKey, label: range.label },
+        techs: [],
+      });
+    }
+
+    const ph = scopedTechIds.map(() => "?").join(",");
+    let query = `SELECT id, name, email, role, area_id, supervisor_id, created_at FROM users WHERE id IN (${ph}) AND is_active = 1`;
+    const params = [...scopedTechIds];
 
     if (area) {
       query += " AND area_id = ?";
@@ -2428,6 +2483,16 @@ router.get("/customers/summary", authenticateToken, (req, res) => {
   try {
     const range = resolveRange(req);
 
+    // Scope to caller's territory
+    const scopedTechIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    if (scopedTechIds.length === 0) {
+      return res.json({
+        range: { startMs: range.startMs, endMs: range.endMs, rangeKey: range.rangeKey, label: range.label },
+        customers: [],
+      });
+    }
+
+    const ph = scopedTechIds.map(() => "?").join(",");
     const rows = db
       .prepare(
         `SELECT
@@ -2439,11 +2504,11 @@ router.get("/customers/summary", authenticateToken, (req, res) => {
            COALESCE(SUM(completed_delta), 0) as locatesClosed,
            COUNT(DISTINCT ticket_id) as ticketCount
          FROM utility_production_ledger
-         WHERE occurred_at >= ? AND occurred_at <= ?
+         WHERE occurred_at >= ? AND occurred_at <= ? AND user_id IN (${ph})
          GROUP BY catalog_customer_id, customer_name, utility_type
          ORDER BY footage DESC`,
       )
-      .all(range.startMs, range.endMs);
+      .all(range.startMs, range.endMs, ...scopedTechIds);
 
     res.json({
       range: {

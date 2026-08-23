@@ -66,7 +66,7 @@ export function DashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="Dashboard"
-        subtitle={stats ? stats.range.label : "Live operations overview"}
+        subtitle={stats ? `${stats.range.label} · ${stats.scope?.label ?? ''}` : "Live operations overview"}
         actions={<RangeToggle value={state} onChange={setRange} />}
       />
 

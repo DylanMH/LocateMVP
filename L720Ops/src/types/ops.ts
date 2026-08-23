@@ -47,6 +47,11 @@ export interface CurrentTicket {
 
 export interface DashboardStats {
   range: RangeSummary;
+  scope?: {
+    role: string;
+    techCount: number;
+    label: string;
+  };
   techs: {
     total: number;
     clockedIn: number;
