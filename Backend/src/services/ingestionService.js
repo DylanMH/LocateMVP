@@ -41,7 +41,7 @@ export async function pullTicketsFrom811(db, since = 0, options = {}) {
 
     // Fetch tickets from 811 Simulator
     const response = await fetch(
-      `${ELEVEN_SIM_BASE_URL}/api/811/tickets?since=${since}&memberCode=USIC&limit=${MAX_811_PULL_LIMIT}`,
+      `${ELEVEN_SIM_BASE_URL}/api/811/tickets?since=${since}&limit=${MAX_811_PULL_LIMIT}`,
     );
     
     if (!response.ok) {

@@ -100,26 +100,31 @@ export async function ticketsRoutes(app: FastifyInstance) {
 
   app.get("/api/811/tickets", async (req, reply) => {
     const querySchema = z.object({
-      memberCode: z.string().min(1).default("USIC"),
+      memberCode: z.string().min(1).optional(),
       since: z.string().optional(), // ms timestamp as string
       limit: z.string().optional(),
     });
     const q = querySchema.parse(req.query ?? {});
     const since = q.since ? Number(q.since) : 0;
     const limit = q.limit ? Math.min(5000, Math.max(1, Number(q.limit))) : 50;
+    const memberFilter = q.memberCode
+      ? `AND EXISTS (
+          SELECT 1 FROM ticket_members_811 m
+          WHERE m.ticket_id = t.id AND m.member_code = ?
+        )`
+      : "";
+    const queryParams = q.memberCode ? [since, q.memberCode, limit] : [since, limit];
 
-    // Find tickets that have at least one member matching memberCode
+    // Without a memberCode, return all dispatch tickets so catalog-backed
+    // customer codes are ingested alongside legacy USIC records.
     const tickets = db.prepare(`
       SELECT t.*
       FROM tickets_811 t
       WHERE t.updated_at > ?
-        AND EXISTS (
-          SELECT 1 FROM ticket_members_811 m
-          WHERE m.ticket_id = t.id AND m.member_code = ?
-        )
+        ${memberFilter}
       ORDER BY t.updated_at ASC
       LIMIT ?
-    `).all(since, q.memberCode, limit) as any[];
+    `).all(...queryParams) as any[];
 
     const membersStmt = db.prepare(`
       SELECT id, member_code, utility_type, company_name, status, response_code, responded_at, notes
