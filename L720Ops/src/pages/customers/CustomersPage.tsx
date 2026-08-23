@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { OpsService } from "../../services/opsService";
 import { useRange } from "../../hooks/useRange";
@@ -89,7 +90,7 @@ export function CustomersPage() {
       header: "Customer",
       render: (row) => (
         <div>
-          <div className="font-medium text-gray-900">{row.customerName || "Unknown customer"}</div>
+          <Link to={`/customers/${row.id}`} className="font-medium text-gray-900 hover:text-blue-600">{row.customerName || "Unknown customer"}</Link>
           <div className="text-xs text-gray-500">{row.code}</div>
         </div>
       ),

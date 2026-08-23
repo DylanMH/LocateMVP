@@ -21,6 +21,7 @@ import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.j
 import { summarizeTicketMetrics } from "../services/analytics/ticketMetrics.js";
 import { computeTeamMetrics } from "../services/analytics/teamMetrics.js";
 import { summarizeCustomerMetrics } from "../services/analytics/customerMetrics.js";
+import { runDataQualityChecks } from "../services/dataQualityService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -2086,6 +2087,16 @@ router.get("/tickets/export.csv", authenticateToken, (req, res) => {
   } catch (error) {
     console.error("[OPS Tickets] Error exporting:", error);
     res.status(500).json({ error: "Failed to export tickets" });
+  }
+});
+
+router.get("/data-quality", authenticateToken, requirePermission('ops.viewOrganization'), (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 250, 1), 1000);
+    res.json({ generatedAt: new Date().toISOString(), ...runDataQualityChecks(db, limit) });
+  } catch (error) {
+    console.error("[OPS Data Quality] Error running checks:", error);
+    res.status(500).json({ error: "Failed to run data-quality checks" });
   }
 });
 

@@ -229,6 +229,21 @@ export const OpsService = {
   },
 
   // Customers
+  getDataQuality(limit = 250) {
+    return opsFetch<{
+      generatedAt: string;
+      issueCount: number;
+      truncated: boolean;
+      byType: Record<string, number>;
+      issues: Array<{
+        type: string;
+        severity: string;
+        entityType: string;
+        entityId: string;
+        message: string;
+      }>;
+    }>("/ops/data-quality", { limit });
+  },
   getCustomerCatalog(params?: QueryParams) {
     return opsFetch<{
       customers: Array<{
@@ -255,6 +270,8 @@ export const OpsService = {
         markedTickets: number;
         markedFootage: number;
         cotp: number | null;
+        cotpNumerator: number;
+        cotpDenominator: number;
         overdueCompletions: number;
         averageFootagePerMarkedTicket: number | null;
       };

@@ -17,6 +17,8 @@ import { MapTicketsPage } from "./pages/maptickets/MapTicketsPage";
 import { SimulatorPage } from "./pages/simulator/SimulatorPage";
 import { TerritoriesPage } from "./pages/territories/TerritoriesPage";
 import { CustomersPage } from "./pages/customers/CustomersPage";
+import { CustomerDetailPage } from "./pages/customers/CustomerDetailPage";
+import { DataQualityPage } from "./pages/dataquality/DataQualityPage";
 
 // Create a client
 const queryClient = new QueryClient({
@@ -51,6 +53,8 @@ function App() {
                       <Route path="/map" element={<MapTicketsPage />} />
                       <Route path="/territories" element={<TerritoriesPage />} />
                       <Route path="/customers" element={<CustomersPage />} />
+                      <Route path="/customers/:id" element={<CustomerDetailPage />} />
+                      <Route path="/data-quality" element={<DataQualityPage />} />
                       <Route path="/simulator" element={<SimulatorPage />} />
                     </Routes>
                   </MainLayout>

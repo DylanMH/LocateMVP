@@ -18,6 +18,7 @@ export function MainLayout({ children }: MainLayoutProps) {
     { name: "Tickets", href: "/map", icon: "📋" },
     { name: "Territories", href: "/territories", icon: "🏛️" },
     { name: "Customers", href: "/customers", icon: "C" },
+    ...(user?.role === "DISTRICT_MANAGER" ? [{ name: "Data Quality", href: "/data-quality", icon: "DQ" }] : []),
     { name: "811 Simulator", href: "/simulator", icon: "🔧" },
   ];
 
