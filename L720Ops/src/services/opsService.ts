@@ -203,6 +203,37 @@ export const OpsService = {
   },
 
   // Customers
+  getCustomerCatalog(params?: QueryParams) {
+    return opsFetch<{
+      customers: Array<{
+        id: string;
+        code: string;
+        displayName: string;
+        utilityType: string;
+        active: boolean | number;
+        territoryId: string | null;
+      }>;
+      pagination: { limit: number; offset: number; total: number };
+    }>("/ops/customers", params);
+  },
+  getCustomerMetrics(id: string, range: QueryParams) {
+    return opsFetch<{
+      customer: { id: string; code: string; display_name: string; utility_type: string };
+      range: RangeSummary;
+      metrics: {
+        ticketCount: number;
+        completed: number;
+        fullyClear: number;
+        fullyMarked: number;
+        mixed: number;
+        markedTickets: number;
+        markedFootage: number;
+        cotp: number | null;
+        overdueCompletions: number;
+        averageFootagePerMarkedTicket: number | null;
+      };
+    }>(`/ops/customers/${id}/metrics`, range);
+  },
   getCustomerSummary(range: QueryParams) {
     return opsFetch<{ range: RangeSummary; customers: CustomerSummaryRow[] }>(
       "/ops/customers/summary",

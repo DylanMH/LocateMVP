@@ -46,6 +46,39 @@ type UtilityType = "GAS" | "ELECTRIC" | "FIBER" | "WATER" | "SEWER" | "COPPER";
 
 const UTIL_POOL: UtilityType[] = ["GAS","ELECTRIC","FIBER","WATER","SEWER","COPPER"];
 
+const CUSTOMER_CATALOG: Record<UtilityType, Array<{ code: string; name: string }>> = {
+  FIBER: [
+    { code: "BSF", name: "BlueSpan Fiber" },
+    { code: "PLN", name: "PineLink Networks" },
+    { code: "RRB", name: "RedRiver Broadband" },
+  ],
+  COPPER: [
+    { code: "LST", name: "LoneStar Telecom" },
+    { code: "CLC", name: "CedarLine Communications" },
+    { code: "MWC", name: "MetroWire Communications" },
+  ],
+  ELECTRIC: [
+    { code: "TEC", name: "Trinity Electric Cooperative" },
+    { code: "EGP", name: "EastGrid Power" },
+    { code: "PLE", name: "Prairie Light Electric" },
+  ],
+  GAS: [
+    { code: "TPG", name: "Texas Prairie Gas" },
+    { code: "BFD", name: "BlueFlame Distribution" },
+    { code: "CCG", name: "Cedar Creek Gas" },
+  ],
+  WATER: [
+    { code: "LWA", name: "Lakeview Water Authority" },
+    { code: "TRW", name: "Trinity Regional Water" },
+    { code: "ETW", name: "East Texas Waterworks" },
+  ],
+  SEWER: [
+    { code: "LBW", name: "Lake Basin Wastewater" },
+    { code: "TSD", name: "Trinity Sanitation District" },
+    { code: "ECW", name: "East County Wastewater" },
+  ],
+};
+
 const STREET_BY_CITY: Partial<Record<AreaId, string[]>> = {
   JOSEPHINE: ["FM 1777", "CR 550", "Main St", "Oak St", "Elm St", "2nd St"],
   MABANK: ["Market St", "3rd St", "Mason St", "Gun Barrel Ln", "CR 3057", "US 175"],
@@ -332,14 +365,15 @@ export function generateTickets(params: { areaId?: AreaId; count: number }) {
 
       // customers/utilities on the ticket (this maps well to your L720 payloadJson.customers[])
       const numCustomers = Math.floor(randBetween(1, 6));
-      const customers = Array.from({ length: numCustomers }).map((_) => {
+      const customers = Array.from({ length: numCustomers }).map(() => {
         const utility = pick(UTIL_POOL);
+        const catalogCustomer = pick(CUSTOMER_CATALOG[utility]);
         return {
           id: crypto.randomUUID(),
-          name: utility === "FIBER" ? "Fiber Network" : utility,
+          name: catalogCustomer.name,
           utility,
-          memberCode: "USIC",              // for now, everything routes to “USIC”
-          companyName: "USIC SIM MEMBER",  // synthetic operator name
+          memberCode: catalogCustomer.code,
+          companyName: catalogCustomer.name,
           // the rest (marking/time/footage) will live in L720, not 811
         };
       });

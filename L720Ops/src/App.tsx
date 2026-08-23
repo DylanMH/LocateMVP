@@ -16,6 +16,7 @@ import { TechDetailPage } from "./pages/techs/TechDetailPage";
 import { MapTicketsPage } from "./pages/maptickets/MapTicketsPage";
 import { SimulatorPage } from "./pages/simulator/SimulatorPage";
 import { TerritoriesPage } from "./pages/territories/TerritoriesPage";
+import { CustomersPage } from "./pages/customers/CustomersPage";
 
 // Create a client
 const queryClient = new QueryClient({
@@ -49,6 +50,7 @@ function App() {
                       <Route path="/techs/:id" element={<TechDetailPage />} />
                       <Route path="/map" element={<MapTicketsPage />} />
                       <Route path="/territories" element={<TerritoriesPage />} />
+                      <Route path="/customers" element={<CustomersPage />} />
                       <Route path="/simulator" element={<SimulatorPage />} />
                     </Routes>
                   </MainLayout>

@@ -20,6 +20,7 @@ import { requirePermission } from "../utils/permissions.js";
 import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.js";
 import { summarizeTicketMetrics } from "../services/analytics/ticketMetrics.js";
 import { computeTeamMetrics } from "../services/analytics/teamMetrics.js";
+import { summarizeCustomerMetrics } from "../services/analytics/customerMetrics.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -2008,6 +2009,44 @@ router.get("/tickets/export.csv", authenticateToken, (req, res) => {
 
 // ---------- customers ----------
 
+router.get("/customers", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const { search, utilityType, active = 'true', limit = '100', offset = '0' } = req.query;
+    const filters = [];
+    const params = [];
+    if (active !== 'all') {
+      filters.push('c.active = ?');
+      params.push(active === 'true' ? 1 : 0);
+    }
+    if (utilityType) {
+      filters.push('c.utility_type = ?');
+      params.push(utilityType);
+    }
+    if (search) {
+      filters.push('(c.code LIKE ? OR c.display_name LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const pageLimit = Math.min(Math.max(Number(limit) || 100, 1), 250);
+    const pageOffset = Math.max(Number(offset) || 0, 0);
+    const rows = db.prepare(`
+      SELECT c.id, c.code, c.display_name as displayName, c.utility_type as utilityType,
+             c.active, c.territory_id as territoryId
+      FROM customers c
+      ${where}
+      ORDER BY c.display_name ASC
+      LIMIT ? OFFSET ?
+    `).all(...params, pageLimit, pageOffset);
+    const total = db.prepare(`SELECT COUNT(*) as count FROM customers c ${where}`).get(...params).count;
+
+    res.json({ customers: rows, pagination: { limit: pageLimit, offset: pageOffset, total } });
+  } catch (error) {
+    console.error("[OPS Customers] Error fetching catalog:", error);
+    res.status(500).json({ error: "Failed to fetch customer catalog" });
+  }
+});
+
 router.get("/customers/summary", authenticateToken, (req, res) => {
   try {
     const range = resolveRange(req);
@@ -2040,6 +2079,45 @@ router.get("/customers/summary", authenticateToken, (req, res) => {
   } catch (error) {
     console.error("[OPS Customers] Error fetching summary:", error);
     res.status(500).json({ error: "Failed to fetch customer summary" });
+  }
+});
+
+router.get("/customers/:id/metrics", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const customer = db.prepare(
+      "SELECT * FROM customers WHERE id = ? AND active = 1",
+    ).get(req.params.id);
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const range = resolveRange(req);
+    const techIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    if (techIds.length === 0) {
+      return res.json({ customer, range, metrics: summarizeCustomerMetrics([], customer) });
+    }
+
+    const placeholders = techIds.map(() => '?').join(',');
+    const tickets = db.prepare(`
+      SELECT * FROM tickets
+      WHERE assigned_tech_id IN (${placeholders})
+        AND closed_at IS NOT NULL
+        AND closed_at >= ?
+        AND closed_at < ?
+      ORDER BY closed_at ASC
+    `).all(...techIds, range.startMs, range.endMs);
+
+    res.json({
+      customer,
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      metrics: summarizeCustomerMetrics(tickets, customer),
+    });
+  } catch (error) {
+    console.error("[OPS Customers] Error fetching customer metrics:", error);
+    res.status(500).json({ error: "Failed to fetch customer metrics" });
   }
 });
 

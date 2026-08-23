@@ -11,6 +11,7 @@ import {
   ensureBoundaryUnitSchema, 
   importTexasCitiesFromGeoJSON 
 } from "./boundaryUnits.js";
+import { ensureCustomerSchema, seedSyntheticCustomers } from "../services/customerService.js";
 
 const DATA_DIR = join(process.cwd(), "data");
 const DB_PATH = join(DATA_DIR, "locate720.db");
@@ -678,6 +679,8 @@ export function initDatabase() {
   // --- Territory model (DISTRICT -> AREA -> SUPERVISOR_TERRITORY -> TECH_TERRITORY) ---
   ensureTerritorySchema(db);
   seedTerritoryTree(db);
+  ensureCustomerSchema(db);
+  seedSyntheticCustomers(db);
   const tbf = backfillTicketTerritories(db);
   if (tbf.updated || tbf.unresolved) {
     console.log(`[Database] Territory backfill: ${tbf.updated} tickets resolved, ${tbf.unresolved} outside known tech territories`);

@@ -17,6 +17,7 @@ export function MainLayout({ children }: MainLayoutProps) {
     { name: "Field Employees", href: "/techs", icon: "👷" },
     { name: "Tickets", href: "/map", icon: "📋" },
     { name: "Territories", href: "/territories", icon: "🏛️" },
+    { name: "Customers", href: "/customers", icon: "C" },
     { name: "811 Simulator", href: "/simulator", icon: "🔧" },
   ];
 
