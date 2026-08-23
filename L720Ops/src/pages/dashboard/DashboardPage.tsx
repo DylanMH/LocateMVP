@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "../../hooks/useAuth";
 import {
   UserGroupIcon,
   ClipboardDocumentListIcon,
@@ -21,12 +22,21 @@ import { ActivityFeed } from "../../components/features/ActivityFeed";
 
 export function DashboardPage() {
   const { state, setRange, toQuery, queryKey } = useRange("day");
+  const { user } = useAuth();
+  const canViewTeam = ["SUPERVISOR", "AREA_MANAGER", "DISTRICT_MANAGER"].includes(user?.role || "");
 
   const statsQuery = useQuery({
     queryKey: ["ops", "dashboard", "stats", queryKey],
     queryFn: () => OpsService.getDashboardStats(toQuery()),
     refetchInterval: 30000,
     refetchOnWindowFocus: true,
+  });
+
+  const teamMetricsQuery = useQuery({
+    queryKey: ["ops", "team", "metrics", queryKey],
+    queryFn: () => OpsService.getTeamMetrics(toQuery()),
+    enabled: canViewTeam,
+    refetchInterval: 60000,
   });
 
   const techStatusQuery = useQuery({
@@ -117,6 +127,32 @@ export function DashboardPage() {
               accent="blue"
             />
           </div>
+
+          {canViewTeam && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Scoped team performance</h3>
+                  <p className="text-xs text-gray-500">
+                    {teamMetricsQuery.data?.range.label || "Selected reporting range"}
+                  </p>
+                </div>
+                <span className="text-xs text-gray-400">backend-calculated</span>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                <Metric label="Team techs" value={teamMetricsQuery.data?.metrics.techCount ?? 0} />
+                <Metric label="Completed" value={teamMetricsQuery.data?.metrics.completed ?? 0} accent="green" />
+                <Metric label="Fully clear" value={teamMetricsQuery.data?.metrics.fullyClear ?? 0} accent="blue" />
+                <Metric label="Marked footage" value={`${(teamMetricsQuery.data?.metrics.markedFootage ?? 0).toLocaleString()} ft`} accent="purple" />
+                <Metric
+                  label="COTP"
+                  value={teamMetricsQuery.data?.metrics.cotp == null ? "—" : `${teamMetricsQuery.data.metrics.cotp.toFixed(1)}%`}
+                  hint={teamMetricsQuery.data ? `${teamMetricsQuery.data.metrics.cotpNumerator}/${teamMetricsQuery.data.metrics.cotpDenominator} on time` : undefined}
+                  accent="yellow"
+                />
+              </div>
+            </section>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
