@@ -82,6 +82,12 @@ Response adds:
 }
 ```
 
+### `GET /api/ops/team/metrics`
+
+Returns canonical ticket outcome and COTP metrics for all field technicians under the authenticated user's territory scope. Requires `ops.viewTeam`; it accepts the common range contract and never accepts a client-supplied team owner as an authorization input.
+
+Response metrics include `techCount`, `completed`, `fullyClear`, `fullyMarked`, `mixed`, `markedTickets`, `markedFootage`, and COTP numerator/denominator/value.
+
 ### `GET /api/ops/techs/:id/timesheets/:date`
 
 Authorization follows the metrics endpoint. The date is interpreted in the requested timezone.

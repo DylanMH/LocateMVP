@@ -19,6 +19,7 @@ import { computeDueUrgency, DUE_URGENCY } from "../utils/dueUrgency.js";
 import { requirePermission } from "../utils/permissions.js";
 import { toTechOpsSummary, toOpsOverview, toOpsMapMarker } from "../dtos/index.js";
 import { summarizeTicketMetrics } from "../services/analytics/ticketMetrics.js";
+import { computeTeamMetrics } from "../services/analytics/teamMetrics.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "l720-ops-secret-key";
@@ -1011,6 +1012,32 @@ router.get("/techs/:id/metrics", authenticateToken, (req, res) => {
   } catch (error) {
     console.error("[OPS Techs] Error fetching technician metrics:", error);
     res.status(500).json({ error: "Failed to fetch technician metrics" });
+  }
+});
+
+router.get("/team/metrics", authenticateToken, requirePermission('ops.viewTeam'), (req, res) => {
+  try {
+    const range = resolveRange(req);
+    const techIds = getTechIdsUnderUser(db, req.user.id, req.user.role);
+    const metrics = computeTeamMetrics(db, techIds, range.startMs, range.endMs);
+
+    res.json({
+      user: {
+        id: req.user.id,
+        name: req.user.name || null,
+        role: req.user.role,
+      },
+      range: {
+        startMs: range.startMs,
+        endMs: range.endMs,
+        rangeKey: range.rangeKey,
+        label: range.label,
+      },
+      metrics,
+    });
+  } catch (error) {
+    console.error("[OPS Team] Error fetching team metrics:", error);
+    res.status(500).json({ error: "Failed to fetch team metrics" });
   }
 });
 

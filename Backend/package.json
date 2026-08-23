@@ -14,7 +14,8 @@
     "test:status-machine": "node src/validation/tests/statusMachine.test.js",
     "test:due-urgency": "node tests/dueUrgency.test.js",
     "test:permissions": "node tests/permissions.test.js",
-    "test:ticket-metrics": "node tests/ticketMetrics.test.js"
+    "test:ticket-metrics": "node tests/ticketMetrics.test.js",
+    "test:team-metrics": "node tests/teamMetrics.test.js"
   },
   "keywords": [
     "811",

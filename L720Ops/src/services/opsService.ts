@@ -51,6 +51,24 @@ export const OpsService = {
       };
     }>(`/ops/techs/${id}/metrics`, range);
   },
+  getTeamMetrics(range: QueryParams) {
+    return opsFetch<{
+      user: { id: string; name: string | null; role: string };
+      range: RangeSummary;
+      metrics: {
+        completed: number;
+        fullyClear: number;
+        fullyMarked: number;
+        mixed: number;
+        markedTickets: number;
+        markedFootage: number;
+        cotp: number | null;
+        cotpNumerator: number;
+        cotpDenominator: number;
+        techCount: number;
+      };
+    }>("/ops/team/metrics", range);
+  },
   getTechTickets(id: string, params: QueryParams) {
     return opsFetch<{ tickets: TicketDetailResponse[] }>(
       `/ops/techs/${id}/tickets`,
